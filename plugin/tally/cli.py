@@ -1,6 +1,7 @@
 """Command line interface: `tally <command>`."""
 
 import argparse
+import contextlib
 import csv
 import json
 import os
@@ -135,8 +136,8 @@ def cmd_export(args):
     for t in tasks.list_tasks(conn, limit=0):
         rep = report.summary_for(conn, t)
         rows.append(rep)
-    out = open(args.output, "w", newline="") if args.output else sys.stdout
-    try:
+    with contextlib.ExitStack() as stack:
+        out = stack.enter_context(open(args.output, "w", newline="")) if args.output else sys.stdout
         if args.format == "json":
             json.dump(rows, out, indent=2)
             out.write("\n")
@@ -153,14 +154,25 @@ def cmd_export(args):
                             tm["wall_s"], tm["active_s"], tot["total"], tot["input"], tot["output"],
                             tot["cache_write"], tot["cache_read"], tot["calls"], round(tot["cost"], 4),
                             n_agents, len(rep["workflows"]), t["initial_prompt"] or ""])
-    finally:
-        if args.output:
-            out.close()
 
 
 def cmd_session(args):
-    """Analyse a whole session (no task needed): ingest everything and report."""
-    conn = db.connect()
+    """Analyse a whole session (no task needed): ingest everything and report.
+
+    Uses a throw-away database: the main one only holds what tasks counted
+    (history before a task start is skipped there on purpose).
+    """
+    import shutil
+    import tempfile
+    from pathlib import Path
+    tmp = tempfile.mkdtemp(prefix="tally-session-")
+    try:
+        _session_report(args, db.connect(Path(tmp) / "session.db"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _session_report(args, conn):
     sid = args.session_id
     if sid.endswith(".jsonl"):
         path = sid
@@ -215,8 +227,7 @@ def cmd_statusline(args):
         task = tasks.active_for_session(conn, sid)
         if task is None:
             return
-        ingest.ingest_sessions(conn, tasks.session_ids(conn, task["id"]))
-        rep = report.build(conn, task)
+        rep = report.summary(conn, task)
         tot = rep["totals"]
         name = task["name"] if len(task["name"]) <= args.width else task["name"][: args.width - 1] + "…"
         print("▶ #%d %s · %s tok · %s · %s" % (
@@ -261,7 +272,8 @@ def cmd_doctor(args):
     print("transcripts   %s %s" % (paths.projects_dir(), "(ok)" if paths.projects_dir().is_dir() else "(MISSING)"))
     inst = paths.claude_dir() / "plugins" / "installed_plugins.json"
     try:
-        data = json.load(open(inst))
+        with open(inst) as fh:
+            data = json.load(fh)
         found = [k for k in json.dumps(data).split('"') if k.startswith("tally@")]
         print("plugin        %s" % (", ".join(sorted(set(found))) or "not installed (run ./install.sh)"))
     except Exception:

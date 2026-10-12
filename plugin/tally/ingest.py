@@ -190,28 +190,32 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
                     first_ts = ts
                 if last_ts is None or ts > last_ts:
                     last_ts = ts
-        if b'"usage"' in line and b'"assistant"' in line:
-            rec = _loads(line)
-            if rec is not None:
-                row = _usage_row(rec, session_id, file_agent_id)
-                if row:
-                    usage_rows.append(row)
-        elif b'"turn_duration"' in line:
-            rec = _loads(line)
-            if rec and rec.get("subtype") == "turn_duration" and not rec.get("isSidechain"):
-                ts = parse_ts(rec.get("timestamp"))
-                dur = rec.get("durationMs")
-                if ts is not None and isinstance(dur, (int, float)) and not file_agent_id:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO turns(uuid, session_id, ts_end, duration_ms) VALUES(?,?,?,?)",
-                        (rec.get("uuid") or "%s:%s" % (session_id, ts), session_id, ts, int(dur)),
-                    )
-                    stats.turns += 1
-        elif b'"workflowName"' in line and b'"runId"' in line:
-            rec = _loads(line)
-            res = rec.get("toolUseResult") if rec else None
-            if isinstance(res, dict) and res.get("runId"):
-                _upsert_workflow(conn, session_id, res, parse_ts(rec.get("timestamp")))
+        # Cheap substring checks first; only candidate lines are JSON-parsed,
+        # then routed by their actual type (a line can match several checks).
+        if not ((b'"usage"' in line and b'"assistant"' in line) or b'"turn_duration"' in line
+                or (b'"workflowName"' in line and b'"runId"' in line)):
+            continue
+        rec = _loads(line)
+        if rec is None:
+            continue
+        typ = rec.get("type")
+        if typ == "assistant":
+            row = _usage_row(rec, session_id, file_agent_id)
+            if row:
+                usage_rows.append(row)
+        elif typ == "system" and rec.get("subtype") == "turn_duration":
+            ts = parse_ts(rec.get("timestamp"))
+            dur = rec.get("durationMs")
+            if (ts is not None and isinstance(dur, (int, float)) and not file_agent_id
+                    and not rec.get("isSidechain")):
+                conn.execute(
+                    "INSERT OR REPLACE INTO turns(uuid, session_id, ts_end, duration_ms) VALUES(?,?,?,?)",
+                    (rec.get("uuid") or "%s:%s" % (session_id, ts), session_id, ts, int(dur)),
+                )
+                stats.turns += 1
+        res = rec.get("toolUseResult")
+        if isinstance(res, dict) and res.get("runId") and res.get("workflowName"):
+            _upsert_workflow(conn, session_id, res, parse_ts(rec.get("timestamp")))
     if usage_rows:
         conn.executemany(
             "INSERT OR REPLACE INTO usage(msg_key, session_id, agent_id, ts, model, speed, input, output, "

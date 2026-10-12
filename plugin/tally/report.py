@@ -1,5 +1,6 @@
 """Build a task report (plain dict, JSON-serialisable) from the database."""
 
+import json
 import time
 from collections import OrderedDict
 from typing import Dict, List, Optional
@@ -57,11 +58,14 @@ class Tot:
         }
 
 
-def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] = None) -> dict:
+def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] = None,
+          detail: bool = True) -> dict:
     """task: row/dict with id, name, started_at, ended_at, ...
 
     windows: optional [(session_id, from, to)] override; by default the
     task's attached sessions clipped to its lifetime.
+    detail=False returns only task/time/totals (lists, status line): no agent
+    tree, no groupings, no reconciliation.
     """
     pricer = pricer or Pricer(paths.load_config().get("pricing"))
     now = time.time()
@@ -102,6 +106,15 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         active_ivals.extend(ivals)
 
     active_s = _union_length(active_ivals)
+    if not detail:
+        return {
+            "task": {"id": task["id"], "name": task["name"], "initial_prompt": task["initial_prompt"],
+                     "status": task["status"], "started_at": t0, "ended_at": task["ended_at"],
+                     "cwd": task["cwd"]},
+            "time": {"wall_s": round(t1 - t0, 3), "active_s": round(active_s, 3), "turns": turn_count},
+            "totals": totals.as_dict(),
+            "unlogged": None,
+        }
 
     window_by_sid = {}
     for sid, a, b in windows:
@@ -344,34 +357,73 @@ def _main_active(conn, sid, a, b) -> float:
     return _union_length(_turn_intervals(conn, sid, a, b))
 
 
-def summary_for(conn, task, live: bool = True) -> dict:
-    """Report for a task: frozen snapshot if ended, fresh build if active.
+def save_snapshot(conn, task_id: int, rep: dict) -> None:
+    summary = {k: rep[k] for k in ("task", "time", "totals", "unlogged")}
+    conn.execute(
+        "INSERT OR REPLACE INTO task_snapshots(task_id, computed_at, report_json, summary_json) VALUES(?,?,?,?)",
+        (task_id, time.time(), json.dumps(rep), json.dumps(summary)),
+    )
 
-    An ended task's snapshot is rebuilt when Claude Code has since written a
-    new session cost record (used for the unlogged-usage estimate).
-    """
-    import json
+
+def _refresh_costs(conn, task) -> List[str]:
+    """Pick up new session cost records; returns the task's session ids."""
     from . import reconcile
-    refreshed = False
-    for sid in tasks.session_ids(conn, task["id"]):
+    sids = tasks.session_ids(conn, task["id"])
+    for sid in sids:
         try:
-            refreshed = reconcile.refresh(conn, sid) or refreshed
+            reconcile.refresh(conn, sid)
         except Exception:
             pass
+    return sids
+
+
+def _fresh_snapshot(conn, task, sids, column: str):
+    """Stored snapshot (report_json or summary_json) unless a session got a
+    newer cost record after it was computed."""
+    from . import reconcile
+    row = conn.execute("SELECT computed_at, %s FROM task_snapshots WHERE task_id = ?" % column,
+                       (task["id"],)).fetchone()
+    if row is None or row[1] is None or reconcile.updated_since(conn, sids, row["computed_at"]):
+        return None
+    data = json.loads(row[1])
+    data["task"]["name"] = task["name"]
+    return data
+
+
+def summary_for(conn, task, live: bool = True) -> dict:
+    """Full report: frozen snapshot if ended (rebuilt when Claude Code has
+    since written a newer session cost record), fresh build if active."""
+    sids = _refresh_costs(conn, task)
     if task["status"] != "active":
-        row = conn.execute("SELECT report_json FROM task_snapshots WHERE task_id = ?", (task["id"],)).fetchone()
-        if row and not refreshed:
-            rep = json.loads(row[0])
-            rep["task"]["name"] = task["name"]
-            return rep
-        rep = build(conn, task)
-        conn.execute("INSERT OR REPLACE INTO task_snapshots(task_id, computed_at, report_json) VALUES(?,?,?)",
-                     (task["id"], time.time(), json.dumps(rep)))
+        rep = _fresh_snapshot(conn, task, sids, "report_json")
+        if rep is None:
+            rep = build(conn, task)
+            save_snapshot(conn, task["id"], rep)
         return rep
-    if live and task["status"] == "active":
-        from . import ingest
-        try:
-            ingest.ingest_sessions(conn, tasks.session_ids(conn, task["id"]))
-        except Exception:
-            pass
+    if live:
+        _ingest(conn, sids)
     return build(conn, task)
+
+
+def summary(conn, task) -> dict:
+    """Totals only (task/time/totals/unlogged), cheap enough for lists and
+    the status line."""
+    if task["status"] == "active":
+        _ingest(conn, tasks.session_ids(conn, task["id"]))
+        return build(conn, task, detail=False)
+    sids = _refresh_costs(conn, task)
+    data = _fresh_snapshot(conn, task, sids, "summary_json")
+    if data is None:
+        rep = summary_for(conn, task)
+        data = {k: rep.get(k) for k in ("task", "time", "totals", "unlogged")}
+        conn.execute("UPDATE task_snapshots SET summary_json = ? WHERE task_id = ? AND summary_json IS NULL",
+                     (json.dumps(data), task["id"]))      # backfill snapshots made before schema v3
+    return data
+
+
+def _ingest(conn, sids) -> None:
+    from . import ingest
+    try:
+        ingest.ingest_sessions(conn, sids)
+    except Exception:
+        pass

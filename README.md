@@ -1,14 +1,14 @@
 # Tally
 
-Per-task **token** and **time** tracking for Claude Code. It runs entirely locally and stores everything in SQLite.
+**Per-task token and time tracking for Claude Code.** It runs locally with zero dependencies, stores everything in SQLite, and its commands cost no tokens.
 
-You start a task inside Claude Code and keep working. Everything that happens while the task is open is counted:
+You start a task inside Claude Code and keep working. While it is open, Tally counts:
 
 - the main conversation;
 - every subagent, including background agents and nested forks;
 - every workflow agent, grouped by run and phase.
 
-When you end the task you get totals plus subtotals per agent, subagent, agent type, workflow and model. The task name and initial prompt are stored with it.
+When you end it, you get totals plus subtotals per agent, subagent, workflow, agent type and model. You also get wall time and active time, and the task name and initial prompt are stored.
 
 ```
 /tally:start Fix login redirect loop
@@ -34,162 +34,83 @@ Task #3 · Fix login redirect loop   [■ ended]
   TOTAL                                             4.21M    85.1k     $3.12   44m 10s    171
 ```
 
+## Features
+
+- **Zero-token commands.** `/tally:*` is answered inside a hook, so the model is never called.
+- **Everything is attributed.** The main agent, subagents, nested forks, background agents, and workflow runs with their phases and agents, as a tree with subtotals.
+- **Accurate.** Tokens come from Claude Code's own transcripts, one row per API call. Claude Code's internal calls that never reach a transcript (background-agent summaries, prompt suggestions, titles) are reconciled from its session cost record. The result matches Claude Code's own cost to within 2% on 40 of 40 validated sessions.
+- **Time.** Wall time, active time (Claude working, overlaps counted once), and per-agent durations.
+- **Robust.**
+  - Survives `/clear`.
+  - A task can span several sessions (`/tally:resume`), and parallel terminals work.
+  - Reports are frozen when a task ends, so they outlive transcript cleanup.
+- **Fast.** About 33 ms per hook, and task start skips earlier history. A 300 MB session with 526 agents reports in 75 ms.
+- **Local dashboard, status line, CLI, CSV/JSON export.**
+
 ## Install
 
-Requirements: Claude Code 2.1+, and `python3` 3.8 or newer. On macOS the Command Line Tools version works. No pip packages are needed.
+You need Claude Code 2.1+ and `python3` 3.8 or newer (the macOS Command Line Tools Python works). There are no packages to install.
 
 ```bash
-git clone <this repo> tally && cd tally
+git clone https://github.com/janhorecny/tally.git && cd tally
 ./install.sh
 ```
 
-`install.sh` does three things:
+Then restart Claude Code, or run `/reload-plugins`.
 
-1. Registers this folder as a local plugin marketplace (`tally`).
-2. Installs the plugin `tally@tally` at user scope, so it is active in every project.
-3. Links the CLI to `~/.local/bin/tally`.
+`install.sh` does the following:
 
-After installing, restart Claude Code or run `/reload-plugins`. Running `install.sh` again updates the plugin. Run `./uninstall.sh` to remove it; it keeps your history unless you pass `--purge`.
+- registers the folder as a local marketplace;
+- installs the plugin `tally@tally` at user scope;
+- links the CLI to `~/.local/bin/tally`;
+- migrates an older `task-counter` install if one exists.
 
-## Commands inside Claude Code
+Run it again to update. `./uninstall.sh` removes everything except your history; add `--purge` to remove that too.
 
-| command | what it does |
+## Commands
+
+| command | |
 |---|---|
-| `/tally:start [name]` | Start a task in this session. If you leave out the name, your next prompt becomes the name. The next prompt is stored as the initial prompt either way. |
-| `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude as its first instruction. |
-| `/tally:status [id]` | Show live totals for the current task, or for task `#id`. |
-| `/tally:end [id] [note]` | End the task and print the final report, which is then frozen in the database. |
-| `/tally:list [n\|all]` | List recent tasks with wall time, active time, tokens and cost. |
-| `/tally:show <id>` | Show the full report of any task. |
-| `/tally:resume <id>` | Keep counting task `#id` in this session, for example after a restart or in a second terminal. Also reopens an ended task. |
+| `/tally:start [name]` | Start a task in this session. The next prompt is stored as its initial prompt. |
+| `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude. |
+| `/tally:status [id]` | Live totals. |
+| `/tally:end [id] [note]` | End the task and show the final report. |
+| `/tally:list [n\|all]` | Recent tasks. |
+| `/tally:show <id>` | Full report of any task. |
+| `/tally:resume <id>` | Count task `#id` in this session too, or reopen an ended task. |
 | `/tally:rename [id] <name>` | Rename a task. |
-| `/tally:dashboard` | Open the local web dashboard at http://127.0.0.1:8765. |
+| `/tally:dashboard` | Local web dashboard (http://127.0.0.1:8765). |
 | `/tally:help` | Show the help text. |
 
-**The commands cost no tokens.** A `UserPromptSubmit` hook answers them and blocks the prompt, so the model is never called. `/tally:new` is the exception, because its prompt is meant to reach Claude.
+CLI: `tally list | status | show | end | export | session <id> | dashboard | statusline | config | doctor`, plus the remaining subcommands listed in [usage](docs/usage.md#cli).
 
-### Rules
+## Documentation
 
-- **One task per session.** Starting a new one ends the previous one, and you see its report.
-- **`/clear` keeps the task.** Claude Code starts a new session ID on `/clear`, and the task follows it automatically because it is the same Claude Code process.
-- **Several sessions can run tasks in parallel,** for example one per terminal. `/tally:status`, `/tally:end` and `/tally:resume` take a task ID when you need to act on a task from another session.
-- **Optional auto mode:** run `tally config auto_start session`. Every new session then starts a task from its first prompt.
-
-## Dashboard
-
-`/tally:dashboard` (or `tally dashboard --open`) serves a single-page dashboard on localhost. It shows:
-
-- the task list;
-- KPI tiles: total tokens, output, cost, wall and active time, API calls;
-- token composition (input, output, cache write, cache read);
-- an expandable breakdown tree with each node's share of the task;
-- tables by model, by agent type and by workflow, plus the prompts of the task.
-
-Active tasks refresh every 5 seconds. Light and dark themes are both supported.
-
-## Status line (optional)
-
-`tally statusline` prints a one-line segment for the active task of the current session. It reads Claude Code's status line JSON on stdin and prints nothing when no task is running:
-
-```
-▶ #3 Fix login redirect loop · 4.21M tok · $3.12 · 44m 10s
-```
-
-- **If you use ccstatusline:** add a *Custom Command* widget with the command `tally statusline`.
-- **Without another status line,** set this in `~/.claude/settings.json`:
-  `"statusLine": {"type": "command", "command": "tally statusline", "refreshInterval": 10}`
-
-## CLI
-
-```
-tally list                 # recent tasks
-tally status [id] [--json] # live report
-tally show <id> --prompts  # report and every prompt of the task
-tally end [id] --note "…"
-tally export --format csv -o tasks.csv
-tally session <session-id|transcript.jsonl>   # analyse ANY past session, no task needed
-tally dashboard --open
-tally config auto_start session
-tally statusline           # one-line segment for your status line
-tally doctor               # installation / hook health check
-```
-
-## How it works
-
-```
-Claude Code ── hooks ──▶ tally (python3, stdlib only) ──▶ ~/.claude/tally/tally.db
-     │                          ▲
-     └── transcripts (.jsonl) ──┘  main session + subagents/agent-*.jsonl + subagents/workflows/<run>/agent-*.jsonl
-```
-
-### Hooks
-
-- `UserPromptSubmit` handles the `/tally:*` commands and stores the task's prompts.
-- `Stop`, `SubagentStop`, `PreCompact` and `SessionEnd` read new transcript lines into the database. This happens only while the session has an active task.
-- `SessionStart` follows `/clear`.
-- Hooks never break Claude Code. On any error they exit silently and log to `~/.claude/tally/errors.log`.
-
-### Tokens
-
-Tokens are read from the `usage` field of every assistant message in Claude Code's own transcripts:
-
-- **Deduplication:** one API response is written as several lines, so lines are deduplicated by message ID plus request ID, keeping the final line.
-- **Incremental reads:** reading is incremental, by byte offset. Starting a task skips the history before it, so hooks stay fast. Validation runs read about 60 MB of transcripts in under a second.
-- **Attribution:** comes from each subagent's `.meta.json`, which gives its type, description, parent agent (for nested forks) and workflow phase. Workflow names come from Claude Code's workflow run record.
-
-### Time
-
-- **Wall time** runs from start to end.
-- **Active time** is the union of the turns Claude spent working. Turns come from the transcript's `turn_duration` records and from prompt→Stop hook timing. Overlapping turns, such as a turn waiting on background agents, are not double counted.
-- **Per-agent time** runs from the agent's first to its last transcript entry inside the task window.
-
-### Cost
-
-Cost is an estimate at API list price.
-
-- **Exact cache pricing:** 1-hour and 5-minute cache writes are priced separately, because the transcript records which was used.
-- **Fast mode** is billed at 2×.
-- **Overrides:** you can change or add prices in `~/.claude/tally/config.json` under `"pricing"`.
-- **Subscriptions:** Pro and Max plans are not billed per token, but the figure is still useful for comparing tasks.
-
-### Accuracy, and Claude Code's own calls
-
-Claude Code makes some API calls for itself that it never writes to a transcript:
-
-- progress summaries for background agents;
-- prompt suggestions;
-- titles;
-- memory extraction;
-- compaction.
-
-They are part of what a task costs, so tally estimates them:
-
-1. When a session exits, Claude Code appends a `cost-state` record with exact per-model totals for the whole session.
-2. tally compares that record with what the transcripts logged.
-3. It gives each task a share of the difference, in proportion to the task's share of the session's logged tokens.
-
-This estimate is reported separately, on the `unlogged ≈ +…` line and in a dashboard note. It does not change the exact per-agent numbers, and it appears once the session has exited.
-
-`scripts/validate_against_claude.py` checks all of this against Claude Code's own figures. It reads files only and makes no API calls. On the 40 most recent sessions of the development machine:
-
-| | within 2% of Claude Code's own session cost |
+| | |
 |---|---|
-| transcripts only (main + subagents + workflows) | 12 / 40 |
-| transcripts + unlogged estimate | 39 / 40 (most within 0.1%) |
-
-Without the estimate, the unlogged share is usually a few percent. In long sessions with many background agents it reaches about 20%.
-
-Prices follow what Claude Code itself bills. One example: Sonnet 5.5 cache reads cost $0.10/MTok in current Claude Code builds.
-
-## Data
-
-- **Where it lives:** SQLite at `~/.claude/tally/tally.db`. Set `TALLY_HOME` to use a different location.
-- **Tables:** `tasks`, `task_sessions`, `usage` (one row per API call), `agents`, `workflows`, `turns`, `prompts`, `session_costs`, and `task_snapshots`. `task_snapshots` holds the final report frozen when a task ends, so it survives Claude Code's transcript cleanup.
+| [Usage guide](docs/usage.md) | Scenarios, reading the report, dashboard, status line, CLI recipes. |
+| [How it works](docs/how-it-works.md) | Architecture, hooks, transcript ingest, attribution, time, cost, reconciliation, performance, security. |
+| [Configuration](docs/configuration.md) | `config.json`, auto-start, pricing overrides, environment variables. |
+| [Data model](docs/data-model.md) | SQLite schema and example queries. |
+| [Troubleshooting](docs/troubleshooting.md) | `tally doctor`, common questions, uninstall. |
+| [Roadmap](docs/roadmap.md) | Ideas and planned improvements. |
+| [Changelog](CHANGELOG.md) | Release history. |
 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # end-to-end tests on synthetic transcripts
+python3 -m unittest discover -s tests -v       # 24 end-to-end tests on synthetic transcripts
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 ```
+
+Layout:
+
+- `plugin/`: the Claude Code plugin (manifest, hooks, commands, `bin/tally`, and the `tally` Python package);
+- `tests/`;
+- `scripts/`;
+- `docs/`.
+
+## License
+
+[MIT](LICENSE)

@@ -109,13 +109,15 @@ class Pricer:
         return found
 
     def cost(self, model, input_tokens=0, output_tokens=0, cache_read=0,
-             cache_write_5m=0, cache_write_1h=0, speed=None) -> Optional[float]:
+             cache_write_5m=0, cache_write_1h=0, speed=None, tiers=True) -> Optional[float]:
+        """Cost of ONE API call. Pass tiers=False for summed usage of many
+        calls: prompt-size tiers apply per call and cannot be judged on a sum."""
         key = self.resolve(model)
         if key is None:
             return None
         p = self.prices[key]
         mult = 1.0
-        tier = TIERS.get(key)
+        tier = TIERS.get(key) if tiers else None
         if tier:
             prompt_tokens = input_tokens + cache_read + cache_write_5m + cache_write_1h
             if prompt_tokens > tier[0]:

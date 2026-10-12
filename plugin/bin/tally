@@ -5,7 +5,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
-from tally.cli import main  # noqa: E402
-
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "hook":
+        # Hot path, runs on every prompt and stop: skip argparse and the CLI.
+        from tally.hooks import main as hook_main
+        sys.exit(hook_main(sys.argv[2]))
+    from tally.cli import main
     sys.exit(main())

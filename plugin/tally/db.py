@@ -7,7 +7,7 @@ from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -24,16 +24,19 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS tasks_status ON tasks(status);
 
--- Sessions a task spans (a task can continue after /clear or in another session).
+-- Intervals during which a session counts towards a task. A task can span
+-- several sessions (/clear, /tally:resume, parallel terminals) and a session
+-- can be attached to the same task more than once (end + resume).
 CREATE TABLE IF NOT EXISTS task_sessions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     session_id   TEXT NOT NULL,
     attached_at  REAL NOT NULL,
     detached_at  REAL,
-    reason       TEXT,
-    PRIMARY KEY (task_id, session_id)
+    reason       TEXT
 );
 CREATE INDEX IF NOT EXISTS task_sessions_sid ON task_sessions(session_id);
+CREATE INDEX IF NOT EXISTS task_sessions_task ON task_sessions(task_id);
 
 CREATE TABLE IF NOT EXISTS sessions (
     session_id       TEXT PRIMARY KEY,
@@ -123,7 +126,8 @@ CREATE INDEX IF NOT EXISTS prompts_task ON prompts(task_id);
 CREATE TABLE IF NOT EXISTS task_snapshots (
     task_id      INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     computed_at  REAL NOT NULL,
-    report_json  TEXT NOT NULL
+    report_json  TEXT NOT NULL,
+    summary_json TEXT                -- task/time/totals/unlogged only, for lists
 );
 
 -- Claude Code's own per-session totals (cost-state record written at exit),
@@ -133,7 +137,8 @@ CREATE TABLE IF NOT EXISTS session_costs (
     scan_offset  INTEGER NOT NULL DEFAULT 0,
     cs_ts        REAL,
     cs_json      TEXT,
-    logged_json  TEXT
+    logged_json  TEXT,
+    updated_at   REAL                -- when the current cost record was stored
 );
 
 CREATE TABLE IF NOT EXISTS kv (
@@ -156,12 +161,48 @@ def connect(path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set:
+    return {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version >= SCHEMA_VERSION:
         return
-    conn.executescript(SCHEMA)
-    conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]   # another process may have won
+        if version < SCHEMA_VERSION:
+            if version and version < 3:
+                _migrate_to_3(conn)
+            for stmt in SCHEMA.split(";"):
+                if stmt.strip():
+                    conn.execute(stmt)
+            conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _migrate_to_3(conn: sqlite3.Connection) -> None:
+    """v1/v2 -> v3: task_sessions gets one row per interval; new columns."""
+    if "id" not in _columns(conn, "task_sessions"):
+        conn.execute("ALTER TABLE task_sessions RENAME TO task_sessions_v2")
+        conn.execute("DROP INDEX IF EXISTS task_sessions_sid")
+        conn.execute(
+            "CREATE TABLE task_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, session_id TEXT NOT NULL, "
+            "attached_at REAL NOT NULL, detached_at REAL, reason TEXT)")
+        conn.execute(
+            "INSERT INTO task_sessions(task_id, session_id, attached_at, detached_at, reason) "
+            "SELECT task_id, session_id, attached_at, detached_at, reason FROM task_sessions_v2 ORDER BY attached_at")
+        conn.execute("DROP TABLE task_sessions_v2")
+    if "summary_json" not in _columns(conn, "task_snapshots"):
+        conn.execute("ALTER TABLE task_snapshots ADD COLUMN summary_json TEXT")
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "session_costs" in tables and "updated_at" not in _columns(conn, "session_costs"):
+        conn.execute("ALTER TABLE session_costs ADD COLUMN updated_at REAL")
 
 
 @contextmanager

@@ -141,7 +141,7 @@ def render_report(rep: dict, detail: bool = True) -> str:
         return "\n".join(out)
     if tot["calls"]:
         out.append("")
-        out.extend("  " + l for l in render_tree(rep["tree"]))
+        out.extend("  " + line for line in render_tree(rep["tree"]))
         out.append("  " + _row("TOTAL", tot, tm["wall_s"]))
         types = [x for x in rep["by_type"] if x["agent_type"] != "main"]
         if types:

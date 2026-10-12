@@ -35,7 +35,18 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code: int = 200) -> None:
         self._send(code, json.dumps(obj).encode(), "application/json; charset=utf-8")
 
+    def _host_allowed(self) -> bool:
+        """Reject foreign Host headers (DNS rebinding): a web page whose name
+        resolves to 127.0.0.1 must not be able to read the task data."""
+        port = self.server.server_address[1]
+        host = (self.headers.get("Host") or "").strip().lower()
+        allowed = {"127.0.0.1", "localhost", "[::1]", str(self.server.server_address[0]).lower()}
+        return host in allowed or host in {"%s:%d" % (h, port) for h in allowed}
+
     def do_GET(self):
+        if not self._host_allowed():
+            self._send(403, b"forbidden host", "text/plain; charset=utf-8")
+            return
         url = urlparse(self.path)
         q = parse_qs(url.query)
         try:
@@ -105,11 +116,11 @@ def ensure_running(open_browser: bool = False):
             raise RuntimeError("port %d is used by another program; set another with "
                                "`tally config dashboard_port 8766`" % port)
         paths.home().mkdir(parents=True, exist_ok=True)
-        log = open(paths.home() / "dashboard.log", "a")
-        subprocess.Popen(
-            [sys.executable, str(BIN), "dashboard", "--host", host, "--port", str(port)],
-            stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True,
-        )
+        with open(paths.home() / "dashboard.log", "a") as log:
+            subprocess.Popen(
+                [sys.executable, str(BIN), "dashboard", "--host", host, "--port", str(port)],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True,
+            )
         for _ in range(30):
             time.sleep(0.1)
             if is_running(host, port):

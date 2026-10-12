@@ -178,7 +178,7 @@ def _ended_text(conn, task) -> str:
 def list_rows(conn, limit: int = 15) -> list:
     rows = []
     for t in tasks.list_tasks(conn, limit=limit):
-        rep = report.summary_for(conn, t)
+        rep = report.summary(conn, t)
         rows.append({
             "id": t["id"], "name": t["name"], "status": t["status"], "started_at": t["started_at"],
             "ended_at": t["ended_at"], "wall_s": rep["time"]["wall_s"], "active_s": rep["time"]["active_s"],
