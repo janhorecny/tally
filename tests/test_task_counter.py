@@ -400,6 +400,9 @@ class CliSmoke(unittest.TestCase):
         e.append(e.main(), assistant(time.time() + 1, "m1", "r1", out=42))
         r = self.run_cli("status", "1", "--json")
         self.assertEqual(json.loads(r.stdout)["totals"]["output"], 42)
+        r = subprocess.run([sys.executable, str(PLUGIN / "bin" / "task-counter"), "statusline"],
+                           input=json.dumps({"session_id": SID}), capture_output=True, text=True, env=os.environ)
+        self.assertIn("▶ #1 CLI task · 1.3k tok", r.stdout)
         r = self.run_cli("slash", "--session", SID, "end", "--", "1 finished via fallback")
         self.assertIn("Task #1 ended", r.stdout)
         r = self.run_cli("list")

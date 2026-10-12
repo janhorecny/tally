@@ -87,6 +87,18 @@ After installing, restart Claude Code or run `/reload-plugins`. Running `install
 
 Active tasks refresh every 5 seconds. Light and dark themes are both supported.
 
+## Status line (optional)
+
+`task-counter statusline` prints a one-line segment for the active task of the current session. It reads Claude Code's status line JSON on stdin and prints nothing when no task is running:
+
+```
+▶ #3 Fix login redirect loop · 4.21M tok · $3.12 · 44m 10s
+```
+
+- **If you use ccstatusline:** add a *Custom Command* widget with the command `task-counter statusline`.
+- **Without another status line,** set this in `~/.claude/settings.json`:
+  `"statusLine": {"type": "command", "command": "task-counter statusline", "refreshInterval": 10}`
+
 ## CLI
 
 ```
@@ -98,6 +110,7 @@ task-counter export --format csv -o tasks.csv
 task-counter session <session-id|transcript.jsonl>   # analyse ANY past session, no task needed
 task-counter dashboard --open
 task-counter config auto_start session
+task-counter statusline           # one-line segment for your status line
 task-counter doctor               # installation / hook health check
 ```
 

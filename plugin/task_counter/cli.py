@@ -198,6 +198,31 @@ def cmd_dashboard(args):
     server.serve(host, port, open_browser=args.open)
 
 
+def cmd_statusline(args):
+    """One-line segment for a status line (stdin: Claude Code statusLine JSON).
+
+    Prints nothing when the session has no active task. Never fails loudly.
+    """
+    try:
+        raw = "" if sys.stdin.isatty() else sys.stdin.read()
+        payload = json.loads(raw) if raw.strip() else {}
+        sid = payload.get("session_id") or args.session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        if not sid:
+            return
+        conn = db.connect()
+        task = tasks.active_for_session(conn, sid)
+        if task is None:
+            return
+        ingest.ingest_sessions(conn, tasks.session_ids(conn, task["id"]))
+        rep = report.build(conn, task)
+        tot = rep["totals"]
+        name = task["name"] if len(task["name"]) <= args.width else task["name"][: args.width - 1] + "…"
+        print("▶ #%d %s · %s tok · %s · %s" % (
+            task["id"], name, fmt.tokens(tot["total"]), fmt.money(tot), fmt.duration(rep["time"]["wall_s"])))
+    except Exception:
+        pass
+
+
 def cmd_config(args):
     cfg = paths.load_config()
     if args.key is None:
@@ -326,6 +351,11 @@ def build_parser():
     s.add_argument("key", nargs="?")
     s.add_argument("value", nargs="?")
     s.set_defaults(func=cmd_config)
+
+    s = sub.add_parser("statusline", help="one-line active-task segment for a status line (reads statusLine JSON)")
+    s.add_argument("--session")
+    s.add_argument("--width", type=int, default=28, help="max task name length")
+    s.set_defaults(func=cmd_statusline)
 
     s = sub.add_parser("doctor", help="check installation")
     s.set_defaults(func=cmd_doctor)
