@@ -36,7 +36,9 @@ DEFAULT_PRICES: Dict[str, dict] = {
     "claude-opus-4-5": _p(5, 25, 0.50),
     "claude-opus-4-1": _p(15, 75, 1.50),
     "claude-opus-4": _p(15, 75, 1.50),
-    "claude-sonnet-5-5": _p(2, 10, 0.20),
+    # Cache reads at $0.10: what Claude Code 2.1.29x itself bills (checked
+    # against its cost-state records from 2026-10-10 on; earlier ones used $0.20).
+    "claude-sonnet-5-5": _p(2, 10, 0.10),
     "claude-sonnet-5": _p(2, 10, 0.20),
     "claude-sonnet-4-6": _p(3, 15, 0.30),
     "claude-sonnet-4-5": _p(3, 15, 0.30),

@@ -129,6 +129,7 @@ class Pricing(unittest.TestCase):
         self.assertAlmostEqual(p.cost("claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000), 24.2)
         self.assertAlmostEqual(p.cost("claude-opus-5-5", 0, 1_000_000, speed="fast"), 40.0)
         self.assertAlmostEqual(p.cost("claude-sonnet-5-5", 0, 0, 0, 1_000_000, 1_000_000), 2.5 + 4.0)
+        self.assertAlmostEqual(p.cost("claude-sonnet-5-5", 0, 0, 1_000_000), 0.10)
         self.assertIsNone(p.cost("some-other-model", 1, 1))
         p2 = Pricer({"my-model": {"input": 1, "output": 2}})
         self.assertAlmostEqual(p2.cost("my-model", 1_000_000, 1_000_000), 3.0)
@@ -341,6 +342,34 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(t["name"], "Build a CSV exporter")
         self.assertEqual(t["created_by"], "auto")
         self.assertEqual(len(tasks.list_tasks(conn)), 1)
+
+    def test_unlogged_reconciliation(self):
+        """cost-state at session exit: the unlogged part is pro-rated to the task."""
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/task:start reconcile me")
+        t = time.time()
+        e.append(e.main(), assistant(t + 0.01, "m1", "r1", inp=0, out=100, read=900, w5=0))
+        e.hook("Stop")
+        time.sleep(max(0.0, t + 0.05 - time.time()))
+        e.hook("UserPromptSubmit", prompt="/task:end")
+        # history before the task: same size as the task's usage -> task share = 50%
+        hist = [assistant(t - 100, "h1", "rh", inp=0, out=100, read=900, w5=0)]
+        content = e.main().read_text()
+        e.main().write_text("".join(json.dumps(l) + "\n" for l in hist) + content)
+        # Claude Code writes its own totals at exit: logged 2000 output-ish tokens + 2000 unlogged cache reads
+        e.append(e.main(), {"type": "cost-state", "sessionId": SID, "totalCostUSD": 1.0, "modelUsage": {
+            "claude-opus-5-5[1m]": {"inputTokens": 0, "outputTokens": 200, "cacheReadInputTokens": 3800,
+                                    "cacheCreationInputTokens": 0, "costUSD": 1.0}}})
+        from task_counter import db, report, tasks
+        conn = db.connect()
+        rep = report.summary_for(conn, tasks.get(conn, 1))
+        un = rep["unlogged"]
+        self.assertEqual(un["status"], "estimated")
+        self.assertEqual(un["cache_read"], 1000)     # (3800 - 1800) * 50%
+        self.assertEqual(un["output"], 0)
+        self.assertAlmostEqual(un["cost"], 2000 * 0.20 / 1e6 * 0.5)
+        self.assertEqual(rep["totals"]["output"], 100)  # exact numbers unchanged
 
     def test_hook_never_fails(self):
         from task_counter import hooks

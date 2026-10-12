@@ -178,6 +178,8 @@ def cmd_session(args):
     whole = {"id": 0, "name": "session " + sid, "initial_prompt": None, "status": "ended",
              "started_at": start - 1, "ended_at": end + 1, "cwd": None, "created_by": "session",
              "end_note": None}
+    from . import reconcile
+    reconcile.refresh(conn, sid)
     rep = report.build(conn, whole, windows=[(sid, start - 1, end + 1)])
     if args.json:
         print(json.dumps(rep, indent=2))

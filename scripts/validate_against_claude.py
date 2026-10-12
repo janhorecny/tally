@@ -44,7 +44,7 @@ def main():
     args = ap.parse_args()
 
     os.environ["TASK_COUNTER_HOME"] = tempfile.mkdtemp(prefix="tc-validate-")
-    from task_counter import db, ingest
+    from task_counter import db, ingest, reconcile
     from task_counter.pricing import Pricer, normalize_model
 
     conn = db.connect()
@@ -74,24 +74,30 @@ def main():
             theirs[n]["cache_read"] += u.get("cacheReadInputTokens", 0)
             theirs[n]["cost"] += u.get("costUSD", 0)
         my_cost = sum(v["cost"] for v in mine.values())
+        reconcile.refresh(conn, sid)
+        span = conn.execute("SELECT MIN(ts), MAX(ts) FROM usage WHERE session_id = ?", (sid,)).fetchone()
+        un = reconcile.estimate(conn, [(sid, (span[0] or 0) - 1, (span[1] or 0) + 1)], pricer)
         their_cost = cs.get("totalCostUSD") or sum(v["cost"] for v in theirs.values())
         my_out = sum(v["output"] for v in mine.values())
         their_out = sum(v["output"] for v in theirs.values())
-        rows.append((sid[:8], f.parent.name[-28:], their_out, my_out, their_cost, my_cost))
+        rows.append((sid[:8], f.parent.name[-28:], their_out, my_out, their_cost, my_cost, un["cost"]))
         checked += 1
 
-    print("%-8s %-28s %12s %12s %7s %10s %10s %7s" % ("session", "project", "out(claude)", "out(mine)", "diff",
-                                                      "$claude", "$mine", "diff"))
-    within = 0
-    for sid, proj, to, mo, tc, mc in rows:
+    print("%-8s %-24s %11s %11s %6s %9s %9s %6s %9s %6s" % (
+        "session", "project", "out(claude)", "out(logged)", "diff", "$claude", "$logged", "diff", "$+unlog", "diff"))
+    within = within2 = 0
+    for sid, proj, to, mo, tc, mc, uc in rows:
         do = (mo - to) / to * 100 if to else 0.0
         dc = (mc - tc) / tc * 100 if tc else 0.0
-        if abs(dc) <= 2:
-            within += 1
-        print("%-8s %-28s %12d %12d %6.1f%% %10.2f %10.2f %6.1f%%" % (sid, proj, to, mo, do, tc, mc, dc))
-    print("\n%d/%d sessions within 2%% of Claude Code's own cost figure" % (within, len(rows)))
-    print("(differences come from usage not written to transcripts, e.g. title generation, and from sessions "
-          "that continued after the last cost-state record)")
+        du = (mc + uc - tc) / tc * 100 if tc else 0.0
+        within += abs(dc) <= 2
+        within2 += abs(du) <= 2
+        print("%-8s %-24s %11d %11d %5.1f%% %9.2f %9.2f %5.1f%% %9.2f %5.1f%%" % (
+            sid, proj[-24:], to, mo, do, tc, mc, dc, mc + uc, du))
+    print("\nlogged only:          %d/%d sessions within 2%% of Claude Code's cost" % (within, len(rows)))
+    print("logged + unlogged:    %d/%d sessions within 2%%" % (within2, len(rows)))
+    print("(logged = transcripts: main, subagents, workflows; unlogged = Claude Code's own calls, from cost-state. "
+          "Remaining gaps: price-table changes over time and sessions resumed after their last cost record.)")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS task_snapshots (
     task_id      INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     computed_at  REAL NOT NULL,
     report_json  TEXT NOT NULL
+);
+
+-- Claude Code's own per-session totals (cost-state record written at exit),
+-- used to estimate usage that never reaches a transcript.
+CREATE TABLE IF NOT EXISTS session_costs (
+    session_id   TEXT PRIMARY KEY,
+    scan_offset  INTEGER NOT NULL DEFAULT 0,
+    cs_ts        REAL,
+    cs_json      TEXT,
+    logged_json  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kv (

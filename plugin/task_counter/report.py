@@ -278,6 +278,9 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         sessions = [{"session_id": s, "attached_at": a, "detached_at": b, "reason": "session"} for s, a, b in windows]
         prompt_count = 0
 
+    from . import reconcile
+    unlogged = reconcile.estimate(conn, windows, pricer)
+
     return {
         "task": {
             "id": task["id"], "name": task["name"], "initial_prompt": task["initial_prompt"],
@@ -287,6 +290,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         },
         "time": {"wall_s": round(t1 - t0, 3), "active_s": round(active_s, 3), "turns": turn_count},
         "totals": totals.as_dict(),
+        "unlogged": unlogged,
         "by_model": sorted(({"model": m, **t.as_dict()} for m, t in by_model.items()), key=lambda d: -d["total"]),
         "by_type": by_type_list,
         "workflows": workflows,
@@ -341,14 +345,29 @@ def _main_active(conn, sid, a, b) -> float:
 
 
 def summary_for(conn, task, live: bool = True) -> dict:
-    """Report for a task: frozen snapshot if ended, fresh build if active."""
+    """Report for a task: frozen snapshot if ended, fresh build if active.
+
+    An ended task's snapshot is rebuilt when Claude Code has since written a
+    new session cost record (used for the unlogged-usage estimate).
+    """
     import json
+    from . import reconcile
+    refreshed = False
+    for sid in tasks.session_ids(conn, task["id"]):
+        try:
+            refreshed = reconcile.refresh(conn, sid) or refreshed
+        except Exception:
+            pass
     if task["status"] != "active":
         row = conn.execute("SELECT report_json FROM task_snapshots WHERE task_id = ?", (task["id"],)).fetchone()
-        if row:
+        if row and not refreshed:
             rep = json.loads(row[0])
             rep["task"]["name"] = task["name"]
             return rep
+        rep = build(conn, task)
+        conn.execute("INSERT OR REPLACE INTO task_snapshots(task_id, computed_at, report_json) VALUES(?,?,?)",
+                     (task["id"], time.time(), json.dumps(rep)))
+        return rep
     if live and task["status"] == "active":
         from . import ingest
         try:

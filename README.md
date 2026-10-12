@@ -152,26 +152,39 @@ Cost is an estimate at API list price.
 - **Overrides:** you can change or add prices in `~/.claude/task-counter/config.json` under `"pricing"`.
 - **Subscriptions:** Pro and Max plans are not billed per token, but the figure is still useful for comparing tasks.
 
-### Accuracy, and what is not counted
+### Accuracy, and Claude Code's own calls
 
-`scripts/validate_against_claude.py` compares the parser against the `cost-state` record Claude Code writes when a session exits. On the 40 most recent sessions on the development machine:
+Claude Code makes some API calls for itself that it never writes to a transcript:
 
-- Output tokens agree within 0–10%. Cost agrees within about 5% for most sessions.
-- Sessions with a workflow matched to 0.1%.
-
-The gap always runs the same way, toward under-counting. Claude Code makes some calls of its own that it never writes to any transcript, so no local tool can attribute them to an agent:
-
+- progress summaries for background agents;
 - prompt suggestions;
+- titles;
 - memory extraction;
-- compaction;
-- session titles and away summaries.
+- compaction.
 
-In long sessions with many background agents this housekeeping can reach roughly 20% of cost. Everything you trigger is counted exactly: the main agent, subagents, forks and workflow agents.
+They are part of what a task costs, so task-counter estimates them:
+
+1. When a session exits, Claude Code appends a `cost-state` record with exact per-model totals for the whole session.
+2. task-counter compares that record with what the transcripts logged.
+3. It gives each task a share of the difference, in proportion to the task's share of the session's logged tokens.
+
+This estimate is reported separately, on the `unlogged ≈ +…` line and in a dashboard note. It does not change the exact per-agent numbers, and it appears once the session has exited.
+
+`scripts/validate_against_claude.py` checks all of this against Claude Code's own figures. It reads files only and makes no API calls. On the 40 most recent sessions of the development machine:
+
+| | within 2% of Claude Code's own session cost |
+|---|---|
+| transcripts only (main + subagents + workflows) | 12 / 40 |
+| transcripts + unlogged estimate | 39 / 40 (most within 0.1%) |
+
+Without the estimate, the unlogged share is usually a few percent. In long sessions with many background agents it reaches about 20%.
+
+Prices follow what Claude Code itself bills. One example: Sonnet 5.5 cache reads cost $0.10/MTok in current Claude Code builds.
 
 ## Data
 
 - **Where it lives:** SQLite at `~/.claude/task-counter/tasks.db`. Set `TASK_COUNTER_HOME` to use a different location.
-- **Tables:** `tasks`, `task_sessions`, `usage` (one row per API call), `agents`, `workflows`, `turns`, `prompts`, and `task_snapshots`. `task_snapshots` holds the final report frozen when a task ends, so it survives Claude Code's transcript cleanup.
+- **Tables:** `tasks`, `task_sessions`, `usage` (one row per API call), `agents`, `workflows`, `turns`, `prompts`, `session_costs`, and `task_snapshots`. `task_snapshots` holds the final report frozen when a task ends, so it survives Claude Code's transcript cleanup.
 
 ## Development
 

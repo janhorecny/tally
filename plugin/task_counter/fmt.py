@@ -129,6 +129,11 @@ def render_report(rep: dict, detail: bool = True) -> str:
     out.append("  tokens   " + token_line(tot))
     out.append("  cost     ≈ %s at list price · %d API calls%s" % (
         money(tot), tot["calls"], (" · %d web searches" % tot["web_search"]) if tot.get("web_search") else ""))
+    un = rep.get("unlogged") or {}
+    if un.get("status") in ("estimated", "partial") and un.get("total"):
+        out.append("  unlogged ≈ +%s tokens · +%s  Claude Code's own calls (agent summaries, suggestions, titles), "
+                   "estimated from the session cost record%s" % (
+                       tokens(un["total"]), money(un), " (partial)" if un["status"] == "partial" else ""))
     if rep["by_model"]:
         out.append("  models   " + " · ".join(
             "%s %s %s" % (m["model"].replace("claude-", ""), tokens(m["total"]), money(m)) for m in rep["by_model"]))
