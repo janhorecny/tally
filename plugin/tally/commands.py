@@ -10,7 +10,8 @@ from typing import Optional
 
 from . import fmt, report, tasks
 
-PREFIX_RE = re.compile(r"^\s*/tally:([a-z][a-z-]*)(?:[ \t]+(.*))?\s*$", re.S)
+# "/tally:start x" (Claude Code), "tally:start x" (Codex: its TUI rejects unknown slash commands)
+PREFIX_RE = re.compile(r"^\s*/?tally:([a-z][a-z-]*)(?:[ \t]+(.*))?\s*$", re.S)
 
 HELP = """Tally: tokens and time per task, including subagents and workflows, plus a todo list.
 
@@ -130,7 +131,13 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
 
     if cmd == "new":
         if not args:
-            return Result("Usage: /tally:new <prompt>  (starts a task and sends the prompt to Claude)")
+            return Result("Usage: /tally:new <prompt>  (starts a task and sends the prompt to the agent)")
+        from . import ingest
+        if ingest.session_agent(conn, session_id) == "pi":
+            # pi sends the prompt itself (sendUserMessage); it is recorded when the turn starts
+            tasks.start(conn, session_id, name=tasks.derive_name(args), cwd=cwd,
+                        transcript_path=transcript_path, created_by="new")
+            return Result(None, block=False, context=args)
         tasks.start(conn, session_id, initial_prompt=args, cwd=cwd,
                     transcript_path=transcript_path, created_by="new", prompt_id=prompt_id)
         return Result(None, block=False)
@@ -271,8 +278,10 @@ def _todo_command(conn, session_id, cmd, args, cwd, transcript_path, prompt_id) 
         except ValueError as e:
             return Result(str(e))
         if cmd == "do":
-            tasks.record_prompt(conn, task, session_id, "/tally:do %d · %s" % (todo_id, todo["title"]),
-                                prompt_id=prompt_id)
+            from . import ingest
+            if ingest.session_agent(conn, session_id) != "pi":      # pi records the prompt it sends
+                tasks.record_prompt(conn, task, session_id, "/tally:do %d · %s" % (todo_id, todo["title"]),
+                                    prompt_id=prompt_id)
             return Result(None, block=False, context=todos.context_for(conn, todo))
         out = []
         if ended is not None:

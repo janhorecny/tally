@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# Remove the tally plugin from Claude Code.
+# Remove Tally from your coding agents.
 #
-#   ./uninstall.sh          keep your task history (~/.claude/tally)
-#   ./uninstall.sh --purge  also delete the database
+#   ./uninstall.sh                     from every agent it is installed in; keeps your history
+#   ./uninstall.sh --agents codex      only from the given agents (claude, codex, pi)
+#   ./uninstall.sh --purge             also delete the database (~/.claude/tally)
 set -euo pipefail
-
-MARKETPLACE="tally"
-PLUGIN="tally@${MARKETPLACE}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PURGE=0
-[ "${1:-}" = "--purge" ] && PURGE=1
-
-claude plugin uninstall "$PLUGIN" >/dev/null 2>&1 && echo "plugin removed" || echo "plugin was not installed"
-claude plugin marketplace remove "$MARKETPLACE" >/dev/null 2>&1 && echo "marketplace removed" || true
-if [ -L "$HOME/.local/bin/tally" ]; then
-  rm "$HOME/.local/bin/tally" && echo "CLI symlink removed"
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --purge) PURGE=1 ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+python3 "$REPO/plugin/bin/tally" uninstall ${ARGS[@]+"${ARGS[@]}"}
+if [ ${#ARGS[@]} -eq 0 ]; then
+  [ -L "$HOME/.local/bin/tally" ] && rm "$HOME/.local/bin/tally" && echo "✓ CLI symlink removed"
+  pkill -f "tally dashboard" 2>/dev/null && echo "✓ dashboard stopped" || true
 fi
-pkill -f "tally dashboard" 2>/dev/null && echo "dashboard stopped" || true
 if [ "$PURGE" = 1 ]; then
-  rm -rf "${TALLY_HOME:-$HOME/.claude/tally}" && echo "data deleted"
+  rm -rf "${TALLY_HOME:-$HOME/.claude/tally}" && echo "✓ data deleted"
 else
   echo "task history kept in ${TALLY_HOME:-$HOME/.claude/tally} (use --purge to delete)"
 fi

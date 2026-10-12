@@ -65,10 +65,24 @@ Models with no known price show the cost with a `+` suffix (for example `$1.20+`
 | `TALLY_HOME` | `~/.claude/tally` | Data directory: `tally.db`, `config.json`, `errors.log` and `dashboard.log`. |
 | `TALLY_PROJECTS_DIR` | `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects` | Where Claude Code transcripts are read from. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Respected the same way Claude Code respects it. |
+| `CODEX_HOME` | `~/.codex` | Where Codex keeps `hooks.json` and its rollouts. Used by the installer and the Codex reader. |
+| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | pi's config directory. The installer puts the extension and the skill there. |
+| `TALLY_BIN`, `TALLY_PYTHON` | (path baked in at install), `python3` | Overrides for the pi extension: which `tally` launcher and which Python to run. |
 
 Hooks inherit Claude Code's environment. Any of these variables must therefore be set before Claude Code starts, for example in your shell profile or in the `env` block of `~/.claude/settings.json`.
 
-## Plugin installation scope
+## Choosing agents
+
+`./install.sh` (or `tally install`) detects Claude Code, Codex and pi and asks which ones to install into. You can also choose non-interactively:
+
+```bash
+./install.sh --agents claude,pi     # just these
+./install.sh --yes                  # every detected agent, no questions
+./uninstall.sh --agents codex       # remove from one agent only
+tally doctor                        # what is installed where
+```
+
+## Plugin installation scope (Claude Code)
 
 `install.sh` installs at **user** scope, so Tally is active in every project. To limit it to one project, uninstall it and install it at project scope instead:
 

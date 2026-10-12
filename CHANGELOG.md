@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0 (2026-10-12)
+
+### Codex and pi support
+
+- **Installer:** `./install.sh` (or `tally install`) detects Claude Code, Codex and pi and asks which ones to install into. Non-interactive: `--agents claude,codex,pi`, `--all` or `--yes`. `./uninstall.sh --agents …` removes Tally from specific agents only. `tally doctor` shows the state per agent.
+- **Codex:**
+  - **Hooks:** merged into `~/.codex/hooks.json`; other hooks are kept, and uninstall removes only Tally's.
+  - **Commands:** `tally:<cmd>` prompts are blocked by `UserPromptSubmit`, at zero tokens.
+  - **Rollout reader:** usage comes from deltas of the cumulative `token_count` totals, including the baseline when a task starts mid-session.
+  - **Attribution:** calls are attributed to turns; subagent threads, with their roles, are discovered and counted; history inherited by a fork is skipped.
+  - **Prices:** OpenAI list prices.
+  - **Skill:** `tally-todos` in `~/.agents/skills`.
+- **pi:**
+  - **Extension:** `/tally <cmd>` with completion, plus `tally:<cmd>` typed as a prompt.
+  - **Display:** a report widget, notifications and a live footer status.
+  - **What is counted:** prompts are read from the session file; pi's own reported cost is used; nested subagent usage on tool results counts as agents (`pi-subagents`, `@tintinweb/pi-subagents`).
+  - **Handing work to the model:** `/tally do` and `/tally new` use `sendUserMessage` in the TUI; in print mode use the `tally:` form.
+  - **Skill:** `tally-todos`.
+- **Shared core:**
+  - `sessions.agent` and the agent-reported `usage.cost` (schema v6), plus per-file reader state.
+  - The command syntax in messages is adjusted per agent.
+- **Testing:** verified against real Codex 0.162.1 (hooks, blocking, rollouts) and pi 0.86.0 (print and RPC modes, using pi's faux provider for model runs).
+
 ## 0.2.0 (2026-10-12)
 
 ### Todos

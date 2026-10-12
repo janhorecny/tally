@@ -1,5 +1,15 @@
 # Usage guide
 
+Tally works in **Claude Code**, **Codex** and **pi**. The commands are the same everywhere; only the way you type them differs:
+
+| | Claude Code | Codex | pi |
+|---|---|---|---|
+| start a task | `/tally:start Fix login` | `tally:start Fix login` | `/tally start Fix login` (or `tally:start …`) |
+| status | `/tally:status` | `tally:status` | `/tally status` |
+| any command | `/tally:<cmd> args` | `tally:<cmd> args` (typed as a prompt) | `/tally <cmd> args` |
+
+The examples below use the Claude Code form. In every agent the commands are answered locally and cost no tokens, except `new` and `do`, which hand work to the model. See [Agents](#agents) for the differences.
+
 ## Commands
 
 | command | what it does |
@@ -174,6 +184,35 @@ The same appears in the dashboard's task detail: summary tiles, a per-prompt tab
 ```
 
 The dashboard's *Settings* tab offers the same controls. See [configuration](configuration.md) for every key.
+
+## Agents
+
+### Claude Code
+
+Everything described here. It is installed as the plugin `tally@tally`, with the `/tally:*` commands and the `tally:todos` skill.
+
+### Codex
+
+- **Commands:** type them as a prompt, for example `tally:start Fix login` or `tally:status`. The Codex TUI rejects unknown slash commands. A `UserPromptSubmit` hook answers the prompt and blocks it, so the model is never called.
+- **One-time step:** Codex asks you to approve new hooks. Open Codex and confirm Tally's hooks in `/hooks`.
+- **What is counted:** every thread of the session, including **subagents**, which are separate threads with their own rollout files. Usage comes from Codex's cumulative `token_count` records, as the difference to the previous total. Cached input is shown as cache reads.
+- **Cost:** an estimate at OpenAI API list prices. With a ChatGPT login Codex is not billed per token.
+- **Skill:** the `tally-todos` skill is installed in `~/.agents/skills`, so Codex can import plans and update todos itself.
+- **Status line:** Codex's status line has fixed items and no custom segment. It already shows tokens and an estimated thread cost.
+
+### pi
+
+- **Commands:** `/tally <cmd> …`, one command with tab completion for its subcommands. `tally:<cmd>` typed as a prompt works too.
+- **Display:**
+  - reports appear in a widget above the editor;
+  - short messages appear as notifications;
+  - the footer shows the live task (`▶ #3 … · 4.2M tok · $1.20 · 12m · 📋 2`).
+- **Cost:** the cost pi computes itself. It is $0 for subscription providers.
+- **Subagents:** counted when the subagent tool reports its nested usage on the tool result, which is pi's convention and is done by `pi-subagents` and `@tintinweb/pi-subagents`. `pi-dynamic-workflows` runs its agents in memory and reports no usage, so it cannot be counted.
+- **Handing work to the model:**
+  - `/tally do 3` in the TUI hands the todo to the model.
+  - In print mode (`pi -p`) the process ends before a queued run starts, so use `tally:do 3` as the prompt there.
+- **Skill:** the `tally-todos` skill is installed in `~/.pi/agent/skills`.
 
 ## Reading the report
 

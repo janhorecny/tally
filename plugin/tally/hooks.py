@@ -31,17 +31,21 @@ def _pid():
         return None
 
 
-def main(event: str, stdin=None, stdout=None) -> int:
+def main(event: str, stdin=None, stdout=None, agent=None, payload_text=None) -> int:
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     try:
-        raw = stdin.read()
+        raw = payload_text if payload_text is not None else stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
+        if agent and not payload.get("agent"):
+            payload["agent"] = agent
     except Exception:
         _log_error(event)
         return 0
     try:
         out = handle(event, payload)
+        if out is not None and payload.get("agent") == "codex":
+            out = _codex_syntax(out)
         if out is not None:
             stdout.write(json.dumps(out))
             stdout.write("\n")
@@ -49,6 +53,16 @@ def main(event: str, stdin=None, stdout=None) -> int:
     except Exception:
         _log_error(event)
     return 0
+
+
+def _codex_syntax(out: dict) -> dict:
+    """Codex: commands are typed as tally:<cmd> (its TUI rejects unknown slash
+    commands), and its hook output schema has no suppressOriginalPrompt."""
+    out.pop("suppressOriginalPrompt", None)
+    for k in ("reason", "systemMessage"):
+        if isinstance(out.get(k), str):
+            out[k] = out[k].replace("/tally:", "tally:")
+    return out
 
 
 def handle(event: str, p: dict):
@@ -59,6 +73,8 @@ def handle(event: str, p: dict):
         return None
     tpath = p.get("transcript_path")
     cwd = p.get("cwd")
+    if tpath and not os.path.isabs(tpath) and cwd:
+        tpath = os.path.normpath(os.path.join(cwd, tpath))
     conn = db.connect()
     try:
         now = time.time()
@@ -68,15 +84,16 @@ def handle(event: str, p: dict):
             if event in ("SessionStart", "UserPromptSubmit"):
                 from . import projects
                 name, root = projects.detect_root(cwd)
-                tasks.touch_session(conn, sid, tpath, cwd, _pid(), project=name)
+                tasks.touch_session(conn, sid, tpath, cwd, _pid(), project=name, agent=p.get("agent") or "claude")
                 if event == "SessionStart":
                     row, is_new = projects.register(conn, name, root)
                     new_project = row if row is not None and row["mode"] == "ask" else None
 
         if event == "SessionStart":
-            if p.get("source") == "clear":
-                tasks.carry_over_after_clear(conn, sid, _pid(), cwd, tpath,
-                                             previous_session=_recently_cleared(conn, cwd, now))
+            if p.get("source") in ("clear", "new"):
+                tasks.carry_over_after_clear(conn, sid, _pid() if not p.get("agent") else None, cwd, tpath,
+                                             previous_session=p.get("previous_session_id")
+                                             or _recently_cleared(conn, cwd, now))
             if p.get("source") in ("startup", "resume", None):
                 return _session_message(conn, cwd, new_project)
             return None
@@ -134,8 +151,8 @@ def _prompt(conn, sid, p, tpath, cwd):
     from . import tasks
 
     prompt = p.get("prompt") or ""
-    pid = p.get("prompt_id")
-    if prompt.lstrip().startswith("/tally:"):
+    pid = p.get("prompt_id") or p.get("turn_id")          # Codex names it turn_id
+    if prompt.lstrip().startswith(("/tally:", "tally:")):
         from . import commands          # imported only for commands: keeps plain prompts fast
         parsed = commands.parse(prompt)
         if parsed:
@@ -151,7 +168,8 @@ def _prompt(conn, sid, p, tpath, cwd):
 
     task = tasks.active_for_session(conn, sid)
     if task is not None:
-        tasks.record_prompt(conn, task, sid, prompt, prompt_id=pid)
+        if p.get("record_prompt", True):      # pi records prompts from its transcript instead
+            tasks.record_prompt(conn, task, sid, prompt, prompt_id=pid)
         _open_turn(conn, sid, tpath, prompt_id=pid)
         return None
 

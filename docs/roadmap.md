@@ -32,9 +32,16 @@ These are proposals, not commitments. Each is grouped by value, with a short not
 19. **MCP read-only server.** Let Claude answer "what did the last three tasks cost?" from the database. It should be opt-in, since tool definitions cost context tokens in every session.
 20. **Windows.** CI already runs on macOS and Ubuntu (Python 3.8 to 3.13). Add a Windows job and use `py -3` in `hooks.json` there.
 
+## Agents
+
+21. **More agents.** The same pattern works for any agent that keeps a transcript and has hooks or an extension API: a reader plus an integration. Candidates are Gemini CLI, opencode, Cursor's agent CLI, and Aider.
+22. **pi workflows.** `pi-dynamic-workflows` runs its agents in memory and reports no usage. This would need an upstream change, so that its tool returns combined `usage` the way `pi-subagents` does.
+
 ## Known limitations (today)
 
 - **Unlogged usage is an estimate.** Claude Code's own background calls are attributed proportionally, and only after the session exits.
 - **Ending a task stops the count.** Agents still running at `/tally:end` are not counted afterwards; use `/tally:resume`.
 - **Turns that span the task start.** Active time ignores a turn already in progress when the task starts.
 - **Prices go stale.** The price table is static, so a price change needs a code or `config.json` update.
+- **Codex costs are notional.** They are estimated at API list prices; with a ChatGPT login Codex is not billed per token.
+- **Codex token detail:** cache writes appear only where Codex reports them (`cache_write_input_tokens`, in newer versions).

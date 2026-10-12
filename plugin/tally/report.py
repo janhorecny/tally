@@ -91,7 +91,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         for r in conn.execute(
             "SELECT * FROM usage WHERE session_id = ? AND ts >= ? AND ts <= ? ORDER BY ts", (sid, a, b)
         ):
-            c = pricer.cost(r["model"], r["input"], r["output"], r["cache_read"],
+            c = r["cost"] if r["cost"] is not None else pricer.cost(r["model"], r["input"], r["output"], r["cache_read"],
                             r["cache_write_5m"], r["cache_write_1h"], r["speed"])
             totals.add_row(r, c)
             mkey = normalize_model(r["model"]) or "unknown"

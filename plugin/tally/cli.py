@@ -39,7 +39,7 @@ def _task_or_active(conn, args):
 
 def cmd_hook(args):
     from . import hooks
-    return hooks.main(args.event)
+    return hooks.main(args.event, agent=args.agent, payload_text=args.payload)
 
 
 def cmd_slash(args):
@@ -48,8 +48,18 @@ def cmd_slash(args):
     text = " ".join(args.args).strip()
     if text.startswith("--"):
         text = text[2:].strip()
-    res = commands.run(conn, _session(args), args.command, text, cwd=os.getcwd())
-    if res.text:
+    sid = _session(args)
+    cwd = args.cwd or os.getcwd()
+    if args.agent or args.transcript:
+        from . import projects
+        with db.transaction(conn):
+            tasks.touch_session(conn, sid, args.transcript, cwd, None, project=projects.detect(cwd),
+                                agent=args.agent)
+    res = commands.run(conn, sid, args.command, text, cwd=cwd, transcript_path=args.transcript,
+                       prompt_id=args.prompt_id)
+    if args.json:
+        print(json.dumps({"text": res.text, "block": res.block, "context": res.context}))
+    elif res.text:
         print(res.text)
 
 
@@ -427,6 +437,20 @@ def cmd_config(args):
     print("%s = %s" % (args.key, json.dumps(value)))
 
 
+def cmd_install(args):
+    from . import installer
+    agents = None if not args.agents else [a.strip() for a in args.agents.split(",") if a.strip()]
+    if args.all:
+        agents = list(installer.AGENTS)
+    return installer.install(agents, assume_yes=args.yes)
+
+
+def cmd_uninstall(args):
+    from . import installer
+    agents = [a.strip() for a in args.agents.split(",")] if args.agents else None
+    return installer.uninstall(agents)
+
+
 def cmd_doctor(args):
     print("tally %s · python %s" % (__version__, sys.version.split()[0]))
     print("data dir      %s" % paths.home())
@@ -441,16 +465,17 @@ def cmd_doctor(args):
         print("last hook     %s at %s (session %s)" % (d["event"], fmt.when(d["ts"], "%Y-%m-%d %H:%M:%S"),
                                                        d.get("session_id", "")[:8]))
     else:
-        print("last hook     never - the plugin hooks have not fired yet (restart Claude Code after install)")
+        print("last hook     never - the hooks have not fired yet (restart the agent after installing)")
+    agents = dict(conn.execute("SELECT COALESCE(agent, 'claude'), COUNT(*) FROM sessions GROUP BY 1").fetchall())
+    if agents:
+        print("sessions      %s" % " · ".join("%s %d" % (k, v) for k, v in sorted(agents.items())))
     print("transcripts   %s %s" % (paths.projects_dir(), "(ok)" if paths.projects_dir().is_dir() else "(MISSING)"))
-    inst = paths.claude_dir() / "plugins" / "installed_plugins.json"
-    try:
-        with open(inst) as fh:
-            data = json.load(fh)
-        found = [k for k in json.dumps(data).split('"') if k.startswith("tally@")]
-        print("plugin        %s" % (", ".join(sorted(set(found))) or "not installed (run ./install.sh)"))
-    except Exception:
-        print("plugin        unknown (%s not readable)" % inst)
+    from . import installer
+    found, inst = installer.detect(), installer.installed()
+    for a in installer.AGENTS:
+        state = ("installed" if inst[a] else
+                 ("found, not installed (./install.sh --agents %s)" % a if found[a] else "not found"))
+        print("%-13s %s" % (installer.NAMES[a], state))
     if paths.error_log_path().exists() and paths.error_log_path().stat().st_size:
         print("errors        see %s" % paths.error_log_path())
     else:
@@ -462,12 +487,19 @@ def build_parser():
     p.add_argument("--version", action="version", version="tally " + __version__)
     sub = p.add_subparsers(dest="cmd")
 
-    s = sub.add_parser("hook", help="(internal) run a Claude Code hook; JSON on stdin")
+    s = sub.add_parser("hook", help="(internal) run an agent hook; JSON payload on stdin or --payload")
     s.add_argument("event")
+    s.add_argument("--agent", choices=["claude", "codex", "pi"])
+    s.add_argument("--payload")
     s.set_defaults(func=cmd_hook)
 
     s = sub.add_parser("slash", help="(internal) run a /tally:<command> for a session")
     s.add_argument("--session")
+    s.add_argument("--agent", choices=["claude", "codex", "pi"])
+    s.add_argument("--transcript")
+    s.add_argument("--cwd")
+    s.add_argument("--prompt-id")
+    s.add_argument("--json", action="store_true")
     s.add_argument("command")
     s.add_argument("args", nargs=argparse.REMAINDER)
     s.set_defaults(func=cmd_slash)
@@ -617,6 +649,16 @@ def build_parser():
     s.add_argument("--session")
     s.add_argument("--width", type=int, default=28, help="max task name length")
     s.set_defaults(func=cmd_statusline)
+
+    s = sub.add_parser("install", help="install into agents: Claude Code, Codex, pi (asks which)")
+    s.add_argument("--agents", help="comma separated: claude,codex,pi")
+    s.add_argument("--all", action="store_true", help="every supported agent")
+    s.add_argument("-y", "--yes", action="store_true", help="no questions: every detected agent")
+    s.set_defaults(func=cmd_install)
+
+    s = sub.add_parser("uninstall", help="remove from agents (default: wherever it is installed)")
+    s.add_argument("--agents")
+    s.set_defaults(func=cmd_uninstall)
 
     s = sub.add_parser("doctor", help="check installation")
     s.set_defaults(func=cmd_doctor)

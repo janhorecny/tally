@@ -872,6 +872,218 @@ class Projects(unittest.TestCase):
         self.assertIsNone(st["tasks"]["share"])
 
 
+def codex_line(ts, typ, payload, ordinal=None):
+    d = {"timestamp": iso(ts), "type": typ, "payload": payload}
+    if ordinal is not None:
+        d["ordinal"] = ordinal
+    return d
+
+
+def codex_tokens(ts, inp, cached, out, ordinal=None):
+    usage = {"input_tokens": inp, "cached_input_tokens": cached, "output_tokens": out,
+             "reasoning_output_tokens": out // 3, "total_tokens": inp + out}
+    return codex_line(ts, "event_msg", {"type": "token_count", "info": {
+        "total_token_usage": usage, "last_token_usage": usage, "model_context_window": 272000}}, ordinal)
+
+
+class OtherAgents(unittest.TestCase):
+    """Codex rollouts and pi sessions through the same hooks, tasks and reports."""
+
+    def setUp(self):
+        self.env = Env()
+        self.codex_home = self.env.tmp / "codex"
+        os.environ["CODEX_HOME"] = str(self.codex_home)
+
+    def tearDown(self):
+        os.environ.pop("CODEX_HOME", None)
+        self.env.cleanup()
+
+    def rollout(self, thread, day=None, meta=None):
+        day = day or time.strftime("%Y/%m/%d")
+        folder = self.codex_home / "sessions" / day
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / ("rollout-2026-10-12T08-00-00-%s.jsonl" % thread)
+        m = {"session_id": thread, "id": thread, "cwd": "/Users/me/proj", "source": "cli"}
+        m.update(meta or {})
+        self.env.append(path, codex_line(time.time() - 100, "session_meta", m))
+        return path
+
+    def codex_hook(self, event, path, thread="T1", **fields):
+        from tally import hooks
+        payload = {"session_id": thread, "transcript_path": str(path), "cwd": "/Users/me/proj",
+                   "hook_event_name": event, "model": "gpt-6.1-sol"}
+        payload.update(fields)
+        out = io.StringIO()
+        hooks.main(event, stdin=io.StringIO(json.dumps(payload)), stdout=out, agent="codex")
+        text = out.getvalue().strip()
+        return json.loads(text) if text else None
+
+    def test_codex_task_with_cumulative_tokens_and_subagent(self):
+        e = self.env
+        main = self.rollout("T1")
+        t0 = time.time() - 50
+        # history before the task: 5000 input / 300 output already used
+        e.append(main, codex_line(t0, "turn_context", {"turn_id": "old", "model": "gpt-6.1-sol"}),
+                 codex_tokens(t0 + 1, 5000, 4000, 300))
+        self.codex_hook("SessionStart", main, source="startup")
+        r = self.codex_hook("UserPromptSubmit", main, prompt="tally:start codex task", turn_id="x")
+        self.assertEqual(r["decision"], "block")
+        self.assertIn("Task #1 started", r["reason"])
+        self.assertNotIn("/tally:", r["reason"])                      # Codex syntax: tally:<cmd>
+        self.codex_hook("UserPromptSubmit", main, prompt="refactor the parser", turn_id="turn-1")
+        t = time.time() + 0.01
+        e.append(main,
+                 codex_line(t, "event_msg", {"type": "turn_started", "turn_id": "turn-1"}),
+                 codex_line(t, "turn_context", {"turn_id": "turn-1", "model": "gpt-6.1-sol"}),
+                 codex_tokens(t + 0.01, 7000, 5000, 400),            # +2000 in (1000 cached), +100 out
+                 codex_tokens(t + 0.02, 7000, 5000, 400),            # repeated total: ignored
+                 codex_line(t + 0.03, "response_item", {"type": "function_call", "name": "shell", "call_id": "c1"}),
+                 codex_tokens(t + 0.04, 9000, 6500, 650))            # +2000 in (1500 cached), +250 out
+        # a subagent thread of this session, in its own rollout
+        sub = self.rollout("S1", meta={"session_id": "T1", "id": "S1", "parent_thread_id": "T1",
+                                       "agent_role": "explorer", "agent_nickname": "scout",
+                                       "source": {"subagent": {"thread_spawn": {"parent_thread_id": "T1", "depth": 1}}}})
+        e.append(sub, codex_line(t + 0.05, "turn_context", {"turn_id": "turn-1", "model": "gpt-6-luna"}),
+                 codex_tokens(t + 0.06, 1000, 0, 50))
+        self.codex_hook("Stop", main, turn_id="turn-1")
+        from tally import db, report, tasks
+        conn = db.connect()
+        rep = report.build(conn, tasks.get(conn, 1))
+        tot = rep["totals"]
+        self.assertEqual(tot["output"], 100 + 250 + 50)               # history before the task excluded
+        self.assertEqual(tot["cache_read"], 1000 + 1500)
+        self.assertEqual(tot["input"], 1000 + 500 + 1000)             # input excludes cached tokens
+        self.assertEqual(tot["calls"], 3)
+        prompts = {p["prompt"]: p for p in rep["prompts"]}
+        self.assertEqual(prompts["refactor the parser"]["output"], 400)  # main 350 + subagent 50
+        kids = {c["label"]: c for c in rep["tree"][0]["children"]}
+        self.assertEqual(kids["scout"]["agent_type"], "explorer")
+        self.assertEqual(kids["scout"]["rollup"]["output"], 50)
+        models = {m["model"] for m in rep["by_model"]}
+        self.assertEqual(models, {"gpt-6.1-sol", "gpt-6-luna"})
+        from tally.pricing import Pricer
+        self.assertAlmostEqual(tot["cost"], Pricer().cost("gpt-6.1-sol", 1500, 350, 2500)
+                               + Pricer().cost("gpt-6-luna", 1000, 50, 0), places=8)
+
+    def test_codex_forked_history_is_skipped(self):
+        e = self.env
+        main = self.rollout("T2")
+        self.codex_hook("SessionStart", main, thread="T2", source="startup")
+        self.codex_hook("UserPromptSubmit", main, thread="T2", prompt="tally:start fork test")
+        t = time.time() + 0.01
+        fork = self.rollout("F1", meta={"session_id": "T2", "id": "F1", "forked_from_id": "T2",
+                                        "subagent_history_start_ordinal": 3})
+        e.append(fork, codex_tokens(t, 8000, 6000, 900, ordinal=1),       # inherited from the parent
+                 codex_tokens(t + 0.01, 8000, 6000, 900, ordinal=2),
+                 codex_tokens(t + 0.02, 8500, 6000, 950, ordinal=3))      # the fork's own work: +500 / +50
+        self.codex_hook("Stop", main, thread="T2")
+        from tally import db, report, tasks
+        rep = report.build(db.connect(), tasks.get(db.connect(), 1))
+        self.assertEqual(rep["totals"]["output"], 50)
+        self.assertEqual(rep["totals"]["input"], 500)
+
+    def test_pi_session(self):
+        e = self.env
+        sess = e.tmp / "pi" / "2026-10-12T08-00-00-000Z_P1.jsonl"
+        e.append(sess, {"type": "session", "version": 3, "id": "P1", "timestamp": iso(time.time() - 60),
+                        "cwd": "/Users/me/proj"})
+
+        def pi_hook(event, **fields):
+            from tally import hooks
+            payload = dict({"session_id": "P1", "transcript_path": str(sess), "cwd": "/Users/me/proj"}, **fields)
+            out = io.StringIO()
+            hooks.main(event, stdin=io.StringIO(json.dumps(payload)), stdout=out, agent="pi")
+            return json.loads(out.getvalue()) if out.getvalue().strip() else None
+
+        def pi_msg(eid, role, ts, **m):
+            return {"type": "message", "id": eid, "parentId": None, "timestamp": iso(ts),
+                    "message": dict({"role": role, "timestamp": int(ts * 1000)}, **m)}
+
+        pi_hook("SessionStart", source="startup")
+        from tally import commands, db, report, tasks
+        conn = db.connect()
+        commands.run(conn, "P1", "start", "pi task", cwd="/Users/me/proj", transcript_path=str(sess))
+        t = time.time() + 0.01
+        usage = lambda i, o, c: {"input": i, "output": o, "cacheRead": 0, "cacheWrite": 0, "totalTokens": i + o,
+                                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": c}}
+        e.append(sess,
+                 pi_msg("u1", "user", t, content="add a test"),
+                 pi_msg("a1", "assistant", t + 0.01, provider="zai", model="glm-5.2", usage=usage(100, 20, 0.01),
+                        stopReason="toolUse", content=[{"type": "toolCall", "id": "tc1", "name": "subagent",
+                                                        "arguments": {}}]),
+                 pi_msg("r1", "toolResult", t + 0.02, toolCallId="tc1", toolName="subagent", isError=False,
+                        content=[], details={"agent": "scout"}, usage=usage(500, 50, 0.02)),
+                 pi_msg("a2", "assistant", t + 0.03, provider="zai", model="glm-5.2", usage=usage(150, 30, 0.03),
+                        stopReason="stop", content=[{"type": "text", "text": "done"}]),
+                 pi_msg("a3", "assistant", t + 0.04, provider="zai", model="glm-5.2", usage=usage(0, 0, 0),
+                        stopReason="error", content=[]))
+        pi_hook("Stop")
+        rep = report.build(conn, tasks.get(conn, 1))
+        self.assertEqual(rep["totals"]["output"], 100)
+        self.assertEqual(rep["totals"]["calls"], 3)                    # the failed empty call is not counted
+        self.assertAlmostEqual(rep["totals"]["cost"], 0.06)            # cost reported by pi
+        self.assertEqual(rep["prompts"][0]["prompt"], "add a test")    # prompt read from the transcript
+        self.assertEqual(rep["prompts"][0]["agents"], 1)
+        sub = rep["tree"][0]["children"][0]
+        self.assertEqual((sub["agent_type"], sub["rollup"]["output"]), ("subagent", 50))
+
+
+class Installer(unittest.TestCase):
+    def setUp(self):
+        self.env = Env()
+        self.home = self.env.tmp / "fakehome"
+        (self.home / ".codex").mkdir(parents=True)
+        (self.home / ".pi" / "agent").mkdir(parents=True)
+        self.saved = {k: os.environ.get(k) for k in ("HOME", "CODEX_HOME", "PI_CODING_AGENT_DIR")}
+        os.environ["HOME"] = str(self.home)
+        os.environ.pop("CODEX_HOME", None)
+        os.environ.pop("PI_CODING_AGENT_DIR", None)
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self.env.cleanup()
+
+    def test_codex_and_pi_install_uninstall(self):
+        from tally import installer
+        hooks = self.home / ".codex" / "hooks.json"
+        hooks.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}}))
+        self.assertEqual(installer.install(["codex", "pi"]), 0)
+        data = json.loads(hooks.read_text())
+        self.assertEqual(sorted(data["hooks"]), sorted(installer.CODEX_EVENTS))
+        self.assertEqual(data["hooks"]["Stop"][0]["hooks"][0]["command"], "echo mine")     # kept
+        self.assertTrue(installer._is_tally(data["hooks"]["Stop"][1]))
+        self.assertTrue(installer.installed()["codex"])
+        installer.install(["codex"])                                                       # idempotent
+        self.assertEqual(len(json.loads(hooks.read_text())["hooks"]["Stop"]), 2)
+        ext = (self.home / ".pi" / "agent" / "extensions" / "tally.ts").read_text()
+        self.assertIn(str(installer.BIN), ext)
+        self.assertNotIn("__TALLY_BIN__", ext)
+        skill = (self.home / ".agents" / "skills" / "tally-todos" / "SKILL.md").read_text()
+        self.assertTrue(skill.startswith("---\nname: tally-todos\n"))
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", skill)
+        installer.uninstall(["codex", "pi"])
+        self.assertEqual(json.loads(hooks.read_text()),
+                         {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}})
+        self.assertFalse((self.home / ".pi" / "agent" / "extensions" / "tally.ts").exists())
+        self.assertFalse(installer.installed()["codex"])
+
+    def test_interactive_choice(self):
+        from unittest import mock
+        from tally import installer
+        with mock.patch.object(installer, "detect", return_value={"claude": True, "codex": False, "pi": True}), \
+                mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=["n", ""]):
+            stdin.isatty.return_value = True
+            self.assertEqual(installer.choose(None, assume_yes=False), ["pi"])
+        with mock.patch.object(installer, "detect", return_value={"claude": True, "codex": False, "pi": True}):
+            self.assertEqual(installer.choose(None, assume_yes=True), ["claude", "pi"])
+        with self.assertRaises(SystemExit):
+            installer.choose(["vim"], assume_yes=True)
+
+
 class CliSmoke(unittest.TestCase):
     def setUp(self):
         self.env = Env()

@@ -69,6 +69,18 @@ Nothing to do. The task follows the new session ID automatically, because it is 
 
 The `tally:todos` skill is loaded on demand. Ask explicitly ("import the plan into tally"), or mention Tally todos in your planning prompt. Also check that `tally` is on PATH (`which tally`). If it isn't, re-run `./install.sh`, or the skill falls back to `python3 "${CLAUDE_PLUGIN_ROOT}/bin/tally"`.
 
+## Codex: `tally:start` goes to the model
+
+- **Hooks not trusted:** Codex runs hooks only after you approve them. Open Codex, run `/hooks`, and trust Tally's entries.
+- **Hooks disabled:** run `codex features list`. `hooks` must be `true`, which is the default.
+- **Not installed:** check that `~/.codex/hooks.json` contains the Tally hooks. `tally doctor` shows the state, and `./install.sh --agents codex` reinstalls them.
+
+## pi: `/tally` is unknown
+
+- **Not loaded yet:** the extension is `~/.pi/agent/extensions/tally.ts`, or the same path under `$PI_CODING_AGENT_DIR`. Restart pi or run `/reload`.
+- **Not auto-discovered:** if you keep extensions somewhere else, add the file to `"extensions"` in `~/.pi/agent/settings.json`.
+- **Print mode:** in `pi -p`, `/tally do` cannot hand work to the model, because the process ends first. Use `tally:do <id>` as the prompt instead.
+
 ## Errors
 
 Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/errors.log` with a traceback. Please include that file when reporting a problem.

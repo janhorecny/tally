@@ -49,6 +49,27 @@ DEFAULT_PRICES: Dict[str, dict] = {
     "claude-3-5-haiku": _p(0.80, 4, 0.08),
 }
 
+# OpenAI models used by Codex (developers.openai.com/api/docs/pricing,
+# 2026-10-12, short context). Codex with a ChatGPT login is not billed per
+# token: these are notional list-price estimates.
+DEFAULT_PRICES.update({
+    "gpt-6-astra": _p(10, 50, 1.0),
+    "gpt-6.1-sol": _p(2, 10, 0.10),
+    "gpt-6-sol": _p(2, 10, 0.20),
+    "gpt-6-luna": _p(0.10, 0.50, 0.01),
+    "gpt-5.6-sol": _p(4, 20, 0.40),
+    "gpt-5.6-terra": _p(2, 12, 0.20),
+    "gpt-5.6-luna": _p(0.20, 1.20, 0.02),
+    "gpt-5.5": _p(5, 30, 0.50),
+    "gpt-5.4": _p(2.5, 15, 0.25),
+    "gpt-5.4-mini": _p(0.75, 4.5, 0.075),
+    "gpt-5.4-nano": _p(0.20, 1.25, 0.02),
+    "gpt-5.2": _p(1.75, 14, 0.175),
+    "gpt-5.1": _p(1.25, 10, 0.125),
+    "gpt-5": _p(1.25, 10, 0.125),
+    "gpt-5-mini": _p(0.25, 2, 0.025),
+})
+
 # Prompt-size tiers: above `threshold` prompt tokens every rate is multiplied.
 # Claude Haiku 5.5 is $0.10/$0.50 up to 100K prompt tokens, $0.50/$2.50 beyond.
 TIERS = {

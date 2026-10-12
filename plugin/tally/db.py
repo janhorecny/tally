@@ -7,7 +7,7 @@ from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     claude_pid       INTEGER,
     first_seen       REAL,
     last_seen        REAL,
-    project          TEXT
+    project          TEXT,
+    agent            TEXT                                 -- claude | codex | pi
 );
 CREATE INDEX IF NOT EXISTS sessions_project ON sessions(project);
 
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS files (
     workflow_run_id  TEXT,
     offset           INTEGER NOT NULL DEFAULT 0,
     meta_loaded      INTEGER NOT NULL DEFAULT 0,
-    last_prompt_id   TEXT                                 -- prompt the next lines belong to
+    last_prompt_id   TEXT,                                -- prompt the next lines belong to
+    state            TEXT                                 -- reader state carried between reads (JSON)
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -106,7 +108,8 @@ CREATE TABLE IF NOT EXISTS usage (
     cache_write_5m  INTEGER NOT NULL DEFAULT 0,
     cache_write_1h  INTEGER NOT NULL DEFAULT 0,
     web_search      INTEGER NOT NULL DEFAULT 0,
-    prompt_id       TEXT                                 -- user prompt that caused the call
+    prompt_id       TEXT,                                -- user prompt that caused the call
+    cost            REAL                                 -- cost reported by the agent itself (pi, codex)
 );
 CREATE INDEX IF NOT EXISTS usage_session_ts ON usage(session_id, ts);
 
@@ -259,6 +262,9 @@ _ADDED_COLUMNS = [
     ("turns", "prompt_id", "TEXT"),
     ("prompts", "prompt_id", "TEXT"),
     ("sessions", "project", "TEXT"),
+    ("sessions", "agent", "TEXT"),
+    ("usage", "cost", "REAL"),
+    ("files", "state", "TEXT"),
 ]
 
 

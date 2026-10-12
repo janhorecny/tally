@@ -8,7 +8,7 @@
 
 # Tally
 
-**Per-task token and time tracking for Claude Code.** It runs locally with zero dependencies, stores everything in SQLite, and its commands cost no tokens.
+**Per-task token and time tracking for Claude Code, Codex and pi.** It runs locally with zero dependencies, stores everything in SQLite, and its commands cost no tokens.
 
 You start a task inside Claude Code and keep working. While it is open, Tally counts:
 
@@ -53,6 +53,7 @@ Task #3 · Fix login redirect loop   [■ ended]
 - **Your choice of detail.** `log.depth` is `summary`, `prompts` or `calls`. `log.prompts` is `full`, `preview` or `off`, for privacy.
 - **Robust and fast.** It survives `/clear`, multiple sessions and parallel terminals, and takes about 33 ms per hook. Reports are frozen when a task ends.
 - **Dashboard.** A local dashboard with tasks, a todo board, projects and settings. There is also a status line segment, a CLI, and CSV/JSON export.
+- **Three agents, one ledger.** Claude Code, Codex and pi feed the same database: the same tasks, todos, projects and reports, whichever agent did the work.
 
 ## Install
 
@@ -63,18 +64,19 @@ git clone https://github.com/janhorecny/tally.git && cd tally
 ./install.sh
 ```
 
-Then restart Claude Code, or run `/reload-plugins`.
+`install.sh` detects **Claude Code, Codex and pi** and asks which ones to install into. To skip the questions, use `./install.sh --agents claude,pi` or `--yes` for every detected agent. Then:
 
-`install.sh` does the following:
+| agent | what gets installed | after installing |
+|---|---|---|
+| Claude Code | plugin `tally@tally` (local marketplace from this folder) | restart, or run `/reload-plugins` |
+| Codex | hooks merged into `~/.codex/hooks.json`, skill in `~/.agents/skills` | approve the hooks once in Codex: `/hooks` |
+| pi | extension `~/.pi/agent/extensions/tally.ts`, skill | restart pi, or run `/reload` |
 
-- registers the folder as a local marketplace;
-- installs the plugin `tally@tally` at user scope;
-- links the CLI to `~/.local/bin/tally`;
-- migrates an older `task-counter` install if one exists.
-
-Run it again to update. `./uninstall.sh` removes everything except your history; add `--purge` to remove that too.
+It also links the CLI to `~/.local/bin/tally`. Run it again to update. `./uninstall.sh` removes Tally (or `--agents codex` from one agent only) and keeps your history; add `--purge` to delete that too. `tally doctor` shows what is installed where.
 
 ## Commands
+
+Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in **pi** use `/tally start …`. Details are in [Agents](docs/usage.md#agents).
 
 | tasks | |
 |---|---|
@@ -114,7 +116,7 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # 36 end-to-end tests on synthetic transcripts
+python3 -m unittest discover -s tests -v       # 41 end-to-end tests (Claude Code, Codex and pi transcripts)
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg

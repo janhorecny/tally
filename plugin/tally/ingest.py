@@ -28,6 +28,10 @@ _PROMPT_RE = re.compile(rb'"promptId"\s*:\s*"([^"]+)"')
 _PROMPT_SCAN = 600
 _TOOL_ERROR_RE = re.compile(rb'"is_error"\s*:\s*true')
 
+USAGE_INSERT = (
+    "INSERT OR REPLACE INTO usage(msg_key, session_id, agent_id, ts, model, speed, input, output, cache_read, "
+    "cache_write_5m, cache_write_1h, web_search, prompt_id, cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+
 
 def parse_ts(value) -> Optional[float]:
     if value is None:
@@ -79,6 +83,9 @@ def resolve_transcript(conn, session_id: str, hint: Optional[str] = None) -> Opt
     if row and row[0] and Path(row[0]).is_file():
         return Path(row[0])
     found = find_transcript(session_id)
+    if found is None and session_agent(conn, session_id) == "codex":
+        from . import codex
+        found = codex.find_rollout(session_id)
     if found:
         conn.execute(
             "INSERT INTO sessions(session_id, transcript_path, first_seen, last_seen) VALUES(?,?,?,?) "
@@ -129,19 +136,34 @@ def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
     main = resolve_transcript(conn, session_id, transcript_path)
     if main is None:
         return stats
+    agent = session_agent(conn, session_id)
     sdir = main.with_suffix("")
     want_tools = settings.depth_at_least("calls")
     with db.transaction(conn):
-        for path, agent_id, run_id in session_files(main):
-            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools)
-        _load_workflow_records(conn, session_id, sdir)
+        if agent == "claude":
+            files = session_files(main)
+        elif agent == "codex":
+            from . import codex
+            files = codex.session_files(conn, session_id, main)
+        else:
+            files = [(main, "", None)]
+        for path, agent_id, run_id in files:
+            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools, agent)
+        if agent == "claude":
+            _load_workflow_records(conn, session_id, sdir)
     return stats
 
 
+def session_agent(conn, session_id: str) -> str:
+    row = conn.execute("SELECT agent FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+    return (row[0] if row and row[0] else None) or "claude"
+
+
 def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[str],
-                 skip_existing: bool, stats: Stats, want_tools: bool = False) -> None:
+                 skip_existing: bool, stats: Stats, want_tools: bool = False, agent: str = "claude") -> None:
     key = str(path)
-    row = conn.execute("SELECT offset, meta_loaded, last_prompt_id FROM files WHERE path = ?", (key,)).fetchone()
+    row = conn.execute("SELECT offset, meta_loaded, last_prompt_id, state FROM files WHERE path = ?",
+                       (key,)).fetchone()
     try:
         size = path.stat().st_size
     except OSError:
@@ -169,8 +191,14 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
     if skip_existing:
         # Skipped bytes are not parsed, but lines appended later still need to
         # know which prompt they belong to: take the last one in the file tail.
-        conn.execute("UPDATE files SET offset = ?, last_prompt_id = COALESCE(?, last_prompt_id) WHERE path = ?",
-                     (size, _last_prompt_in_tail(path, size), key))
+        from . import adapters
+        if agent == "claude":
+            tail_prompt, tail_state = _last_prompt_in_tail(path, size), None
+        else:
+            tail_prompt, tail_state = adapters.tail_state(agent, path, size)
+        conn.execute("UPDATE files SET offset = ?, last_prompt_id = COALESCE(?, last_prompt_id), "
+                     "state = COALESCE(?, state) WHERE path = ?",
+                     (size, tail_prompt, json.dumps(tail_state) if tail_state else None, key))
         return
     with open(path, "rb") as fh:
         fh.seek(offset)
@@ -181,10 +209,18 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
     chunk = data[: end + 1]
     stats.files += 1
     stats.bytes += len(chunk)
-    prompt_id = _process_chunk(conn, session_id, agent_id, chunk, stats,
-                               row["last_prompt_id"] if row is not None else None, want_tools)
-    conn.execute("UPDATE files SET offset = ?, last_prompt_id = ? WHERE path = ?",
-                 (offset + len(chunk), prompt_id, key))
+    from . import adapters
+    process = adapters.chunk_processor(agent) or _process_chunk
+    state = {}
+    if row is not None and row["state"]:
+        try:
+            state = json.loads(row["state"]) or {}
+        except ValueError:
+            state = {}
+    prompt_id = process(conn, session_id, agent_id, chunk, stats,
+                        row["last_prompt_id"] if row is not None else None, want_tools, state)
+    conn.execute("UPDATE files SET offset = ?, last_prompt_id = ?, state = ? WHERE path = ?",
+                 (offset + len(chunk), prompt_id, json.dumps(state) if state else None, key))
 
 
 def _last_prompt_in_tail(path: Path, size: int, tail: int = 512 * 1024) -> Optional[str]:
@@ -203,7 +239,8 @@ def _last_prompt_in_tail(path: Path, size: int, tail: int = 512 * 1024) -> Optio
 
 
 def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stats: Stats,
-                   prompt_id: Optional[str] = None, want_tools: bool = False) -> Optional[str]:
+                   prompt_id: Optional[str] = None, want_tools: bool = False,
+                   state: Optional[dict] = None) -> Optional[str]:
     """Parse complete lines; returns the prompt id in effect at the end."""
     first_ts = last_ts = None
     usage_rows = []
@@ -258,9 +295,7 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
             _upsert_workflow(conn, session_id, res, parse_ts(rec.get("timestamp")))
     if usage_rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO usage(msg_key, session_id, agent_id, ts, model, speed, input, output, "
-            "cache_read, cache_write_5m, cache_write_1h, web_search, prompt_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            usage_rows,
+            USAGE_INSERT, [r + (None,) if len(r) == 13 else r for r in usage_rows],
         )
         stats.usage_rows += len(usage_rows)
     if tool_rows:
@@ -274,6 +309,10 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
             (session_id, file_agent_id, first_ts, last_ts),
         )
     return prompt_id
+
+
+def insert_tools(conn, rows: list) -> None:
+    _insert_tools(conn, rows)
 
 
 def _insert_tools(conn, rows: list) -> None:

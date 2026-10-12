@@ -22,11 +22,35 @@
 
 Tally is a Claude Code **plugin**. It consists of slash commands, hooks, and a Python package that uses only the standard library. The plugin never calls a model. It never contacts the network, except for the dashboard, which listens on localhost. It reads only the transcripts Claude Code already writes.
 
+## Agents
+
+The data model, the reports, the todos and the projects are the same for every agent. Each agent has its own way in (events) and its own transcript reader:
+
+| | Claude Code | Codex | pi |
+|---|---|---|---|
+| integration | plugin: `hooks/hooks.json`, `commands/`, skill | `~/.codex/hooks.json` (merged) and skill in `~/.agents/skills` | extension `~/.pi/agent/extensions/tally.ts` and skill |
+| commands | `/tally:<cmd>`, blocked by `UserPromptSubmit` | `tally:<cmd>` prompt, blocked by `UserPromptSubmit` | `pi.registerCommand("tally")` and an `input` handler for `tally:<cmd>` |
+| transcript | `~/.claude/projects/…/<session>.jsonl` plus `subagents/` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, plus subagent threads | `~/.pi/agent/sessions/--<cwd>--/*.jsonl` |
+| usage | `message.usage` per response | `token_count`: delta of the cumulative `total_token_usage` | `message.usage` (with pi's own cost), tool-result `usage` (nested subagents), `usage`/compaction entries |
+| prompt id | `promptId` on user lines | `turn_id` (`turn_started`, `turn_context`) | the user message's entry id |
+| cost | priced per call from the price table, reconciled with `cost-state` | priced at OpenAI list prices (notional with ChatGPT plans) | as reported by pi |
+
+- **Readers:**
+  - `ingest.py` (Claude Code);
+  - `adapters.py` (pi, and the dispatch to the other readers);
+  - `codex.py`.
+- **Reader state:** a reader can carry state from one read to the next (`files.state`). Codex needs this because its counters are cumulative. When a task starts mid-session, the reader starts from the last total in the file, not from zero.
+- **Agent per session:** `sessions.agent` records which agent a session belongs to.
+- **Reported cost:** `usage.cost` holds the cost an agent reported itself. It wins over the price table.
+
 ## Components
 
 | path | role |
 |---|---|
-| `plugin/.claude-plugin/plugin.json` | Plugin manifest (name `tally`, so commands are `/tally:*`). |
+| `plugin/.claude-plugin/plugin.json` | Claude Code plugin manifest (name `tally`, so commands are `/tally:*`). |
+| `plugin/agents/pi/tally.ts` | pi extension: events → `tally hook --agent pi`, the `/tally` command, the footer status. |
+| `tally/adapters.py`, `tally/codex.py` | Transcript readers for pi and Codex. |
+| `tally/installer.py` | `tally install` / `uninstall` for Claude Code, Codex and pi. |
 | `plugin/hooks/hooks.json` | Hook registrations. Every hook runs `python3 bin/tally hook <Event>`. |
 | `plugin/commands/*.md` | Slash command definitions. The hook answers them. Their bodies are only a fallback that runs the CLI when hooks are disabled. |
 | `plugin/bin/tally` | Launcher. `hook` goes straight to `tally.hooks`, without argparse. Everything else goes to `tally.cli`. |

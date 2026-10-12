@@ -63,17 +63,18 @@ def task_windows(conn, task) -> List[Tuple[str, float, float]]:
 
 def touch_session(conn, session_id: str, transcript_path: Optional[str] = None,
                   cwd: Optional[str] = None, claude_pid: Optional[int] = None,
-                  project: Optional[str] = None) -> None:
+                  project: Optional[str] = None, agent: Optional[str] = None) -> None:
     now = time.time()
     conn.execute(
-        "INSERT INTO sessions(session_id, transcript_path, cwd, claude_pid, first_seen, last_seen, project) "
-        "VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
+        "INSERT INTO sessions(session_id, transcript_path, cwd, claude_pid, first_seen, last_seen, project, agent) "
+        "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
+        "agent = COALESCE(excluded.agent, sessions.agent), "
         "transcript_path = COALESCE(excluded.transcript_path, sessions.transcript_path), "
         "cwd = COALESCE(excluded.cwd, sessions.cwd), "
         "claude_pid = COALESCE(excluded.claude_pid, sessions.claude_pid), "
         "project = COALESCE(excluded.project, sessions.project), "
         "last_seen = excluded.last_seen",
-        (session_id, transcript_path, cwd, claude_pid, now, now, project),
+        (session_id, transcript_path, cwd, claude_pid, now, now, project, agent),
     )
 
 
