@@ -170,7 +170,7 @@ tally doctor
 tally export --format csv -o ~/Desktop/claude-tasks.csv
 
 # what did a past session cost, including subagents? (no task needed)
-tally session 282bb40a-4829-48fe-b490-d8f1883b960f
+tally session <session-id>        # ids: ls ~/.claude/projects/*/
 
 # the five most expensive tasks
 tally list --all --json | python3 -c "import json,sys; r=json.load(sys.stdin); [print(t['id'], round(t['cost'],2), t['name']) for t in sorted(r, key=lambda t: -t['cost'])[:5]]"
