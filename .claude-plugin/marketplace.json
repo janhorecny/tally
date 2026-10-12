@@ -1,0 +1,20 @@
+{
+  "name": "task-counter",
+  "owner": {
+    "name": "Galton",
+    "email": "office@galton.sk"
+  },
+  "metadata": {
+    "description": "Local marketplace for task-counter: per-task token and time tracking for Claude Code.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "task",
+      "source": "./plugin",
+      "description": "Track tokens and time per task, including subagents and workflows. Local SQLite, zero-token commands.",
+      "version": "0.1.0",
+      "keywords": ["tokens", "usage", "cost", "time-tracking", "subagents", "workflows"]
+    }
+  ]
+}

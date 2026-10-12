@@ -1,0 +1,10 @@
+{
+  "name": "task",
+  "version": "0.1.0",
+  "description": "task-counter: track tokens and time per task (main session, subagents, workflows) in a local SQLite database. /task:start, /task:end, /task:status, /task:list, /task:dashboard.",
+  "author": {
+    "name": "Galton",
+    "email": "office@galton.sk"
+  },
+  "keywords": ["tokens", "usage", "cost", "time-tracking", "subagents", "workflows"]
+}

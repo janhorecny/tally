@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Install task-counter into Claude Code as a local plugin.
+#
+#   ./install.sh            install (or update) for your user
+#   ./install.sh --no-cli   skip the ~/.local/bin/task-counter symlink
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MARKETPLACE="task-counter"
+PLUGIN="task@${MARKETPLACE}"
+WITH_CLI=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-cli) WITH_CLI=0 ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+  esac
+done
+
+say() { printf '\033[1m%s\033[0m\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+command -v python3 >/dev/null || die "python3 is required (macOS: xcode-select --install)"
+python3 - <<'EOF' || die "python3 >= 3.8 with sqlite3 is required"
+import sys, sqlite3
+assert sys.version_info >= (3, 8)
+EOF
+command -v claude >/dev/null || die "the claude CLI (Claude Code) is required"
+
+say "1/4 validating plugin"
+claude plugin validate "$REPO" >/dev/null
+claude plugin validate "$REPO/plugin" >/dev/null
+
+say "2/4 registering local marketplace '$MARKETPLACE' -> $REPO"
+if claude plugin marketplace list 2>/dev/null | grep -q "$MARKETPLACE"; then
+  claude plugin marketplace update "$MARKETPLACE" >/dev/null
+else
+  claude plugin marketplace add "$REPO" >/dev/null
+fi
+
+say "3/4 installing plugin $PLUGIN (user scope)"
+if claude plugin list 2>/dev/null | grep -q "$PLUGIN"; then
+  claude plugin update "$PLUGIN" >/dev/null || true
+else
+  claude plugin install "$PLUGIN" --scope user >/dev/null
+fi
+
+if [ "$WITH_CLI" = 1 ]; then
+  say "4/4 linking CLI ~/.local/bin/task-counter"
+  mkdir -p "$HOME/.local/bin"
+  chmod +x "$REPO/plugin/bin/task-counter"
+  ln -sf "$REPO/plugin/bin/task-counter" "$HOME/.local/bin/task-counter"
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) echo "   note: add ~/.local/bin to PATH to use 'task-counter' directly" ;;
+  esac
+else
+  say "4/4 skipping CLI symlink"
+fi
+
+python3 "$REPO/plugin/bin/task-counter" doctor | sed 's/^/   /'
+cat <<'EOF'
+
+Installed. Restart Claude Code (or run /reload-plugins in an open session), then:
+
+  /task:start Fix the login bug     start tracking (zero tokens)
+  /task:new <prompt>                start a task and send <prompt> to Claude
+  /task:status                      live tokens / cost / time incl. subagents & workflows
+  /task:end                         final report
+  /task:list   /task:dashboard      history and the local web dashboard
+EOF

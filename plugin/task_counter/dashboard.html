@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>task-counter</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --hover: rgba(11,11,11,0.04);
+  --select: rgba(42,120,214,0.10);
+  --series-1: #2a78d6;  /* input        */
+  --series-2: #eb6834;  /* output       */
+  --series-3: #1baf7a;  /* cache write  */
+  --series-4: #eda100;  /* cache read   */
+  --seq: #2a78d6;       /* token share (single hue, magnitude) */
+  --seq-track: #e1e0d9;
+  --good: #0ca30c;
+  --muted-status: #898781;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7;
+    --text-muted: #898781; --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+    --hover: rgba(255,255,255,0.05); --select: rgba(57,135,229,0.18);
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --seq: #3987e5; --seq-track: #2c2c2a;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7;
+  --text-muted: #898781; --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+  --hover: rgba(255,255,255,0.05); --select: rgba(57,135,229,0.18);
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --seq: #3987e5; --seq-track: #2c2c2a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+.viz-root { background: var(--page); color: var(--text-primary); min-height: 100vh; }
+.num { font-variant-numeric: tabular-nums; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--border);
+  background: var(--surface-1); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+header .sub { color: var(--text-muted); font-size: 12px; }
+header .spacer { flex: 1; }
+button, select { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { background: var(--hover); }
+main { display: grid; grid-template-columns: minmax(320px, 400px) 1fr; gap: 20px; padding: 20px 24px; align-items: start; }
+@media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; }
+.card > h2, .section-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: none;
+  margin: 0; padding: 14px 16px 8px; letter-spacing: .02em; }
+.tasklist { max-height: calc(100vh - 110px); overflow: auto; }
+.trow { display: grid; grid-template-columns: 14px 1fr auto; gap: 4px 10px; padding: 10px 16px; cursor: pointer;
+  border-top: 1px solid var(--border); }
+.trow:hover { background: var(--hover); }
+.trow.sel { background: var(--select); }
+.trow .name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow .meta { grid-column: 2 / 4; color: var(--text-muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+.trow .tok { text-align: right; font-weight: 600; }
+.dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; background: var(--muted-status); }
+.dot.active { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px;
+  border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.badge .dot { margin: 0; }
+#detail { min-width: 0; }
+.empty { color: var(--text-muted); padding: 40px; text-align: center; }
+.dhead { padding: 18px 20px 6px; }
+.dhead h2 { font-size: 20px; margin: 0 0 6px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+.dhead .line { color: var(--text-secondary); font-size: 13px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.prompt { margin: 10px 20px 0; padding: 10px 12px; border-left: 3px solid var(--baseline); color: var(--text-secondary);
+  white-space: pre-wrap; max-height: 120px; overflow: auto; font-size: 13px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--border);
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-top: 16px; }
+.tile { background: var(--surface-1); padding: 14px 16px; }
+.tile .label { color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 24px; font-weight: 650; margin-top: 2px; }
+.tile .hint { color: var(--text-muted); font-size: 12px; }
+.section { padding: 4px 20px 18px; }
+.section-title { padding: 16px 0 10px; }
+.stack { display: flex; height: 14px; gap: 2px; border-radius: 4px; overflow: hidden; background: var(--surface-1); }
+.stack div { height: 100%; min-width: 2px; cursor: default; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 10px; font-size: 13px; }
+.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend .v { font-weight: 600; margin-left: 4px; }
+.legend .p { color: var(--text-muted); margin-left: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: right; font-weight: 600; color: var(--text-muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--baseline); white-space: nowrap; }
+td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td.lbl { white-space: normal; max-width: 0; width: 42%; }
+td.lbl .t { display: flex; align-items: center; gap: 6px; min-width: 0; }
+td.lbl .t span.txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tr.tot td { font-weight: 650; border-top: 1px solid var(--baseline); border-bottom: none; }
+tr:hover td { background: var(--hover); }
+.kind { font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; flex: none; }
+.tw { width: 16px; flex: none; color: var(--text-muted); cursor: pointer; user-select: none; text-align: center; }
+.share { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.share .track { width: 110px; height: 8px; background: var(--seq-track); border-radius: 4px; overflow: hidden; }
+.share .bar { height: 100%; background: var(--seq); border-radius: 0 4px 4px 0; }
+.share .pc { width: 44px; color: var(--text-secondary); }
+.muted { color: var(--text-muted); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+@media (max-width: 1200px) { .two { grid-template-columns: 1fr; } }
+.prompts li { margin: 0 0 8px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompts time { color: var(--text-muted); font-size: 12px; margin-right: 8px; }
+#tip { position: fixed; pointer-events: none; z-index: 20; background: var(--surface-1); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  display: none; max-width: 320px; }
+#tip b { display: block; margin-bottom: 2px; }
+.note { color: var(--text-muted); font-size: 12px; padding: 0 20px 18px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <header>
+    <h1>task-counter</h1>
+    <span class="sub" id="sub">tokens &amp; time per Claude Code task</span>
+    <span class="spacer"></span>
+    <span class="sub num" id="updated"></span>
+    <select id="theme" aria-label="Theme">
+      <option value="">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
+    </select>
+    <button id="refresh">Refresh</button>
+  </header>
+  <main>
+    <section class="card tasklist" aria-label="Tasks">
+      <h2>Tasks</h2>
+      <div id="tasks"><div class="empty">Loading…</div></div>
+    </section>
+    <section class="card" id="detail"><div class="empty">Select a task.</div></section>
+  </main>
+  <div id="tip" role="tooltip"></div>
+</div>
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTok = n => n == null ? "–" : n < 1e3 ? String(n) : n < 1e6 ? (n/1e3).toFixed(1) + "k" : n < 1e9 ? (n/1e6).toFixed(2) + "M" : (n/1e9).toFixed(2) + "B";
+const fmtFull = n => (n ?? 0).toLocaleString();
+const fmtCost = (c, partial) => c == null ? "–" : (c >= 0.995 || c === 0 ? "$" + c.toFixed(2) : "$" + c.toFixed(3)) + (partial ? "+" : "");
+function fmtDur(s) {
+  if (s == null) return "–";
+  s = Math.round(s);
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s/60) + "m " + String(s%60).padStart(2,"0") + "s";
+  if (s < 86400) return Math.floor(s/3600) + "h " + String(Math.floor(s%3600/60)).padStart(2,"0") + "m";
+  return Math.floor(s/86400) + "d " + String(Math.floor(s%86400/3600)).padStart(2,"0") + "h";
+}
+const fmtWhen = ts => ts ? new Date(ts*1000).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"}) : "–";
+const pct = (a, b) => b ? (a / b * 100) : 0;
+
+// ---------------------------------------------------------------- theme
+const themeSel = $("#theme");
+themeSel.value = localStorage.getItem("tc-theme") || "";
+function applyTheme() {
+  const v = themeSel.value;
+  if (v) document.documentElement.setAttribute("data-theme", v); else document.documentElement.removeAttribute("data-theme");
+  localStorage.setItem("tc-theme", v);
+}
+themeSel.onchange = applyTheme; applyTheme();
+
+// ---------------------------------------------------------------- tooltip
+const tip = $("#tip");
+document.addEventListener("mousemove", e => {
+  const t = e.target.closest("[data-tip]");
+  if (!t) { tip.style.display = "none"; return; }
+  tip.innerHTML = t.getAttribute("data-tip");
+  tip.style.display = "block";
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+});
+
+// ---------------------------------------------------------------- state
+let selected = Number(location.hash.slice(1)) || null;
+let tasks = [];
+const collapsed = new Set();
+const seenKeys = new Set();       // nodes with many children start collapsed
+let lastDetail = null;
+
+async function getJSON(url) {
+  const r = await fetch(url, {cache: "no-store"});
+  if (!r.ok) throw new Error(r.status + " " + url);
+  return r.json();
+}
+
+async function loadTasks() {
+  const d = await getJSON("/api/tasks?limit=200");
+  tasks = d.tasks;
+  if (!selected && tasks.length) selected = tasks[0].id;
+  renderTasks();
+  $("#updated").textContent = "updated " + new Date().toLocaleTimeString();
+}
+
+function renderTasks() {
+  const el = $("#tasks");
+  if (!tasks.length) {
+    el.innerHTML = '<div class="empty">No tasks yet.<br>In Claude Code run <b>/task:start &lt;name&gt;</b> or <b>/task:new &lt;prompt&gt;</b>.</div>';
+    return;
+  }
+  el.innerHTML = tasks.map(t => `
+    <div class="trow ${t.id === selected ? "sel" : ""}" data-id="${t.id}" role="button" tabindex="0">
+      <span class="dot ${t.status === "active" ? "active" : ""}" title="${t.status}"></span>
+      <span class="name" title="${esc(t.name)}">#${t.id} · ${esc(t.name)}</span>
+      <span class="tok num">${fmtTok(t.total)}</span>
+      <span class="meta num"><span>${t.status === "active" ? "active" : "ended"}</span><span>${fmtWhen(t.started_at)}</span>
+        <span>wall ${fmtDur(t.wall_s)}</span><span>active ${fmtDur(t.active_s)}</span><span>${fmtCost(t.cost, t.cost_partial)}</span></span>
+    </div>`).join("");
+  el.querySelectorAll(".trow").forEach(r => {
+    const go = () => { selected = Number(r.dataset.id); location.hash = selected; renderTasks(); loadDetail(); };
+    r.onclick = go; r.onkeydown = e => { if (e.key === "Enter") go(); };
+  });
+}
+
+async function loadDetail() {
+  if (!selected) return;
+  try {
+    const rep = await getJSON("/api/tasks/" + selected);
+    lastDetail = rep;
+    renderDetail(rep);
+  } catch (e) {
+    $("#detail").innerHTML = '<div class="empty">Task not found.</div>';
+  }
+}
+
+function tile(label, value, hint, tipText) {
+  return `<div class="tile"${tipText ? ` data-tip="${esc(tipText)}"` : ""}><div class="label">${label}</div>
+    <div class="value num">${value}</div><div class="hint num">${hint || "&nbsp;"}</div></div>`;
+}
+
+function renderDetail(rep) {
+  const t = rep.task, tm = rep.time, tot = rep.totals;
+  const active = t.status === "active";
+  const agents = rep.by_type.filter(x => x.agent_type !== "main").reduce((a, x) => a + x.agents, 0);
+  const comp = [
+    ["Input", tot.input, "--series-1", "uncached input tokens"],
+    ["Output", tot.output, "--series-2", "generated tokens (incl. thinking)"],
+    ["Cache write", tot.cache_write, "--series-3", "tokens written to the prompt cache"],
+    ["Cache read", tot.cache_read, "--series-4", "tokens served from the prompt cache"],
+  ];
+  const h = [];
+  h.push(`<div class="dhead"><h2>#${t.id} · ${esc(t.name)}</h2>
+    <div class="line"><span class="badge"><span class="dot ${active ? "active" : ""}"></span>${active ? "active" : "ended"}</span>
+    <span class="num">${fmtWhen(t.started_at)}${t.ended_at ? " → " + fmtWhen(t.ended_at) : ""}</span>
+    ${t.cwd ? `<span class="muted">${esc(t.cwd)}</span>` : ""}
+    <span class="muted">${t.sessions.length} session${t.sessions.length === 1 ? "" : "s"} · ${t.prompt_count} prompt${t.prompt_count === 1 ? "" : "s"}</span></div></div>`);
+  if (t.initial_prompt) h.push(`<div class="prompt">${esc(t.initial_prompt)}</div>`);
+  h.push(`<div class="tiles">
+    ${tile("Total tokens", fmtTok(tot.total), fmtFull(tot.total), "input + output + cache write + cache read")}
+    ${tile("Output tokens", fmtTok(tot.output), fmtFull(tot.output))}
+    ${tile("Est. cost", fmtCost(tot.cost, tot.cost_partial), "at API list price", "Estimate from token counts and list prices; subscription plans are not billed per token.")}
+    ${tile("Wall time", fmtDur(tm.wall_s), active ? "running" : "start → end")}
+    ${tile("Active time", fmtDur(tm.active_s), tm.turns + " turn" + (tm.turns === 1 ? "" : "s"), "time Claude was working on turns in this task")}
+    ${tile("API calls", fmtFull(tot.calls), agents + " agent" + (agents === 1 ? "" : "s"))}
+  </div>`);
+
+  // composition
+  if (tot.total) {
+    h.push(`<div class="section"><div class="section-title">Token composition</div>
+      <div class="stack" role="img" aria-label="Token composition">${comp.filter(c => c[1] > 0).map(c =>
+        `<div style="flex:${c[1]};background:var(${c[2]})" data-tip="<b>${c[0]}</b>${fmtFull(c[1])} tokens · ${pct(c[1], tot.total).toFixed(1)}%<br><span class=muted>${c[3]}</span>"></div>`).join("")}</div>
+      <div class="legend">${comp.map(c => `<span><span class="sw" style="background:var(${c[2]})"></span>${c[0]}<span class="v num">${fmtTok(c[1])}</span><span class="p num">${pct(c[1], tot.total).toFixed(1)}%</span></span>`).join("")}</div></div>`);
+  }
+
+  // breakdown tree
+  h.push(`<div class="section"><div class="section-title">Breakdown by agent, subagent and workflow</div>
+    <table><thead><tr><th>agent</th><th>share of tokens</th><th>tokens</th><th>output</th><th>cost</th><th>time</th><th>calls</th></tr></thead><tbody>`);
+  const rows = [];
+  const kindLabel = {main: "main", subagent: "subagent", fork: "fork", workflow: "workflow", phase: "phase", "workflow-agent": "agent"};
+  function walk(n, depth) {
+    const vals = n.kind === "main" ? n.own : n.rollup;
+    const kids = n.children || [];
+    if (!seenKeys.has(n.key)) { seenKeys.add(n.key); if (kids.length > 12 && (n.kind === "phase" || n.kind === "workflow")) collapsed.add(n.key); }
+    const open = !collapsed.has(n.key);
+    let label = n.kind === "main" ? n.label + " (own)" :
+      n.kind === "workflow" ? `${n.label} · ${n.agent_count} agents` :
+      n.kind === "phase" ? `${n.label} · ${n.agent_count}` :
+      (n.description && n.description !== n.agent_type ? `${n.agent_type} · ${n.description}` : (n.agent_type || n.label));
+    const share = pct(vals.total, tot.total);
+    const tipText = `<b>${esc(label)}</b>${fmtFull(vals.total)} tokens · ${share.toFixed(1)}% of task<br>in ${fmtTok(vals.input)} · out ${fmtTok(vals.output)} · cache write ${fmtTok(vals.cache_write)} · cache read ${fmtTok(vals.cache_read)}` +
+      (n.models && n.models.length ? `<br><span class=muted>${esc(n.models.join(", "))}</span>` : "") +
+      (n.kind !== "main" && n.own && n.own.calls && kids.length ? `<br><span class=muted>own ${fmtTok(n.own.total)} · with children ${fmtTok(n.rollup.total)}</span>` : "");
+    rows.push(`<tr><td class="lbl"><div class="t" style="padding-left:${depth * 18}px">
+        <span class="tw" data-key="${esc(n.key)}">${kids.length ? (open ? "▾" : "▸") : ""}</span>
+        <span class="kind">${kindLabel[n.kind] || n.kind}</span><span class="txt" title="${esc(label)}">${esc(label)}</span></div></td>
+      <td><div class="share" data-tip="${esc(tipText)}"><div class="track"><div class="bar" style="width:${Math.max(share, vals.total ? 1 : 0)}%"></div></div><span class="pc num">${share.toFixed(1)}%</span></div></td>
+      <td class="num">${fmtTok(vals.total)}</td><td class="num">${fmtTok(vals.output)}</td><td class="num">${fmtCost(vals.cost, vals.cost_partial)}</td>
+      <td class="num">${fmtDur(n.duration_s)}</td><td class="num">${fmtFull(vals.calls)}</td></tr>`);
+    if (open) kids.forEach(c => walk(c, depth + 1));
+  }
+  rep.tree.forEach(n => walk(n, 0));
+  rows.push(`<tr class="tot"><td>Total</td><td></td><td class="num">${fmtTok(tot.total)}</td><td class="num">${fmtTok(tot.output)}</td>
+    <td class="num">${fmtCost(tot.cost, tot.cost_partial)}</td><td class="num">${fmtDur(tm.wall_s)}</td><td class="num">${fmtFull(tot.calls)}</td></tr>`);
+  h.push(rows.join(""), "</tbody></table></div>");
+
+  // models + types
+  const simple = (title, head, items, rowFn) => items.length ? `<div><div class="section-title">${title}</div><table><thead><tr>${head.map(x => `<th>${x}</th>`).join("")}</tr></thead><tbody>${items.map(rowFn).join("")}</tbody></table></div>` : "";
+  h.push(`<div class="section two">` +
+    simple("By model", ["model", "tokens", "input", "output", "cache write", "cache read", "cost"], rep.by_model, m =>
+      `<tr><td>${esc(m.model)}</td><td class="num">${fmtTok(m.total)}</td><td class="num">${fmtTok(m.input)}</td><td class="num">${fmtTok(m.output)}</td><td class="num">${fmtTok(m.cache_write)}</td><td class="num">${fmtTok(m.cache_read)}</td><td class="num">${fmtCost(m.cost, m.cost_partial)}</td></tr>`) +
+    simple("By agent type", ["type", "agents", "tokens", "output", "cost"], rep.by_type, x =>
+      `<tr><td>${esc(x.agent_type)}</td><td class="num">${x.agents}</td><td class="num">${fmtTok(x.total)}</td><td class="num">${fmtTok(x.output)}</td><td class="num">${fmtCost(x.cost, x.cost_partial)}</td></tr>`) +
+    `</div>`);
+
+  if (rep.workflows.length) {
+    h.push(`<div class="section">` + simple("Workflows", ["workflow", "agents", "tokens", "output", "cost", "time", "phases"], rep.workflows, w =>
+      `<tr><td title="${esc(w.summary || "")}">${esc(w.name)} <span class="muted">${esc(w.run_id)}</span></td><td class="num">${w.agents}</td><td class="num">${fmtTok(w.total)}</td><td class="num">${fmtTok(w.output)}</td><td class="num">${fmtCost(w.cost, w.cost_partial)}</td><td class="num">${fmtDur(w.duration_s)}</td>
+       <td class="muted" style="white-space:normal">${w.phases.map(p => `${esc(p.phase)} (${p.agents}) ${fmtTok(p.total)}`).join(" · ")}</td></tr>`) + `</div>`);
+  }
+
+  if (rep.prompts && rep.prompts.length) {
+    h.push(`<div class="section"><div class="section-title">Prompts (${rep.prompts.length})</div><ol class="prompts">${
+      rep.prompts.map(p => `<li><time class="num">${fmtWhen(p.ts)}</time>${esc(p.prompt.length > 600 ? p.prompt.slice(0, 600) + "…" : p.prompt)}</li>`).join("")}</ol></div>`);
+  }
+  if (t.end_note) h.push(`<div class="note">Note: ${esc(t.end_note)}</div>`);
+  h.push(`<div class="note">Token counts come from Claude Code transcripts (main session, subagents, workflow agents). Cost is an estimate at API list price.</div>`);
+  $("#detail").innerHTML = h.join("");
+  $("#detail").querySelectorAll(".tw[data-key]").forEach(el => el.onclick = () => {
+    const k = el.dataset.key; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); renderDetail(lastDetail);
+  });
+}
+
+async function refreshAll() {
+  try { await loadTasks(); await loadDetail(); }
+  catch (e) { $("#updated").textContent = "server not reachable"; }
+}
+$("#refresh").onclick = refreshAll;
+window.addEventListener("hashchange", () => { const id = Number(location.hash.slice(1)); if (id && id !== selected) { selected = id; renderTasks(); loadDetail(); } });
+refreshAll();
+setInterval(() => {
+  const cur = tasks.find(t => t.id === selected);
+  if (document.hidden) return;
+  if (tasks.some(t => t.status === "active")) loadTasks().catch(() => {});
+  if (cur && cur.status === "active") loadDetail();
+}, 5000);
+</script>
+</body>
+</html>
