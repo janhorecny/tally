@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg">
+    <img alt="Tally: per-task token and time tracking for Claude Code" src="docs/assets/banner-light.svg" width="100%">
+  </picture>
+</p>
+
 # Tally
 
 **Per-task token and time tracking for Claude Code.** It runs locally with zero dependencies, stores everything in SQLite, and its commands cost no tokens.
@@ -102,6 +110,7 @@ CLI: `tally list | status | show | end | export | session <id> | dashboard | sta
 python3 -m unittest discover -s tests -v       # 24 end-to-end tests on synthetic transcripts
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
+python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg
 ```
 
 Layout:
