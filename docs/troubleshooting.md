@@ -59,6 +59,16 @@ Only usage written before `/tally:end` is counted. To include the rest, use `/ta
 
 Nothing to do. The task follows the new session ID automatically, because it is the same Claude Code process. For a different terminal, or after a restart, use `/tally:resume <id>`.
 
+## I don't see the todo reminder or the new-project question
+
+- **Headless mode:** both are `systemMessage`s on session start. They appear in interactive Claude Code, but `claude -p` does not print them. The status line shows the same information (`📋 3 todos`, or `Tally: new project · /tally:project …`).
+- **Reminders switched off:** check that `todos.reminder` is `on` (`/tally:settings`).
+- **Project switched off:** check the project is not set to `off` (`/tally:projects`).
+
+## Claude does not update the todo list during a plan
+
+The `tally:todos` skill is loaded on demand. Ask explicitly ("import the plan into tally"), or mention Tally todos in your planning prompt. Also check that `tally` is on PATH (`which tally`). If it isn't, re-run `./install.sh`, or the skill falls back to `python3 "${CLAUDE_PLUGIN_ROOT}/bin/tally"`.
+
 ## Errors
 
 Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/errors.log` with a traceback. Please include that file when reporting a problem.

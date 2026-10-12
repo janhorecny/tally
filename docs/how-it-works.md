@@ -80,6 +80,39 @@ A task counts usage whose timestamp lies inside one of its `task_sessions` inter
 
 An active task's interval is open-ended, so a few milliseconds of clock skew between processes cannot drop usage.
 
+## Prompts, tools and projects
+
+### Per-prompt attribution
+
+- **The id:** every user prompt gets an id (`prompt_id` in the `UserPromptSubmit` hook payload). Claude Code writes the same id as `promptId` on the transcript's user lines: the prompt itself and every tool result of its turn.
+- **Assignment:** API responses carry no id. Each one is assigned to the last `promptId` seen in the same file. That id is remembered per file across incremental reads, and taken from the file's tail when history was skipped.
+- **Subagents:** a subagent's first line carries the id of the prompt that spawned it, so its calls count towards that prompt.
+- **Automatic turns:** ids that belong to no prompt you typed come from turns Claude Code starts by itself, such as background-agent notifications. They are shown as *automatic turns*.
+
+### Tool calls
+
+With `log.depth = calls`, every `tool_use` block in an assistant response becomes a `tool_calls` row. Every `tool_result` with `is_error: true` marks its call as failed. Both happen during the same incremental read, so they add no extra I/O.
+
+### Projects
+
+- **Detection:** a project is the git repository a directory belongs to. For a worktree it is the main repository. This is detected without a subprocess, by walking up to `.git`.
+- **New projects:**
+  - **The question:** on `SessionStart` in an unknown project, Tally registers it as `ask` and shows the setup question as a `systemMessage`. It is shown to the user and not added to the model's context.
+  - **Headless mode:** `claude -p` does not display system messages. The status line hint covers that case.
+- **Track mode:** `Stop`, `SubagentStop`, `PreCompact` and `SessionEnd` read the session's transcripts even when no task is running. That gives the project's overall usage, and task statistics stay exact on top of it.
+
+### Working with skills (superpowers and others)
+
+The plugin includes a model-invocable skill, `tally:todos` (`plugin/skills/todos/SKILL.md`). Only its one-line description sits in context, about 40 tokens. The body loads only when the skill is used.
+
+The skill teaches Claude to use the `tally todo` CLI:
+
+- `import` a written plan;
+- `next` to find what to do next;
+- `mark … doing` and `done` around each task.
+
+Superpowers' `writing-plans`, `executing-plans` and `subagent-driven-development` therefore keep the Tally board current without any extra commands from you.
+
 ## The report
 
 - **Totals:** a sum over all `usage` rows in the window. Total tokens = input + output + cache read + cache write.

@@ -4,16 +4,29 @@ Tally works with no configuration. Everything optional lives in one JSON file an
 
 ## `~/.claude/tally/config.json`
 
-Edit it by hand, or use the CLI. The CLI parses values as JSON and falls back to a plain string:
+Change settings in any of three ways. All of them validate the value:
+
+- `/tally:settings <key> <value>` inside Claude Code;
+- `tally settings <key> <value>`;
+- the dashboard's *Settings* tab.
+
+`tally config` shows or sets raw keys, including `pricing`.
 
 ```bash
-tally config                          # show the effective config and the file path
-tally config auto_start session       # set a key
-tally config dashboard_port 8766
+tally settings                          # every setting, its value and allowed values
+tally settings log.depth calls
+tally settings log.prompts off
+tally config pricing                    # raw access
 ```
+
+Per-project tracking modes (`track`, `tasks`, `off`) are stored in the database, not in this file. Set them with `/tally:project <mode>`, `tally project --set <mode>`, or the dashboard's *Projects* tab.
 
 | key | default | meaning |
 |---|---|---|
+| `log.depth` | `"prompts"` | **Logging depth.** `summary`: task totals and the agent tree. `prompts`: adds the per-prompt breakdown. `calls`: adds tool-call statistics (each tool, how often, errors). |
+| `log.prompts` | `"full"` | **Logging type for prompt text.** `full`, `preview` (first 300 characters) or `off` (never stored; prompts are still counted). |
+| `todos.reminder` | `true` | Show the project's open todos when a session starts. |
+| `todos.reminder_limit` | `5` | How many todos the reminder lists. |
 | `auto_start` | `"off"` | `"off"`: tasks start only with `/tally:start` or `/tally:new`. `"session"`: the first prompt of every new session starts a task named after that prompt. |
 | `dashboard_host` | `"127.0.0.1"` | Interface the dashboard binds to. Keep it on localhost, because the API has no authentication. |
 | `dashboard_port` | `8765` | Port of the dashboard. |

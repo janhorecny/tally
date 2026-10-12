@@ -46,14 +46,13 @@ Task #3 · Fix login redirect loop   [■ ended]
 
 - **Zero-token commands.** `/tally:*` is answered inside a hook, so the model is never called.
 - **Everything is attributed.** The main agent, subagents, nested forks, background agents, and workflow runs with their phases and agents, as a tree with subtotals.
-- **Accurate.** Tokens come from Claude Code's own transcripts, one row per API call. Claude Code's internal calls that never reach a transcript (background-agent summaries, prompt suggestions, titles) are reconciled from its session cost record. The result matches Claude Code's own cost to within 2% on 40 of 40 validated sessions.
-- **Time.** Wall time, active time (Claude working, overlaps counted once), and per-agent durations.
-- **Robust.**
-  - Survives `/clear`.
-  - A task can span several sessions (`/tally:resume`), and parallel terminals work.
-  - Reports are frozen when a task ends, so they outlive transcript cleanup.
-- **Fast.** About 33 ms per hook, and task start skips earlier history. A 300 MB session with 526 agents reports in 75 ms.
-- **Local dashboard, status line, CLI, CSV/JSON export.**
+- **Per-prompt statistics.** Tokens, cost, time, subagents and tool calls for every prompt. Attribution is exact, because each API call is linked to the prompt that caused it.
+- **Todo list.** Quick capture with `@project`, priority and due date. `/tally:take` and `/tally:do` pick a todo up and measure what it costs, and reminders appear at session start. Plans from superpowers and similar tools are imported, and a skill lets Claude keep the board current.
+- **Projects.** The first time you open a repository, Tally asks whether to track it. You then get overall statistics per project (7 and 30 days, a daily series, models, tasks, todos).
+- **Accurate.** Tokens come from Claude Code's own transcripts. Its internal calls that never reach a transcript are reconciled from its session cost record. The result matches Claude Code's own cost to within 2% on 40 of 40 validated sessions.
+- **Your choice of detail.** `log.depth` is `summary`, `prompts` or `calls`. `log.prompts` is `full`, `preview` or `off`, for privacy.
+- **Robust and fast.** It survives `/clear`, multiple sessions and parallel terminals, and takes about 33 ms per hook. Reports are frozen when a task ends.
+- **Dashboard.** A local dashboard with tasks, a todo board, projects and settings. There is also a status line segment, a CLI, and CSV/JSON export.
 
 ## Install
 
@@ -77,26 +76,34 @@ Run it again to update. `./uninstall.sh` removes everything except your history;
 
 ## Commands
 
-| command | |
+| tasks | |
 |---|---|
 | `/tally:start [name]` | Start a task in this session. The next prompt is stored as its initial prompt. |
 | `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude. |
-| `/tally:status [id]` | Live totals. |
+| `/tally:status [id]` · `/tally:stats [id]` | Live totals · detailed statistics (per prompt, tools, averages). |
 | `/tally:end [id] [note]` | End the task and show the final report. |
-| `/tally:list [n\|all]` | Recent tasks. |
-| `/tally:show <id>` | Full report of any task. |
-| `/tally:resume <id>` | Count task `#id` in this session too, or reopen an ended task. |
-| `/tally:rename [id] <name>` | Rename a task. |
-| `/tally:dashboard` | Local web dashboard (http://127.0.0.1:8765). |
-| `/tally:help` | Show the help text. |
+| `/tally:list` · `/tally:show <id>` · `/tally:resume <id>` · `/tally:rename` | History, any report, continue elsewhere, rename. |
 
-CLI: `tally list | status | show | end | export | session <id> | dashboard | statusline | config | doctor`, plus the remaining subcommands listed in [usage](docs/usage.md#cli).
+| todos | |
+|---|---|
+| `/tally:todo <text>` | Add one: `@project`, `!`/`!!`/`!!!`, `due:fri\|zajtra\|+3d\|20.10.`, ` -- notes`. |
+| `/tally:todos [project\|all\|done]` | Open todos of this project. |
+| `/tally:take <id>` · `/tally:do <id>` | Pick up (measuring starts) · pick up and let Claude work on it. |
+| `/tally:done [id]` · `/tally:mark <id> <status>` | Finish it (ends its task) · `todo`, `doing`, `blocked`, `done` or `dropped`. |
+
+| projects and more | |
+|---|---|
+| `/tally:project [track\|tasks\|off]` · `/tally:projects` | Overall statistics of this project, or set its mode · all projects. |
+| `/tally:settings [key value]` | `log.depth`, `log.prompts`, `todos.reminder`, `auto_start` … |
+| `/tally:dashboard` · `/tally:help` | Local dashboard (http://127.0.0.1:8765) · help. |
+
+The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | settings | export | session <id> | dashboard | statusline | doctor`. See [usage](docs/usage.md#cli).
 
 ## Documentation
 
 | | |
 |---|---|
-| [Usage guide](docs/usage.md) | Scenarios, reading the report, dashboard, status line, CLI recipes. |
+| [Usage guide](docs/usage.md) | Scenarios, todos, projects, detailed stats, settings, reading the report, dashboard, status line, CLI recipes. |
 | [How it works](docs/how-it-works.md) | Architecture, hooks, transcript ingest, attribution, time, cost, reconciliation, performance, security. |
 | [Configuration](docs/configuration.md) | `config.json`, auto-start, pricing overrides, environment variables. |
 | [Data model](docs/data-model.md) | SQLite schema and example queries. |
@@ -107,7 +114,7 @@ CLI: `tally list | status | show | end | export | session <id> | dashboard | sta
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # 24 end-to-end tests on synthetic transcripts
+python3 -m unittest discover -s tests -v       # 36 end-to-end tests on synthetic transcripts
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg

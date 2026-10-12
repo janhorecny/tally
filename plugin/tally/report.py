@@ -83,6 +83,9 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
     agent_models: Dict[tuple, set] = {}
     active_ivals: List[tuple] = []
     turn_count = 0
+    per_prompt: Dict[Optional[str], Tot] = {}
+    prompt_agents: Dict[Optional[str], set] = {}
+    prompt_span: Dict[Optional[str], list] = {}
 
     for sid, a, b in windows:
         for r in conn.execute(
@@ -99,6 +102,13 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
             span = agent_span.setdefault(akey, [r["ts"], r["ts"]])
             span[0] = min(span[0], r["ts"])
             span[1] = max(span[1], r["ts"])
+            pid = r["prompt_id"]
+            per_prompt.setdefault(pid, Tot()).add_row(r, c)
+            if r["agent_id"]:
+                prompt_agents.setdefault(pid, set()).add((sid, r["agent_id"]))
+            pspan = prompt_span.setdefault(pid, [r["ts"], r["ts"]])
+            pspan[0] = min(pspan[0], r["ts"])
+            pspan[1] = max(pspan[1], r["ts"])
         ivals = _turn_intervals(conn, sid, a, b)
         # the same turn may be measured twice (transcript turn_duration + hooks)
         n_hook = sum(1 for iv in ivals if iv[2])
@@ -106,11 +116,11 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         active_ivals.extend(ivals)
 
     active_s = _union_length(active_ivals)
+    head = _task_head(conn, task)
     if not detail:
         return {
-            "task": {"id": task["id"], "name": task["name"], "initial_prompt": task["initial_prompt"],
-                     "status": task["status"], "started_at": t0, "ended_at": task["ended_at"],
-                     "cwd": task["cwd"]},
+            "task": dict(head, initial_prompt=task["initial_prompt"], status=task["status"], started_at=t0,
+                         ended_at=task["ended_at"], cwd=task["cwd"]),
             "time": {"wall_s": round(t1 - t0, 3), "active_s": round(active_s, 3), "turns": turn_count},
             "totals": totals.as_dict(),
             "unlogged": None,
@@ -291,16 +301,50 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         sessions = [{"session_id": s, "attached_at": a, "detached_at": b, "reason": "session"} for s, a, b in windows]
         prompt_count = 0
 
-    from . import reconcile
+    from . import reconcile, settings
     unlogged = reconcile.estimate(conn, windows, pricer)
 
+    cfg = paths.load_config()
+    tools = _tool_stats(conn, windows) if settings.depth_at_least("calls", cfg) else None
+    prompt_rows, automatic = _prompt_rows(conn, task, windows, per_prompt, prompt_agents, prompt_span,
+                                          tools, active_ivals)
+    n_prompts = len(prompt_rows) if task["id"] else 0
+    tot_d = totals.as_dict()
+    durations = [p["duration_s"] for p in prompt_rows if p["duration_s"]]
+    stats = {
+        "prompts": n_prompts,
+        "automatic_turns": automatic["turns"] if automatic else 0,
+        "tokens_per_prompt": round(tot_d["total"] / n_prompts) if n_prompts else None,
+        "output_per_prompt": round(tot_d["output"] / n_prompts) if n_prompts else None,
+        "cost_per_prompt": round(tot_d["cost"] / n_prompts, 6) if n_prompts else None,
+        "avg_turn_s": round(sum(durations) / len(durations), 1) if durations else None,
+        "max_turn_s": round(max(durations), 1) if durations else None,
+        "cache_hit_ratio": (round(tot_d["cache_read"] / float(tot_d["input"] + tot_d["cache_read"]
+                                                             + tot_d["cache_write"]), 4)
+                            if (tot_d["input"] + tot_d["cache_read"] + tot_d["cache_write"]) else None),
+        "output_per_active_min": round(tot_d["output"] / (active_s / 60.0)) if active_s >= 1 else None,
+        "subagents": sum(1 for n in nodes.values() if n["kind"] in ("subagent", "fork", "workflow-agent")
+                         and n["own"].calls),
+        "workflows": len(workflows),
+        "models": len(by_model),
+        "tool_calls": sum(t["calls"] for t in tools) if tools is not None else None,
+        "tool_errors": sum(t["errors"] for t in tools) if tools is not None else None,
+        "tools": tools,
+        "automatic": automatic,
+        "depth": settings.get("log.depth", cfg) or "prompts",
+    }
+    if not settings.depth_at_least("prompts", cfg):
+        prompt_rows = None
+
     return {
-        "task": {
-            "id": task["id"], "name": task["name"], "initial_prompt": task["initial_prompt"],
+        "task": dict(head, **{
+            "initial_prompt": task["initial_prompt"],
             "status": task["status"], "started_at": t0, "ended_at": task["ended_at"],
             "cwd": task["cwd"], "created_by": task["created_by"], "end_note": task["end_note"],
             "sessions": sessions, "prompt_count": prompt_count,
-        },
+        }),
+        "prompts": prompt_rows,
+        "stats": stats,
         "time": {"wall_s": round(t1 - t0, 3), "active_s": round(active_s, 3), "turns": turn_count},
         "totals": totals.as_dict(),
         "unlogged": unlogged,
@@ -310,6 +354,77 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         "tree": tree,
         "generated_at": now,
     }
+
+
+def _task_head(conn, task) -> dict:
+    head = {"id": task["id"], "name": task["name"], "project": None, "todo": None}
+    keys = task.keys() if hasattr(task, "keys") else []
+    if "project" in keys:
+        head["project"] = task["project"]
+    if "todo_id" in keys and task["todo_id"]:
+        t = conn.execute("SELECT id, title, status FROM todos WHERE id = ?", (task["todo_id"],)).fetchone()
+        if t:
+            head["todo"] = {"id": t["id"], "title": t["title"], "status": t["status"]}
+    if task["id"]:
+        head["prompt_count"] = conn.execute("SELECT COUNT(*) FROM prompts WHERE task_id = ?",
+                                            (task["id"],)).fetchone()[0]
+    return head
+
+
+def _tool_stats(conn, windows) -> list:
+    tools: Dict[str, list] = {}
+    for sid, a, b in windows:
+        for r in conn.execute("SELECT tool, COUNT(*) AS n, SUM(is_error) AS e FROM tool_calls "
+                              "WHERE session_id = ? AND ts >= ? AND ts <= ? GROUP BY tool", (sid, a, b)):
+            t = tools.setdefault(r["tool"], [0, 0])
+            t[0] += r["n"]
+            t[1] += r["e"] or 0
+    return sorted(({"tool": k, "calls": v[0], "errors": v[1]} for k, v in tools.items()),
+                  key=lambda d: (-d["calls"], d["tool"]))
+
+
+def _prompt_rows(conn, task, windows, per_prompt, prompt_agents, prompt_span, tools, active_ivals):
+    """Per-prompt breakdown. Every API call carries the id of the user prompt
+    that caused it (subagents inherit the prompt that spawned them).
+    Calls of turns Claude started on its own (background-agent notifications)
+    are grouped as 'automatic'."""
+    rows = []
+    known = set()
+    tool_counts: Dict[Optional[str], int] = {}
+    if tools is not None:
+        for sid, a, b in windows:
+            for r in conn.execute("SELECT prompt_id, COUNT(*) AS n FROM tool_calls WHERE session_id = ? "
+                                  "AND ts >= ? AND ts <= ? GROUP BY prompt_id", (sid, a, b)):
+                tool_counts[r["prompt_id"]] = tool_counts.get(r["prompt_id"], 0) + r["n"]
+    by_prompt_turns: Dict[str, list] = {}
+    for iv in active_ivals:
+        if len(iv) > 3 and iv[3]:
+            by_prompt_turns.setdefault(iv[3], []).append(iv)
+    if task["id"]:
+        for i, p in enumerate(conn.execute("SELECT * FROM prompts WHERE task_id = ? ORDER BY ts, id",
+                                           (task["id"],)).fetchall(), 1):
+            pid = p["prompt_id"]
+            if pid:
+                known.add(pid)
+            tot = per_prompt.get(pid) if pid else None
+            if pid in by_prompt_turns:
+                dur = _union_length(by_prompt_turns[pid])
+            elif pid in prompt_span:
+                dur = max(0.0, prompt_span[pid][1] - p["ts"])
+            else:
+                dur = 0.0
+            rows.append(dict(
+                (tot or Tot()).as_dict(), index=i, ts=p["ts"], prompt=p["prompt"], prompt_id=pid,
+                agents=len(prompt_agents.get(pid, ())) if pid else 0, duration_s=round(dur, 1),
+                tool_calls=tool_counts.get(pid) if tools is not None and pid else None))
+    auto = Tot()
+    auto_ids = [pid for pid in per_prompt if pid and pid not in known]
+    for pid in auto_ids:
+        auto.add(per_prompt[pid])
+    if None in per_prompt:
+        auto.add(per_prompt[None])
+    automatic = dict(auto.as_dict(), turns=len(auto_ids)) if auto.calls else None
+    return rows, automatic
 
 
 def _rollup_total_hint(nodes, key) -> int:
@@ -328,13 +443,13 @@ def _turn_intervals(conn, sid, a, b) -> List[tuple]:
     """
     out = []
     for t in conn.execute(
-        "SELECT uuid, ts_end, duration_ms FROM turns WHERE session_id = ? AND ts_end >= ? "
+        "SELECT uuid, ts_end, duration_ms, prompt_id FROM turns WHERE session_id = ? AND ts_end >= ? "
         "AND ts_end - duration_ms / 1000.0 <= ?", (sid, a, b)
     ):
         lo = max(t["ts_end"] - t["duration_ms"] / 1000.0, a)
         hi = min(t["ts_end"], b)
         if hi > lo:
-            out.append((lo, hi, t["uuid"].startswith("hook:")))
+            out.append((lo, hi, t["uuid"].startswith("hook:"), t["prompt_id"]))
     return out
 
 

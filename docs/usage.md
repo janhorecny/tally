@@ -12,6 +12,16 @@
 | `/tally:show [id]` | Full report of any task (default: the current one, otherwise the latest). |
 | `/tally:resume <id>` | Count task `#id` in this session too. Also reopens an ended task. |
 | `/tally:rename [id] <name>` | Rename the current task or task `#id`. |
+| `/tally:stats [id]` | Detailed statistics: per-prompt breakdown, averages, cache hit rate, tools. |
+| `/tally:todo <text>` | Add a todo: `@project`, `!`/`!!`/`!!!` priority, `due:fri\|+3d\|20.10.`, ` -- notes`. |
+| `/tally:todos [project\|all\|done]` | Open todos of this project (or of another project, all of them, or the done ones). |
+| `/tally:take <id>` | Pick up a todo: its status becomes *doing* and a task starts measuring it. You write the prompt. |
+| `/tally:do <id>` | Pick up a todo and let Claude start on it right away (the todo goes to Claude as context). |
+| `/tally:done [id] [note]` | Mark a todo done and end its task. Default: the todo you are working on. |
+| `/tally:mark <id> <status>` | `todo`, `doing`, `blocked`, `done` or `dropped`. |
+| `/tally:project [track\|tasks\|off]` | This project's overall statistics, or set how it is tracked. |
+| `/tally:projects` | All projects with their tracking mode and totals. |
+| `/tally:settings [key value]` | Show or change settings: logging depth and type, reminders, auto start. |
 | `/tally:dashboard` | Start the local dashboard if needed, and open it in the browser. |
 | `/tally:help` | Show the help text. |
 
@@ -71,6 +81,99 @@ tally config auto_start session
 ```
 
 The first prompt of every new session then starts a task named after it. Use `/tally:end` or `/tally:start` as usual. To switch it off: `tally config auto_start off`.
+
+## Todos
+
+A quick todo list per project. Each todo can be picked up as a measured task, so you can see what it really cost.
+
+```
+/tally:todo Fix login redirect loop !! due:fri -- Safari only
+/tally:todo Write release notes @website due:zajtra
+/tally:todos                       ← open todos of this project
+/tally:take 3                      ← status doing, Tally measures from now; you write the prompt
+/tally:do 3                        ← the same, and Claude starts working on it immediately
+/tally:done                        ← todo done, its task ends, report shown
+```
+
+### Quick syntax (`/tally:todo`, dashboard, `tally todo add`)
+
+| syntax | example | meaning |
+|---|---|---|
+| `@name` | `@website` | Project. Default: the git repository you are in. |
+| `!`, `!!`, `!!!` | `!!` | Priority: low, medium or high. |
+| `due:<when>` | `due:fri`, `due:pi`, `due:zajtra`, `due:+3d`, `due:+4h`, `due:20.10.`, `due:2026-10-20` | Due date, at the end of that day. English and Slovak day names work. |
+| ` -- ` | `Fix it -- only on Safari` | Everything after it becomes the notes. |
+
+### Statuses
+
+`todo` → `doing` (picked up) → `done`. Two other statuses: `blocked` (waiting on something) and `dropped` (won't do).
+
+- **Ending without done:** if you `/tally:end` a todo's task without `/tally:done`, the todo goes back to `todo`. It keeps the tokens and time measured so far, and the next `/tally:take` adds to them.
+- **Steps:** a todo with steps (from a plan) is marked done automatically once all its steps are done.
+
+### Reminders
+
+When Claude Code starts in a project that has open todos, Tally shows them (0 tokens). Items being worked on come first, then overdue ones, then the rest by priority. The status line can show `📋 3 todos · 1 overdue` as well. Switch the reminder off with `/tally:settings todos.reminder off`.
+
+### Plans: superpowers and others
+
+```bash
+tally todo import docs/plans/2026-10-12-export.md
+```
+
+- **What is imported:** `### Task N: …` headings become todos. `**Step N: …**` lines and `- [ ]` / `- [x]` checklists under them become their steps. Code blocks are ignored.
+- **Re-importing is safe:** it adds new items and marks checked ones done, and never reopens anything.
+- **Claude can do it itself:** the plugin ships a `tally:todos` skill. When a plan is written (for example by superpowers `writing-plans`), Claude imports it. While executing it (for example superpowers `executing-plans`), Claude marks each task `doing` and then `done`, so progress shows up live in `/tally:todos` and the dashboard.
+
+## Projects
+
+The first time Claude Code opens in a git repository Tally does not know yet, it asks (0 tokens):
+
+```
+👋 Tally: first time in project website. Track it?
+  /tally:project track   count every session here (overall project stats)
+  /tally:project tasks   only tasks you start (/tally:start, /tally:take)
+  /tally:project off     ignore this project, don't ask again
+```
+
+| mode | what is counted |
+|---|---|
+| `track` | Every session in the project, with or without a task. This gives the project's overall usage and the share that went through tasks. |
+| `tasks` | Only explicit tasks (`/tally:start`, `/tally:new`, `/tally:take`). |
+| `off` | Nothing, and no questions or reminders. |
+
+`/tally:project` shows the project's overall statistics:
+
+- all time, the last 7 days and the last 30 days;
+- a daily sparkline;
+- usage by model;
+- tasks and how much of the usage they account for;
+- todos.
+
+`/tally:projects` lists all projects. The dashboard has a *Projects* tab where you can switch modes and see a 30-day chart. Until a project is set up, the status line shows a hint.
+
+## Detailed statistics
+
+`/tally:stats` (or `tally stats [id]`) adds the following to the report:
+
+- **Averages:** prompts, automatic turns, subagents, workflows; average and longest turn; cache hit rate; output tokens per active minute.
+- **Per prompt:** tokens, output, cost, duration, API calls, subagents and tool calls for every prompt of the task.
+  - **Exact attribution:** every API call carries the id of the user prompt that caused it, and subagents inherit the prompt that spawned them.
+  - **Automatic turns:** turns Claude Code starts on its own, for example when a background agent finishes, are listed separately.
+- **Tools:** calls and errors per tool, including MCP tools. This needs `log.depth calls`.
+
+The same appears in the dashboard's task detail: summary tiles, a per-prompt table and a tools table.
+
+## Settings
+
+```
+/tally:settings                         ← show everything
+/tally:settings log.depth calls         ← logging depth: summary | prompts | calls
+/tally:settings log.prompts preview     ← logging type: full | preview | off
+/tally:settings todos.reminder off
+```
+
+The dashboard's *Settings* tab offers the same controls. See [configuration](configuration.md) for every key.
 
 ## Reading the report
 
@@ -154,6 +257,11 @@ tally end [id] [--note "…"]
 tally start <name> --session <id>        # outside Claude Code you must name the session
 tally resume <id> --session <id>
 tally rename <id> <name>
+tally stats [id] [--json]
+tally todo add|list|next|show|take|done|mark|edit|rm|import …   # see `tally todo -h`
+tally project [name] [--set track|tasks|off] [--days N] [--json]
+tally projects [--json]
+tally settings [key [value]]
 tally delete <id> [-y]
 tally export --format csv|json [-o file]
 tally session <session-id | path/to/transcript.jsonl> [--json]

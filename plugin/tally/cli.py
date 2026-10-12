@@ -212,26 +212,199 @@ def cmd_dashboard(args):
     server.serve(host, port, open_browser=args.open)
 
 
+def cmd_stats(args):
+    """Default task: the active one of this session, else the only active one, else the latest."""
+    conn = db.connect()
+    if args.id:
+        t = tasks.get(conn, args.id)
+        if t is None:
+            sys.exit("Task #%s not found." % args.id)
+    else:
+        active = tasks.active_tasks(conn)
+        t = _task_or_active_soft(conn, args) or (active[0] if len(active) == 1 else None) or _latest(conn)
+        if t is None:
+            sys.exit("No tasks yet.")
+    rep = report.summary_for(conn, t)
+    print(json.dumps({k: rep.get(k) for k in ("task", "time", "totals", "stats", "prompts")}, indent=2)
+          if args.json else fmt.render_stats(rep))
+
+
+def _latest(conn):
+    rows = tasks.list_tasks(conn, limit=1)
+    return rows[0] if rows else None
+
+
+def _task_or_active_soft(conn, args):
+    sid = getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    return tasks.active_for_session(conn, sid) if sid else None
+
+
+def _todo_json(conn, r, with_children=False) -> dict:
+    from . import todos
+    d = dict(r)
+    d["progress"] = list(todos.progress(conn, r["id"]))
+    if with_children:
+        d["children"] = [_todo_json(conn, c, True) for c in todos.children(conn, r["id"])]
+        d["work"] = todos.linked_stats(conn, r["id"])
+    return d
+
+
+def cmd_todo(args):
+    from . import projects, todos
+    conn = db.connect()
+    here = projects.detect(os.getcwd())
+    a = args.todo_cmd
+    try:
+        if a == "add":
+            spec = todos.parse_quick(" ".join(args.text), args.project or here)
+            if args.priority is not None:
+                spec["priority"] = args.priority
+            if args.due:
+                spec["due_at"] = todos.parse_due(args.due)
+            if args.notes:
+                spec["notes"] = args.notes
+            t = todos.add(conn, spec["title"], project=spec["project"], priority=spec["priority"],
+                          due_at=spec["due_at"], notes=spec["notes"], parent_id=args.parent, source=args.source)
+            print(json.dumps(_todo_json(conn, t)) if args.json else "#%d %s (%s)" % (t["id"], t["title"], t["project"]))
+        elif a in ("list", "ls"):
+            st = {"open": todos.OPEN, "done": ("done", "dropped"), "all": None}.get(args.status, (args.status,))
+            project = None if args.all else (args.project or here)
+            rows = todos.list_todos(conn, project=project, statuses=st)
+            if args.json:
+                print(json.dumps([_todo_json(conn, r, with_children=args.tree) for r in rows], indent=2))
+            else:
+                print(fmt.render_todos(conn, rows, project, show_project=project is None, tree=args.tree))
+        elif a == "next":
+            r = todos.next_todo(conn, project=None if args.all else (args.project or here))
+            if r is None:
+                print("{}" if args.json else "Nothing open.")
+            else:
+                print(json.dumps(_todo_json(conn, r)) if args.json else todos.line_for(r, show_project=True))
+        elif a == "show":
+            t = todos.get(conn, args.id)
+            if t is None:
+                sys.exit("Todo #%s not found." % args.id)
+            d = _todo_json(conn, t, with_children=True)
+            if args.json:
+                print(json.dumps(d, indent=2))
+            else:
+                print(todos.line_for(t, show_project=True))
+                if t["notes"]:
+                    print("  notes  " + t["notes"])
+                w = d["work"]
+                if w["tasks"]:
+                    print("  work   %d task%s · %s tokens · %s · %s active" % (
+                        w["tasks"], "" if w["tasks"] == 1 else "s", fmt.tokens(w["total"]),
+                        fmt.money({"cost": w["cost"]}), fmt.duration(w["active_s"])))
+                for c in todos.children(conn, t["id"]):
+                    print("    " + todos.line_for(c))
+        elif a == "take":
+            todo, task, _ = todos.take(conn, args.id, _session(args), cwd=os.getcwd())
+            print("Todo #%d taken; task #%d measures it." % (todo["id"], task["id"]))
+        elif a == "done":
+            t = todos.set_status(conn, args.id, "done", note=args.note)
+            for task in conn.execute("SELECT * FROM tasks WHERE todo_id = ? AND status = 'active'",
+                                     (args.id,)).fetchall():
+                tasks.end(conn, task["id"], note=args.note or "todo done")
+            print("✓ #%d %s" % (t["id"], t["title"]))
+        elif a == "mark":
+            t = todos.set_status(conn, args.id, args.status, note=args.note)
+            print("#%d is now %s" % (t["id"], t["status"]))
+        elif a == "edit":
+            fields = {}
+            for k in ("title", "notes", "project", "priority"):
+                if getattr(args, k) is not None:
+                    fields[k] = getattr(args, k)
+            if args.due is not None:
+                fields["due_at"] = todos.parse_due(args.due) if args.due else None
+            t = todos.update(conn, args.id, **fields)
+            print(todos.line_for(t, show_project=True))
+        elif a == "rm":
+            t = todos.get(conn, args.id)
+            if t is None:
+                sys.exit("Todo #%s not found." % args.id)
+            if not args.yes and input("Delete todo #%d '%s'? [y/N] " % (t["id"], t["title"])).lower() not in ("y", "yes"):
+                return
+            todos.delete(conn, args.id)
+            print("deleted")
+        elif a == "import":
+            r = todos.import_plan(conn, args.file, project=args.project, source=args.source)
+            if args.json:
+                print(json.dumps(r))
+            else:
+                print("Plan #%d %s (%s): %d created, %d updated · %d/%d done" % (
+                    r["plan_id"], r["title"], r["project"], r["created"], r["updated"],
+                    r["progress_done"], r["progress_total"]))
+    except ValueError as e:
+        sys.exit(str(e))
+
+
+def cmd_settings(args):
+    from . import settings
+    if args.key and args.value is not None:
+        try:
+            print("%s = %s" % (args.key, json.dumps(settings.set_value(args.key, args.value))))
+        except ValueError as e:
+            sys.exit(str(e))
+        return
+    for key, value, desc, allowed in settings.describe():
+        if args.key and key != args.key:
+            continue
+        print("%-22s %-10s [%s]\n%-22s %s" % (key, json.dumps(value), allowed, "", desc))
+
+
+def cmd_project(args):
+    from . import commands, projects
+    conn = db.connect()
+    if args.cmd == "projects":
+        if args.json:
+            print(json.dumps([projects.stats(conn, n, series_days=1) for n in projects.all_names(conn)], indent=2))
+        else:
+            print(commands._project_command(conn, "projects", "", os.getcwd()))
+        return
+    name = args.name or projects.detect(os.getcwd())
+    if args.set:
+        with db.transaction(conn):
+            row = projects.set_mode(conn, name, args.set)
+        print("%s: %s (%s)" % (name, row["mode"], projects.MODE_HELP[row["mode"]]))
+        return
+    st = projects.stats(conn, name, days=args.days, series_days=args.series)
+    print(json.dumps(st, indent=2) if args.json else fmt.render_project(st))
+
+
 def cmd_statusline(args):
     """One-line segment for a status line (stdin: Claude Code statusLine JSON).
 
-    Prints nothing when the session has no active task. Never fails loudly.
+    Active task: "▶ #3 name · 4.21M tok · $3.12 · 44m 10s" (+ "· 📋 2" open todos).
+    No task: "📋 3 todos · 1 overdue" for the project, or nothing. Never fails loudly.
     """
     try:
+        from . import projects, todos
         raw = "" if sys.stdin.isatty() else sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
         sid = payload.get("session_id") or args.session or os.environ.get("CLAUDE_CODE_SESSION_ID")
-        if not sid:
-            return
+        cwd = payload.get("cwd") or (payload.get("workspace") or {}).get("current_dir") or os.getcwd()
         conn = db.connect()
-        task = tasks.active_for_session(conn, sid)
+        project = projects.detect(cwd)
+        open_rows = todos.list_todos(conn, project=project, statuses=todos.OPEN) if project else []
+        now = time.time()
+        overdue = sum(1 for r in open_rows if r["due_at"] and r["due_at"] < now)
+        todo_part = ("📋 %d%s" % (len(open_rows), (" · %d overdue" % overdue) if overdue else "")) if open_rows else ""
+        task = tasks.active_for_session(conn, sid) if sid else None
+        if task is None and project and projects.mode_of(conn, project) == "ask":
+            print("Tally: new project · /tally:project track|tasks|off" + (" · " + todo_part if todo_part else ""))
+            return
         if task is None:
+            if todo_part:
+                print(todo_part.replace("📋 %d" % len(open_rows),
+                                        "📋 %d todo%s" % (len(open_rows), "" if len(open_rows) == 1 else "s"), 1))
             return
         rep = report.summary(conn, task)
         tot = rep["totals"]
         name = task["name"] if len(task["name"]) <= args.width else task["name"][: args.width - 1] + "…"
-        print("▶ #%d %s · %s tok · %s · %s" % (
-            task["id"], name, fmt.tokens(tot["total"]), fmt.money(tot), fmt.duration(rep["time"]["wall_s"])))
+        line = "▶ #%d %s · %s tok · %s · %s" % (
+            task["id"], name, fmt.tokens(tot["total"]), fmt.money(tot), fmt.duration(rep["time"]["wall_s"]))
+        print(line + (" · " + todo_part if todo_part else ""))
     except Exception:
         pass
 
@@ -365,6 +538,80 @@ def build_parser():
     s.add_argument("key", nargs="?")
     s.add_argument("value", nargs="?")
     s.set_defaults(func=cmd_config)
+
+    s = sub.add_parser("stats", help="detailed stats of a task: per-prompt breakdown, tools, averages")
+    s.add_argument("id", nargs="?", type=int)
+    s.add_argument("--session")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_stats)
+
+    s = sub.add_parser("todo", help="todo list: add, list, next, show, take, done, mark, edit, rm, import")
+    tsub = s.add_subparsers(dest="todo_cmd")
+    s.set_defaults(func=lambda a: (cmd_todo(a) if a.todo_cmd else s.print_help()))
+    t = tsub.add_parser("add", help="add a todo (quick syntax: @project ! !! !!! due:fri -- notes)")
+    t.add_argument("text", nargs="+", help="title; @project, ! !! !!!, due:<when> are recognised")
+    t.add_argument("-p", "--project")
+    t.add_argument("--priority", type=int, choices=[0, 1, 2, 3])
+    t.add_argument("--due", help="today, tomorrow, fri, +3d, 2026-10-20, 20.10.")
+    t.add_argument("--notes")
+    t.add_argument("--parent", type=int, help="make it a step of another todo")
+    t.add_argument("--source", default="user", help="user | claude | import")
+    t.add_argument("--json", action="store_true")
+    t = tsub.add_parser("list", aliases=["ls"], help="list todos (default: open, this project)")
+    t.add_argument("-p", "--project")
+    t.add_argument("--all", action="store_true", help="all projects")
+    t.add_argument("--status", default="open", help="open | done | all | todo | doing | blocked | dropped")
+    t.add_argument("--tree", action="store_true", help="show plan steps under their todos")
+    t.add_argument("--json", action="store_true")
+    t = tsub.add_parser("next", help="the next todo to work on (doing first, then by priority/due)")
+    t.add_argument("-p", "--project")
+    t.add_argument("--all", action="store_true")
+    t.add_argument("--json", action="store_true")
+    t = tsub.add_parser("show", help="a todo with its steps and measured work")
+    t.add_argument("id", type=int)
+    t.add_argument("--json", action="store_true")
+    t = tsub.add_parser("take", help="pick up a todo in a Claude Code session (starts measuring)")
+    t.add_argument("id", type=int)
+    t.add_argument("--session")
+    t = tsub.add_parser("done", help="mark done (ends its active task)")
+    t.add_argument("id", type=int)
+    t.add_argument("--note")
+    t = tsub.add_parser("mark", help="set status")
+    t.add_argument("id", type=int)
+    t.add_argument("status", choices=["todo", "doing", "blocked", "done", "dropped"])
+    t.add_argument("--note")
+    t = tsub.add_parser("edit", help="change title, notes, project, priority or due date")
+    t.add_argument("id", type=int)
+    t.add_argument("--title")
+    t.add_argument("--notes")
+    t.add_argument("--project")
+    t.add_argument("--priority", type=int, choices=[0, 1, 2, 3])
+    t.add_argument("--due", help="new due date, or '' to clear")
+    t = tsub.add_parser("rm", help="delete a todo (and its steps)")
+    t.add_argument("id", type=int)
+    t.add_argument("-y", "--yes", action="store_true")
+    t = tsub.add_parser("import", help="create/update todos from a markdown plan (superpowers, checklists)")
+    t.add_argument("file")
+    t.add_argument("-p", "--project")
+    t.add_argument("--source", default="import")
+    t.add_argument("--json", action="store_true")
+
+    s = sub.add_parser("project", help="overall stats of a project; --set track|tasks|off")
+    s.add_argument("name", nargs="?", help="default: the project of the current directory")
+    s.add_argument("--set", choices=["track", "tasks", "off"])
+    s.add_argument("--days", type=int, help="only the last N days")
+    s.add_argument("--series", type=int, default=14, help="days in the daily series")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_project)
+
+    s = sub.add_parser("projects", help="all projects with mode and totals")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_project)
+
+    s = sub.add_parser("settings", help="show or change settings (validated)")
+    s.add_argument("key", nargs="?")
+    s.add_argument("value", nargs="?")
+    s.set_defaults(func=cmd_settings)
 
     s = sub.add_parser("statusline", help="one-line active-task segment for a status line (reads statusLine JSON)")
     s.add_argument("--session")

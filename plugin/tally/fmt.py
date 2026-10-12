@@ -120,6 +120,13 @@ def render_report(rep: dict, detail: bool = True) -> str:
     tot = rep["totals"]
     out = []
     out.append("Task #%d · %s   [%s]" % (t["id"], _cut(t["name"], 70), status_mark(t["status"])))
+    where = []
+    if t.get("project"):
+        where.append("project " + t["project"])
+    if t.get("todo"):
+        where.append("todo #%d (%s)" % (t["todo"]["id"], t["todo"]["status"]))
+    if where:
+        out.append("  " + " · ".join(where))
     if t.get("initial_prompt") and t["initial_prompt"].strip() != t["name"].rstrip("…").strip():
         out.append("  prompt   " + _cut(t["initial_prompt"], 90))
     started = when(t["started_at"])
@@ -127,6 +134,11 @@ def render_report(rep: dict, detail: bool = True) -> str:
     out.append("  time     %s wall · %s active (%d turns) · %s%s" % (
         duration(tm["wall_s"]), duration(tm["active_s"]), tm["turns"], started, ended))
     out.append("  tokens   " + token_line(tot))
+    st = rep.get("stats") or {}
+    if st.get("prompts"):
+        out.append("  prompts  %d · avg %s tokens · %s per prompt%s" % (
+            st["prompts"], tokens(st["tokens_per_prompt"]), money({"cost": st["cost_per_prompt"]}),
+            (" · +%d automatic turns" % st["automatic_turns"]) if st.get("automatic_turns") else ""))
     out.append("  cost     ≈ %s at list price · %d API calls%s" % (
         money(tot), tot["calls"], (" · %d web searches" % tot["web_search"]) if tot.get("web_search") else ""))
     un = rep.get("unlogged") or {}
@@ -167,4 +179,115 @@ def render_list(rows: List[dict]) -> str:
             r["id"], "active" if r["status"] == "active" else "ended", when(r["started_at"]),
             duration(r["wall_s"]), duration(r["active_s"]), tokens(r["total"]), money(r),
             _cut(r["name"], 48)))
+    return "\n".join(out)
+
+
+def pct(x: Optional[float]) -> str:
+    return "-" if x is None else "%.0f%%" % (x * 100)
+
+
+def render_stats(rep: dict) -> str:
+    """Detailed stats: header, averages, per-prompt table, tools."""
+    out = [render_report(rep, detail=False), ""]
+    st = rep.get("stats") or {}
+    out.append("  stats    %s prompts · %s automatic turns · %s subagents · %s workflows · %s models" % (
+        st.get("prompts", 0), st.get("automatic_turns", 0), st.get("subagents", 0), st.get("workflows", 0),
+        st.get("models", 0)))
+    out.append("           avg turn %s · longest %s · cache hit %s · %s output tokens / active min" % (
+        duration(st.get("avg_turn_s")), duration(st.get("max_turn_s")), pct(st.get("cache_hit_ratio")),
+        tokens(st.get("output_per_active_min"))))
+    if st.get("tool_calls") is not None:
+        out.append("           %d tool calls · %d errors" % (st["tool_calls"], st["tool_errors"] or 0))
+    prompts = rep.get("prompts")
+    if prompts:
+        out.append("")
+        out.append("  %3s  %-5s %-34s %8s %8s %8s %8s %5s %6s" % (
+            "#", "time", "prompt", "tokens", "output", "cost", "took", "calls", "agents"))
+        for p in prompts:
+            text = p["prompt"] if p["prompt"] is not None else "(not stored)"
+            out.append("  %3d  %-5s %-34s %8s %8s %8s %8s %5s %6s" % (
+                p["index"], when(p["ts"], "%H:%M"), _cut(text, 34), tokens(p["total"]), tokens(p["output"]),
+                money(p), duration(p["duration_s"]), p["calls"], p["agents"] or ""))
+        auto = st.get("automatic")
+        if auto:
+            out.append("  %3s  %-5s %-34s %8s %8s %8s %8s %5s" % (
+                "", "", "automatic turns (%d)" % auto["turns"], tokens(auto["total"]), tokens(auto["output"]),
+                money(auto), "", auto["calls"]))
+    elif prompts is None:
+        out.append("")
+        out.append("  per-prompt breakdown is off (log.depth = summary); /tally:settings log.depth prompts")
+    tools = st.get("tools")
+    if tools:
+        out.append("")
+        out.append("  tools")
+        width = max(t["calls"] for t in tools)
+        for t in tools[:12]:
+            bar = "█" * max(1, int(round(16 * t["calls"] / float(width))))
+            out.append("    %-34s %5d  %-16s%s" % (_cut(t["tool"], 34), t["calls"], bar,
+                                                  ("  %d errors" % t["errors"]) if t["errors"] else ""))
+        if len(tools) > 12:
+            out.append("    … %d more tools" % (len(tools) - 12))
+    elif tools is None and st:
+        out.append("")
+        out.append("  tool statistics are off (log.depth = %s); /tally:settings log.depth calls" % st.get("depth"))
+    return "\n".join(out)
+
+
+def render_todos(conn, rows: list, project: Optional[str], show_project: bool = False,
+                 tree: bool = False) -> str:
+    from . import todos
+    where = ("project " + project) if project else "all projects"
+    if not rows:
+        return "No open todos in %s. Add one: /tally:todo <text> [@project] [!!] [due:fri]" % where
+    now = time.time()
+    out = ["Todos · %s (%d)" % (where, len(rows))]
+
+    def emit(r, depth):
+        line = "  " + "   " * depth + todos.line_for(r, now, show_project=show_project and depth == 0)
+        done, total = todos.progress(conn, r["id"])
+        if total:
+            line += "  [%d/%d]" % (done, total)
+        out.append(line)
+        if tree:
+            for c in todos.children(conn, r["id"]):
+                emit(c, depth + 1)
+
+    for r in rows:
+        emit(r, 0)
+    out.append("")
+    out.append("  /tally:take <id> start measuring · /tally:do <id> let Claude work on it · /tally:done")
+    return "\n".join(out)
+
+
+def render_project(st: dict) -> str:
+    from .projects import MODE_HELP
+    t, w, m = st["totals"], st["last_7d"], st["last_30d"]
+    out = ["Project %s   [%s: %s]" % (st["project"], st["mode"], MODE_HELP.get(st["mode"], ""))]
+    if st["mode"] == "ask":
+        out.append("  not set up yet: /tally:project track | tasks | off")
+    out.append("  all time %s tokens · %s · %d API calls · %d sessions" % (
+        tokens(t["total"]), money(t), t["calls"], st["sessions"]))
+    out.append("  last 7d  %s tokens · %s      last 30d %s tokens · %s" % (
+        tokens(w["total"]), money(w), tokens(m["total"]), money(m)))
+    if st["by_model"]:
+        out.append("  models   " + " · ".join("%s %s %s" % (x["model"].replace("claude-", ""), tokens(x["total"]),
+                                                            money(x)) for x in st["by_model"][:4]))
+    tk = st["tasks"]
+    share = (" · %s of project tokens" % pct(tk["share"])) if tk["share"] is not None else ""
+    out.append("  tasks    %d (%d active) · %s tokens%s" % (tk["count"], tk["active"], tokens(tk["tokens"]), share))
+    td = st["todos"]
+    out.append("  todos    %d open (%d doing, %d blocked) · %d done" % (
+        td["todo"] + td["doing"] + td["blocked"], td["doing"], td["blocked"], td["done"]))
+    days = st["daily"]
+    if any(d["total"] for d in days):
+        peak = max(d["total"] for d in days)
+        blocks = " ▁▂▃▄▅▆▇█"
+        spark = "".join(blocks[0 if not d["total"] else max(1, int(round(8 * d["total"] / float(peak))))]
+                        for d in days)
+        out.append("  %d days %s  (peak %s)" % (len(days), spark, tokens(peak)))
+    if tk["recent"]:
+        out.append("")
+        for x in tk["recent"][:5]:
+            out.append("    #%-4d %-40s %9s %8s %s" % (x["id"], _cut(x["name"], 40), tokens(x["total"]),
+                                                    money(x), "● active" if x["status"] == "active" else ""))
     return "\n".join(out)

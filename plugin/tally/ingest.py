@@ -23,6 +23,10 @@ from typing import Iterable, List, Optional, Tuple
 from . import db, paths
 
 _TS_RE = re.compile(rb'"timestamp"\s*:\s*"([^"]+)"')
+# user lines carry the id of the prompt they belong to as their 3rd key
+_PROMPT_RE = re.compile(rb'"promptId"\s*:\s*"([^"]+)"')
+_PROMPT_SCAN = 600
+_TOOL_ERROR_RE = re.compile(rb'"is_error"\s*:\s*true')
 
 
 def parse_ts(value) -> Optional[float]:
@@ -120,22 +124,24 @@ def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
     skip_existing=True moves every file's offset to its current end without
     parsing; used when a task starts so history before the task is not read.
     """
+    from . import settings
     stats = Stats()
     main = resolve_transcript(conn, session_id, transcript_path)
     if main is None:
         return stats
     sdir = main.with_suffix("")
+    want_tools = settings.depth_at_least("calls")
     with db.transaction(conn):
         for path, agent_id, run_id in session_files(main):
-            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats)
+            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools)
         _load_workflow_records(conn, session_id, sdir)
     return stats
 
 
 def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[str],
-                 skip_existing: bool, stats: Stats) -> None:
+                 skip_existing: bool, stats: Stats, want_tools: bool = False) -> None:
     key = str(path)
-    row = conn.execute("SELECT offset, meta_loaded FROM files WHERE path = ?", (key,)).fetchone()
+    row = conn.execute("SELECT offset, meta_loaded, last_prompt_id FROM files WHERE path = ?", (key,)).fetchone()
     try:
         size = path.stat().st_size
     except OSError:
@@ -161,7 +167,10 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
         conn.execute("UPDATE files SET offset = ? WHERE path = ?", (offset, key))
         return
     if skip_existing:
-        conn.execute("UPDATE files SET offset = ? WHERE path = ?", (size, key))
+        # Skipped bytes are not parsed, but lines appended later still need to
+        # know which prompt they belong to: take the last one in the file tail.
+        conn.execute("UPDATE files SET offset = ?, last_prompt_id = COALESCE(?, last_prompt_id) WHERE path = ?",
+                     (size, _last_prompt_in_tail(path, size), key))
         return
     with open(path, "rb") as fh:
         fh.seek(offset)
@@ -172,16 +181,39 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
     chunk = data[: end + 1]
     stats.files += 1
     stats.bytes += len(chunk)
-    _process_chunk(conn, session_id, agent_id, chunk, stats)
-    conn.execute("UPDATE files SET offset = ? WHERE path = ?", (offset + len(chunk), key))
+    prompt_id = _process_chunk(conn, session_id, agent_id, chunk, stats,
+                               row["last_prompt_id"] if row is not None else None, want_tools)
+    conn.execute("UPDATE files SET offset = ?, last_prompt_id = ? WHERE path = ?",
+                 (offset + len(chunk), prompt_id, key))
 
 
-def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stats: Stats) -> None:
+def _last_prompt_in_tail(path: Path, size: int, tail: int = 512 * 1024) -> Optional[str]:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(max(0, size - tail))
+            data = fh.read(min(size, tail))
+    except OSError:
+        return None
+    found = None
+    for line in data.split(b"\n"):
+        m = _PROMPT_RE.search(line, 0, _PROMPT_SCAN)
+        if m:
+            found = m.group(1).decode("ascii", "ignore")
+    return found
+
+
+def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stats: Stats,
+                   prompt_id: Optional[str] = None, want_tools: bool = False) -> Optional[str]:
+    """Parse complete lines; returns the prompt id in effect at the end."""
     first_ts = last_ts = None
     usage_rows = []
+    tool_rows = []
     for line in chunk.split(b"\n"):
         if not line:
             continue
+        pm = _PROMPT_RE.search(line, 0, _PROMPT_SCAN)
+        if pm:
+            prompt_id = pm.group(1).decode("ascii", "ignore")
         m = _TS_RE.search(line)
         if m:
             ts = parse_ts(m.group(1).decode("ascii", "ignore"))
@@ -192,17 +224,25 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
                     last_ts = ts
         # Cheap substring checks first; only candidate lines are JSON-parsed,
         # then routed by their actual type (a line can match several checks).
+        tool_error = want_tools and b'"tool_result"' in line and _TOOL_ERROR_RE.search(line) is not None
         if not ((b'"usage"' in line and b'"assistant"' in line) or b'"turn_duration"' in line
-                or (b'"workflowName"' in line and b'"runId"' in line)):
+                or (b'"workflowName"' in line and b'"runId"' in line) or tool_error):
             continue
         rec = _loads(line)
         if rec is None:
             continue
         typ = rec.get("type")
         if typ == "assistant":
-            row = _usage_row(rec, session_id, file_agent_id)
+            row = _usage_row(rec, session_id, file_agent_id, prompt_id)
             if row:
                 usage_rows.append(row)
+                if want_tools:
+                    tool_rows.extend(_tool_uses(rec, session_id, row[2], prompt_id, row[3]))
+        elif typ == "user" and tool_error:
+            if tool_rows:                     # the failed call may be in this same chunk
+                _insert_tools(conn, tool_rows)
+                tool_rows = []
+            _mark_tool_errors(conn, rec)
         elif typ == "system" and rec.get("subtype") == "turn_duration":
             ts = parse_ts(rec.get("timestamp"))
             dur = rec.get("durationMs")
@@ -219,10 +259,12 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
     if usage_rows:
         conn.executemany(
             "INSERT OR REPLACE INTO usage(msg_key, session_id, agent_id, ts, model, speed, input, output, "
-            "cache_read, cache_write_5m, cache_write_1h, web_search) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "cache_read, cache_write_5m, cache_write_1h, web_search, prompt_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             usage_rows,
         )
         stats.usage_rows += len(usage_rows)
+    if tool_rows:
+        _insert_tools(conn, tool_rows)
     if file_agent_id and first_ts is not None:
         conn.execute(
             "INSERT INTO agents(session_id, agent_id, first_ts, last_ts) VALUES(?,?,?,?) "
@@ -231,6 +273,30 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
             "last_ts = MAX(COALESCE(agents.last_ts, excluded.last_ts), excluded.last_ts)",
             (session_id, file_agent_id, first_ts, last_ts),
         )
+    return prompt_id
+
+
+def _insert_tools(conn, rows: list) -> None:
+    conn.executemany(
+        "INSERT OR IGNORE INTO tool_calls(id, session_id, agent_id, prompt_id, ts, tool) VALUES(?,?,?,?,?,?)", rows)
+
+
+def _tool_uses(rec: dict, session_id: str, agent_id: str, prompt_id: Optional[str], ts: float) -> list:
+    content = (rec.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return []
+    return [(c["id"], session_id, agent_id, prompt_id, ts, str(c.get("name") or "?"))
+            for c in content
+            if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("id")]
+
+
+def _mark_tool_errors(conn, rec: dict) -> None:
+    content = (rec.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return
+    for c in content:
+        if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("is_error") and c.get("tool_use_id"):
+            conn.execute("UPDATE tool_calls SET is_error = 1 WHERE id = ?", (c["tool_use_id"],))
 
 
 def _loads(line: bytes):
@@ -248,7 +314,7 @@ def _int(v) -> int:
         return 0
 
 
-def _usage_row(rec: dict, session_id: str, file_agent_id: str):
+def _usage_row(rec: dict, session_id: str, file_agent_id: str, prompt_id: Optional[str] = None):
     if rec.get("type") != "assistant":
         return None
     msg = rec.get("message")
@@ -282,7 +348,7 @@ def _usage_row(rec: dict, session_id: str, file_agent_id: str):
         key, session_id, agent_id, ts, model, u.get("speed"),
         _int(u.get("input_tokens")), _int(u.get("output_tokens")),
         _int(u.get("cache_read_input_tokens")), w5m, w1h,
-        _int(stu.get("web_search_requests")),
+        _int(stu.get("web_search_requests")), prompt_id,
     )
 
 

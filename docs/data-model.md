@@ -3,14 +3,17 @@
 The database is a single SQLite file, `~/.claude/tally/tally.db`, in WAL mode. Any SQLite client can open it, read-only or read-write, while Claude Code is running. Times are Unix seconds (REAL). Token counts are integers.
 
 ```
-tasks ──< task_sessions >── sessions
-  │                             │
-  ├──< prompts                  ├──< usage      (one row per API response; agent_id '' = main session)
-  └──  task_snapshots           ├──< agents     (subagents, forks, workflow agents)
-                                ├──< workflows  (workflow runs)
-                                ├──< turns      (main-session turn intervals)
-                                └──  session_costs (Claude Code's exit-time totals)
-files  (ingest offsets)   kv  (internal state)
+projects ──< sessions (project)            todos ──< todos (parent_id: plan steps)
+    │                                         │
+tasks (project, todo_id) ──< task_sessions >── sessions
+  │                                              │
+  ├──< prompts (prompt_id)                       ├──< usage       (one row per API response, with prompt_id)
+  └──  task_snapshots                            ├──< tool_calls  (log.depth = calls)
+                                                 ├──< agents      (subagents, forks, workflow agents)
+                                                 ├──< workflows   (workflow runs)
+                                                 ├──< turns       (turn intervals, with prompt_id)
+                                                 └──  session_costs (Claude Code's exit-time totals)
+files  (ingest offsets, last prompt id)   kv  (internal state)
 ```
 
 ## Tables
@@ -29,6 +32,35 @@ One row per task.
 | `created_by` | `command` (`/tally:start`), `new` (`/tally:new`), `auto` (auto-start) or `cli`. |
 | `end_note` | Optional note from `/tally:end <note>`. |
 
+Two further columns on `tasks`:
+
+- `project`: the git repository the task was started in.
+- `todo_id`: the todo the task works on, if it was started with `/tally:take` or `/tally:do`.
+
+### `todos`
+
+| column | |
+|---|---|
+| `project`, `title`, `notes` | |
+| `status` | `todo`, `doing`, `blocked`, `done` or `dropped`. |
+| `priority` | 0 none, 1 low, 2 medium, 3 high. |
+| `due_at` | Unix seconds, at the end of the due day. |
+| `parent_id`, `position` | Plan structure (plan → task → step), in plan order. |
+| `source`, `source_ref` | Where the todo came from: `user`, `claude`, `import` or `dashboard`. For plan imports, the file plus the item key, which makes re-imports idempotent. |
+| `created_at`, `updated_at`, `done_at` | |
+
+A todo's measured work is the sum over `tasks WHERE todo_id = id`.
+
+### `projects`
+
+| column | |
+|---|---|
+| `name`, `path` | The git repository (the main one for worktrees) and its path. |
+| `mode` | `ask` (not decided yet), `track` (every session counts), `tasks` or `off`. |
+| `first_seen`, `decided_at` | |
+
+`sessions.project` links each session to its project.
+
 ### `task_sessions`
 
 Which sessions count towards a task, and when. A task can span several sessions: after `/clear`, after `/tally:resume`, or in parallel terminals. A session counts during `[attached_at, detached_at]`, clipped to the task lifetime.
@@ -44,6 +76,7 @@ One row per API response, deduplicated by `msg_key = message.id:requestId`. The 
 | `model`, `speed` | `speed` is `fast` for fast mode. |
 | `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h` | Token counts. Total = the sum of all five. |
 | `web_search` | Count of server-side web search requests. |
+| `prompt_id` | The user prompt that caused the call. It comes from the `promptId` on transcript user lines; a subagent inherits the prompt that spawned it. |
 
 Rows exist only for transcript bytes read while a task was active, or by `tally session`. History before a task is never parsed.
 
@@ -70,7 +103,11 @@ Main-session turn intervals, from two sources. The report uses the union of thes
 
 ### `prompts`
 
-Every prompt submitted while a task was active.
+Every prompt submitted while a task was active, with its `prompt_id`. This is the same id Claude Code writes into the transcript, which is what makes the per-prompt breakdown exact. The text follows `log.prompts`: `full`, `preview`, or `off` (the row is kept, the text is not).
+
+### `tool_calls`
+
+One row per `tool_use` block, stored when `log.depth = calls`: `id` (the tool_use id), `session_id`, `agent_id`, `prompt_id`, `ts`, `tool`, and `is_error`. `is_error` is set from the matching `tool_result`.
 
 ### `task_snapshots`
 
@@ -103,6 +140,12 @@ SELECT COALESCE(a.agent_type, 'main') AS type, COUNT(DISTINCT u.agent_id) AS age
 FROM usage u LEFT JOIN agents a ON a.session_id = u.session_id AND a.agent_id = u.agent_id
 GROUP BY type ORDER BY tokens DESC;
 
+-- open todos per project with the tokens spent on them so far
+SELECT d.project, d.id, d.title, d.status, COUNT(t.id) AS tasks
+FROM todos d LEFT JOIN tasks t ON t.todo_id = d.id
+WHERE d.status IN ('todo', 'doing', 'blocked') AND d.parent_id IS NULL
+GROUP BY d.id ORDER BY d.project, d.priority DESC;
+
 -- final totals of ended tasks straight from the snapshots
 SELECT t.id, t.name,
        json_extract(s.report_json, '$.totals.total') AS tokens,
@@ -115,9 +158,13 @@ For spreadsheets, `tally export --format csv` is simpler. It gives one row per t
 
 ## Schema migrations
 
-`PRAGMA user_version` holds the schema version (currently 3). `db.connect()` migrates inside one `BEGIN IMMEDIATE` transaction, so two hooks starting at once cannot both migrate.
+`PRAGMA user_version` holds the schema version (currently 5). `db.connect()` migrates inside one `BEGIN IMMEDIATE` transaction, so two hooks starting at once cannot both migrate.
 
 - **v1 → v3:** `task_sessions` changes from one row per (task, session) to one row per interval.
 - **v2 → v3:** `summary_json` and `updated_at` are added.
+- **v3 → v4:** adds `todos`, `tool_calls`, `prompt_id` columns, and `tasks.project`/`todo_id`, with the project filled in from the cwd.
+- **v4 → v5:** adds `projects` and `sessions.project`.
+
+The migration creates tables first, then adds missing columns, then indexes. So any older version upgrades in one step.
 
 Existing data is kept.

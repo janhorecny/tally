@@ -4,7 +4,7 @@ import re
 import time
 from typing import List, Optional, Tuple
 
-from . import db, ingest
+from . import db, ingest, paths
 
 UNTITLED = "(untitled)"
 
@@ -62,47 +62,56 @@ def task_windows(conn, task) -> List[Tuple[str, float, float]]:
 
 
 def touch_session(conn, session_id: str, transcript_path: Optional[str] = None,
-                  cwd: Optional[str] = None, claude_pid: Optional[int] = None) -> None:
+                  cwd: Optional[str] = None, claude_pid: Optional[int] = None,
+                  project: Optional[str] = None) -> None:
     now = time.time()
     conn.execute(
-        "INSERT INTO sessions(session_id, transcript_path, cwd, claude_pid, first_seen, last_seen) "
-        "VALUES(?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
+        "INSERT INTO sessions(session_id, transcript_path, cwd, claude_pid, first_seen, last_seen, project) "
+        "VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
         "transcript_path = COALESCE(excluded.transcript_path, sessions.transcript_path), "
         "cwd = COALESCE(excluded.cwd, sessions.cwd), "
         "claude_pid = COALESCE(excluded.claude_pid, sessions.claude_pid), "
+        "project = COALESCE(excluded.project, sessions.project), "
         "last_seen = excluded.last_seen",
-        (session_id, transcript_path, cwd, claude_pid, now, now),
+        (session_id, transcript_path, cwd, claude_pid, now, now, project),
     )
 
 
 def start(conn, session_id: str, name: Optional[str] = None, initial_prompt: Optional[str] = None,
           cwd: Optional[str] = None, transcript_path: Optional[str] = None,
-          created_by: str = "command", now: Optional[float] = None):
+          created_by: str = "command", now: Optional[float] = None, project: Optional[str] = None,
+          todo_id: Optional[int] = None, prompt_id: Optional[str] = None):
     """Start a task in a session. Ends a task already running in that session.
 
     Returns (new_task_row, ended_task_row_or_None).
     """
+    from . import projects, settings
     now = now or time.time()
     ended = None
     prev = active_for_session(conn, session_id)
     if prev is not None:
         ended = end(conn, prev["id"], note="auto-ended: new task started", now=now)
-    name = (name or "").strip() or (derive_name(initial_prompt) if initial_prompt else UNTITLED)
+    cfg = paths.load_config()
+    stored = settings.store_prompt(initial_prompt, cfg)
+    name = (name or "").strip() or (derive_name(stored) if stored else UNTITLED)
+    project = project or projects.detect(cwd)
     with db.transaction(conn):
+        if project:
+            projects.register(conn, project, projects.detect_root(cwd)[1] if cwd else None)
         cur = conn.execute(
-            "INSERT INTO tasks(name, initial_prompt, status, started_at, cwd, origin_session, created_by) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (name, initial_prompt, "active", now, cwd, session_id, created_by),
+            "INSERT INTO tasks(name, initial_prompt, status, started_at, cwd, origin_session, created_by, project, "
+            "todo_id) VALUES(?,?,?,?,?,?,?,?,?)",
+            (name, stored, "active", now, cwd, session_id, created_by, project, todo_id),
         )
         task_id = cur.lastrowid
         conn.execute(
             "INSERT INTO task_sessions(task_id, session_id, attached_at, reason) VALUES(?,?,?,?)",
             (task_id, session_id, now, "start"),
         )
-        if initial_prompt:
+        if initial_prompt is not None:
             conn.execute(
-                "INSERT INTO prompts(task_id, session_id, ts, prompt) VALUES(?,?,?,?)",
-                (task_id, session_id, now, initial_prompt),
+                "INSERT INTO prompts(task_id, session_id, ts, prompt, prompt_id) VALUES(?,?,?,?,?)",
+                (task_id, session_id, now, stored, prompt_id),
             )
     _skip_history(conn, session_id, transcript_path, exclude_task=task_id)
     return get(conn, task_id), ended
@@ -113,11 +122,12 @@ def _skip_history(conn, session_id: str, transcript_path: Optional[str], exclude
     task is never parsed. Only safe when no other active task is counting
     this session; otherwise read normally so nothing of that task is lost.
     """
+    from . import projects
     other = conn.execute(
         "SELECT 1 FROM task_sessions s JOIN tasks t ON t.id = s.task_id WHERE s.session_id = ? "
         "AND s.detached_at IS NULL AND t.status = 'active' AND t.id != ? LIMIT 1",
         (session_id, exclude_task),
-    ).fetchone()
+    ).fetchone() or projects.session_tracked(conn, session_id)
     try:
         ingest.ingest_session(conn, session_id, transcript_path, skip_existing=other is None)
     except Exception:
@@ -152,17 +162,22 @@ def attach(conn, task_id: int, session_id: str, transcript_path: Optional[str] =
     return get(conn, task_id), ended
 
 
-def record_prompt(conn, task, session_id: str, prompt: str, now: Optional[float] = None) -> None:
+def record_prompt(conn, task, session_id: str, prompt: str, now: Optional[float] = None,
+                  prompt_id: Optional[str] = None) -> None:
+    """Store a prompt of the task (text per the log.prompts setting; the row
+    is kept even when the text is not, so prompts are always counted)."""
+    from . import settings
     now = now or time.time()
+    stored = settings.store_prompt(prompt)
     with db.transaction(conn):
         conn.execute(
-            "INSERT INTO prompts(task_id, session_id, ts, prompt) VALUES(?,?,?,?)",
-            (task["id"], session_id, now, prompt),
+            "INSERT INTO prompts(task_id, session_id, ts, prompt, prompt_id) VALUES(?,?,?,?,?)",
+            (task["id"], session_id, now, stored, prompt_id),
         )
-        if not task["initial_prompt"]:
-            conn.execute("UPDATE tasks SET initial_prompt = ? WHERE id = ?", (prompt, task["id"]))
+        if not task["initial_prompt"] and stored:
+            conn.execute("UPDATE tasks SET initial_prompt = ? WHERE id = ?", (stored, task["id"]))
             if task["name"] == UNTITLED:
-                conn.execute("UPDATE tasks SET name = ? WHERE id = ?", (derive_name(prompt), task["id"]))
+                conn.execute("UPDATE tasks SET name = ? WHERE id = ?", (derive_name(stored), task["id"]))
 
 
 def end(conn, task_id: int, note: Optional[str] = None, now: Optional[float] = None):
@@ -188,6 +203,11 @@ def end(conn, task_id: int, note: Optional[str] = None, now: Optional[float] = N
             "UPDATE task_sessions SET detached_at = ? WHERE task_id = ? AND detached_at IS NULL",
             (now, task_id),
         )
+        if task["todo_id"]:
+            # nobody works on it any more; /tally:done marks it done instead
+            conn.execute("UPDATE todos SET status = 'todo', updated_at = ? WHERE id = ? AND status = 'doing' "
+                         "AND NOT EXISTS (SELECT 1 FROM tasks WHERE todo_id = ? AND status = 'active' AND id != ?)",
+                         (now, task["todo_id"], task["todo_id"], task_id))
     task = get(conn, task_id)
     report.save_snapshot(conn, task_id, report.build(conn, task))
     return task
@@ -243,12 +263,15 @@ def carry_over_after_clear(conn, new_session_id: str, claude_pid: Optional[int],
     return task
 
 
-def list_tasks(conn, limit: int = 20, status: Optional[str] = None) -> list:
-    sql = "SELECT * FROM tasks"
+def list_tasks(conn, limit: int = 20, status: Optional[str] = None, project: Optional[str] = None) -> list:
+    sql = "SELECT * FROM tasks WHERE 1=1"
     args: list = []
     if status:
-        sql += " WHERE status = ?"
+        sql += " AND status = ?"
         args.append(status)
+    if project:
+        sql += " AND project = ?"
+        args.append(project)
     sql += " ORDER BY id DESC"
     if limit:
         sql += " LIMIT ?"

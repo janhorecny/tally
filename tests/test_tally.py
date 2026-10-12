@@ -28,13 +28,13 @@ def iso(ts: float) -> str:
 
 
 def assistant(ts, mid, req, model="claude-opus-5-5", inp=10, out=100, read=1000, w5=200, w1=0,
-              agent_id=None, sidechain=False, speed="standard"):
+              agent_id=None, sidechain=False, speed="standard", content=None):
     line = {
         "type": "assistant", "timestamp": iso(ts), "requestId": req, "uuid": "u-%s-%s" % (mid, out),
         "isSidechain": sidechain, "sessionId": SID,
         "message": {
             "id": mid, "model": model, "role": "assistant", "type": "message",
-            "content": [{"type": "text", "text": "x"}],
+            "content": content or [{"type": "text", "text": "x"}],
             "usage": {
                 "input_tokens": inp, "output_tokens": out, "cache_read_input_tokens": read,
                 "cache_creation_input_tokens": w5 + w1,
@@ -48,8 +48,12 @@ def assistant(ts, mid, req, model="claude-opus-5-5", inp=10, out=100, read=1000,
     return line
 
 
-def user(ts, text="hi", agent_id=None):
-    d = {"type": "user", "timestamp": iso(ts), "message": {"role": "user", "content": text}, "uuid": "uu%s" % ts}
+def user(ts, text="hi", agent_id=None, prompt_id=None, content=None):
+    d = {"parentUuid": None, "isSidechain": bool(agent_id)}
+    if prompt_id:
+        d["promptId"] = prompt_id          # Claude Code writes it as the 3rd key
+    d.update({"type": "user", "timestamp": iso(ts), "message": {"role": "user", "content": content or text},
+              "uuid": "uu%s" % ts})
     if agent_id:
         d["agentId"] = agent_id
         d["isSidechain"] = True
@@ -147,7 +151,7 @@ class EndToEnd(unittest.TestCase):
         now = time.time()
         # history before the task: must not be counted
         e.append(e.main(), user(now - 300), assistant(now - 290, "msg_old", "req_old", out=5000))
-        self.assertIsNone(e.hook("SessionStart", source="startup"))
+        self.assertIn("first time in project proj", e.hook("SessionStart", source="startup")["systemMessage"])
 
         res = e.hook("UserPromptSubmit", prompt="/tally:start Fix login bug")
         self.assertEqual(res["decision"], "block")
@@ -576,6 +580,296 @@ class ReviewRegressions(unittest.TestCase):
         self.assertIn("updated_at", db._columns(conn, "session_costs"))
         from tally import tasks
         self.assertEqual(tasks.active_for_session(conn, "sess-old")["name"], "old task")
+
+
+class TodosAndStats(unittest.TestCase):
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def test_quick_syntax_and_due_dates(self):
+        from datetime import datetime
+        from tally import todos
+        now = datetime(2026, 10, 12, 10, 0).timestamp()          # a Monday
+        eod = lambda y, m, d: datetime(y, m, d, 23, 59, 59).timestamp()
+        self.assertEqual(todos.parse_due("dnes", now), eod(2026, 10, 12))
+        self.assertEqual(todos.parse_due("zajtra", now), eod(2026, 10, 13))
+        self.assertEqual(todos.parse_due("pi", now), eod(2026, 10, 16))
+        self.assertEqual(todos.parse_due("fri", now), eod(2026, 10, 16))
+        self.assertEqual(todos.parse_due("po", now), eod(2026, 10, 19))      # next Monday, not today
+        self.assertEqual(todos.parse_due("+3d", now), eod(2026, 10, 15))
+        self.assertEqual(todos.parse_due("20.10.", now), eod(2026, 10, 20))
+        self.assertEqual(todos.parse_due("5.1.", now), eod(2027, 1, 5))      # past date -> next year
+        self.assertEqual(todos.parse_due("2026-11-02", now), eod(2026, 11, 2))
+        with self.assertRaises(ValueError):
+            todos.parse_due("someday", now)
+        q = todos.parse_quick("Fix login @web !! due:2026-11-02 -- check Safari", "proj")
+        self.assertEqual((q["title"], q["project"], q["priority"], q["notes"]),
+                         ("Fix login", "web", 2, "check Safari"))
+        self.assertEqual(todos.parse_quick("Plain thing", "proj")["project"], "proj")
+
+    def test_todo_take_done_flow(self):
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        r = e.hook("UserPromptSubmit", prompt="/tally:todo Fix the export !!! due:+2d")
+        self.assertIn("Todo #1 in proj: Fix the export", r["reason"])          # project = cwd basename
+        r = e.hook("UserPromptSubmit", prompt="/tally:todos")
+        self.assertIn("#1 Fix the export !!!", r["reason"])
+        r = e.hook("UserPromptSubmit", prompt="/tally:take 1")
+        self.assertIn("Todo #1 taken", r["reason"])
+        from tally import db, tasks, todos
+        conn = db.connect()
+        task = tasks.active_for_session(conn, SID)
+        self.assertEqual((task["todo_id"], task["name"], task["project"]), (1, "Fix the export", "proj"))
+        self.assertEqual(todos.get(conn, 1)["status"], "doing")
+        time.sleep(0.01)
+        e.append(e.main(), assistant(time.time(), "m1", "r1", out=70))
+        e.hook("Stop")
+        r = e.hook("UserPromptSubmit", prompt="/tally:done shipped it")
+        self.assertIn("✓ Todo #1 done", r["reason"])
+        self.assertIn("Task #1 ended", r["reason"])
+        self.assertEqual(todos.get(conn, 1)["status"], "done")
+        self.assertEqual(tasks.get(conn, 1)["status"], "ended")
+        self.assertEqual(todos.linked_stats(conn, 1)["output"], 70)
+        # ending a todo's task without /tally:done puts the todo back to "todo"
+        e.hook("UserPromptSubmit", prompt="/tally:todo Second")
+        e.hook("UserPromptSubmit", prompt="/tally:take 2")
+        e.hook("UserPromptSubmit", prompt="/tally:end")
+        self.assertEqual(todos.get(conn, 2)["status"], "todo")
+
+    def test_do_hands_the_todo_to_claude(self):
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/tally:todo Write the release notes -- mention the new dashboard")
+        r = e.hook("UserPromptSubmit", prompt="/tally:do 1", prompt_id="p-do")
+        ctx = r["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(r["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        self.assertIn("Tally todo #1", ctx)
+        self.assertIn("mention the new dashboard", ctx)
+        from tally import db, tasks
+        conn = db.connect()
+        task = tasks.active_for_session(conn, SID)
+        self.assertEqual(task["todo_id"], 1)
+        self.assertEqual(conn.execute("SELECT prompt_id FROM prompts WHERE task_id = ?", (task["id"],)).fetchone()[0],
+                         "p-do")
+
+    def test_session_start_reminder(self):
+        e = self.env
+        e.hook("UserPromptSubmit", prompt="/tally:todo Call the client due:dnes")
+        r = e.hook("SessionStart", source="startup")
+        self.assertIn("first time in project proj", r["systemMessage"])
+        self.assertIn("📋 proj: 1 open todo", r["systemMessage"])
+        self.assertIn("Call the client", r["systemMessage"])
+        self.assertIsNone(e.hook("SessionStart", source="clear"))
+        from tally import settings
+        settings.set_value("todos.reminder", "off")
+        r = e.hook("SessionStart", source="startup")
+        self.assertNotIn("Call the client", r["systemMessage"])      # only the project setup question is left
+        e.hook("UserPromptSubmit", prompt="/tally:project tasks")
+        self.assertIsNone(e.hook("SessionStart", source="startup"))
+
+    def test_per_prompt_breakdown_is_exact(self):
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/tally:start stats")
+        e.hook("UserPromptSubmit", prompt="first prompt", prompt_id="P1")
+        t = time.time() + 0.01
+        main, sub = e.main(), e.sdir() / "subagents"
+        e.append(main, user(t, "first prompt", prompt_id="P1"),
+                 assistant(t + 0.01, "a1", "ra1", out=10),
+                 user(t + 0.02, content=[{"type": "tool_result", "tool_use_id": "x", "content": "ok"}], prompt_id="P1"),
+                 assistant(t + 0.03, "a2", "ra2", out=20))
+        e.meta(sub / "agent-s1.meta.json", {"agentType": "Explore", "description": "look"})
+        e.append(sub / "agent-s1.jsonl", user(t + 0.02, "go", agent_id="s1", prompt_id="P1"),
+                 assistant(t + 0.04, "s1m", "rs1", out=5, agent_id="s1", sidechain=True))
+        e.hook("Stop")
+        e.hook("UserPromptSubmit", prompt="second prompt", prompt_id="P2")
+        e.append(main, user(t + 0.1, "second prompt", prompt_id="P2"), assistant(t + 0.11, "b1", "rb1", out=300),
+                 user(t + 0.2, "<task-notification>", prompt_id="AUTO"), assistant(t + 0.21, "c1", "rc1", out=1))
+        e.hook("Stop")
+        from tally import db, report, tasks
+        conn = db.connect()
+        rep = report.build(conn, tasks.get(conn, 1))
+        rows = {p["prompt"]: p for p in rep["prompts"]}
+        self.assertEqual(rows["first prompt"]["output"], 35)        # 10 + 20 + subagent 5
+        self.assertEqual(rows["first prompt"]["agents"], 1)
+        self.assertEqual(rows["second prompt"]["output"], 300)
+        self.assertEqual(rep["stats"]["prompts"], 2)
+        self.assertEqual(rep["stats"]["automatic"]["output"], 1)
+        self.assertEqual(rep["stats"]["automatic_turns"], 1)
+        self.assertEqual(rep["stats"]["tokens_per_prompt"], round(rep["totals"]["total"] / 2))
+
+    def test_tool_calls_at_depth_calls(self):
+        e = self.env
+        from tally import db, report, settings, tasks
+        settings.set_value("log.depth", "calls")
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/tally:start tools")
+        t = time.time() + 0.01
+        e.append(e.main(),
+                 user(t, "do it", prompt_id="P1"),
+                 assistant(t + 0.01, "m1", "r1", content=[{"type": "tool_use", "id": "tu1", "name": "Bash", "input": {}},
+                                                          {"type": "tool_use", "id": "tu2", "name": "Read", "input": {}}]),
+                 user(t + 0.02, prompt_id="P1", content=[{"type": "tool_result", "tool_use_id": "tu1", "is_error": True,
+                                                         "content": "boom"}]),
+                 assistant(t + 0.03, "m2", "r2", content=[{"type": "tool_use", "id": "tu3", "name": "Bash", "input": {}}]))
+        e.hook("Stop")
+        rep = report.build(db.connect(), tasks.get(db.connect(), 1))
+        tools = {x["tool"]: x for x in rep["stats"]["tools"]}
+        self.assertEqual((tools["Bash"]["calls"], tools["Bash"]["errors"]), (2, 1))
+        self.assertEqual(tools["Read"]["calls"], 1)
+        self.assertEqual((rep["stats"]["tool_calls"], rep["stats"]["tool_errors"]), (3, 1))
+        settings.set_value("log.depth", "summary")
+        rep = report.build(db.connect(), tasks.get(db.connect(), 1))
+        self.assertIsNone(rep["prompts"])
+        self.assertIsNone(rep["stats"]["tools"])
+
+    def test_prompt_storage_modes(self):
+        e = self.env
+        from tally import db, settings
+        e.append(e.main(), user(time.time() - 10))
+        settings.set_value("log.prompts", "preview")
+        e.hook("UserPromptSubmit", prompt="/tally:start privacy")
+        e.hook("UserPromptSubmit", prompt="x" * 1000)
+        settings.set_value("log.prompts", "off")
+        e.hook("UserPromptSubmit", prompt="secret prompt")
+        rows = db.connect().execute("SELECT prompt FROM prompts ORDER BY id").fetchall()
+        self.assertEqual(len(rows[0]["prompt"]), 300)
+        self.assertIsNone(rows[1]["prompt"])                       # counted, not stored
+        with self.assertRaises(ValueError):
+            settings.set_value("log.prompts", "everything")
+
+    def test_plan_import_progress_and_next(self):
+        e = self.env
+        plan = e.tmp / "plan.md"
+        plan.write_text("""# Export plan
+
+### Task 1: CSV writer
+- [x] **Step 1: failing test**
+- [ ] **Step 2: implement**
+
+### Task 2: CLI flag
+**Step 1: add --format**
+
+```
+- [ ] not a step (code)
+```
+## Notes
+- [ ] Update README
+""")
+        from tally import db, todos
+        conn = db.connect()
+        r = todos.import_plan(conn, str(plan), project="web")
+        self.assertEqual((r["created"], r["progress_done"], r["progress_total"]), (7, 1, 4))
+        r = todos.import_plan(conn, str(plan), project="web")
+        self.assertEqual((r["created"], r["updated"]), (0, 0))      # idempotent
+        nxt = todos.next_todo(conn, "web")
+        self.assertEqual(nxt["title"], "implement")                 # plan order, not position per parent
+        todos.set_status(conn, nxt["id"], "done")
+        task1 = conn.execute("SELECT * FROM todos WHERE title = 'CSV writer'").fetchone()
+        self.assertEqual(task1["status"], "done")                   # all steps done -> task done
+        for title in ("add --format", "Update README"):
+            todos.set_status(conn, conn.execute("SELECT id FROM todos WHERE title = ?", (title,)).fetchone()[0], "done")
+        root = todos.get(conn, r["plan_id"])
+        self.assertEqual(root["status"], "done")                    # -> plan done
+        todos.set_status(conn, conn.execute("SELECT id FROM todos WHERE title = 'Update README'").fetchone()[0], "todo")
+        self.assertEqual(todos.get(conn, r["plan_id"])["status"], "todo")   # reopening reopens the plan
+
+    def test_dashboard_writes_need_same_origin(self):
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from tally import server
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % port
+
+        def post(path, body, headers):
+            req = urllib.request.Request(base + path, data=json.dumps(body).encode(), method="POST",
+                                         headers=dict({"Content-Type": "application/json"}, **headers))
+            return urllib.request.urlopen(req, timeout=5)
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as cm:      # a plain cross-site form/fetch
+                post("/api/todos", {"text": "evil"}, {})
+            self.assertEqual(cm.exception.code, 403)
+            with self.assertRaises(urllib.error.HTTPError) as cm:      # foreign Origin
+                post("/api/todos", {"text": "evil"}, {"X-Tally": "1", "Origin": "https://evil.example"})
+            self.assertEqual(cm.exception.code, 403)
+            r = post("/api/todos", {"text": "From the dashboard @web !"}, {"X-Tally": "1",
+                                                                          "Origin": "http://127.0.0.1:%d" % port})
+            todo = json.loads(r.read())
+            self.assertEqual((todo["title"], todo["project"], todo["priority"]), ("From the dashboard", "web", 1))
+            r = post("/api/todos/%d" % todo["id"], {"status": "blocked"}, {"X-Tally": "1"})
+            self.assertEqual(json.loads(r.read())["status"], "blocked")
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                post("/api/settings", {"key": "log.depth", "value": "everything"}, {"X-Tally": "1"})
+            self.assertEqual(cm.exception.code, 400)
+            board = json.loads(urllib.request.urlopen(base + "/api/todos?project=web", timeout=5).read())
+            self.assertEqual(board["todos"][0]["status"], "blocked")
+        finally:
+            httpd.shutdown()
+
+
+class Projects(unittest.TestCase):
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def test_setup_question_and_modes(self):
+        e = self.env
+        r = e.hook("SessionStart", source="startup")
+        self.assertIn("/tally:project track", r["systemMessage"])
+        r = e.hook("UserPromptSubmit", prompt="/tally:project track")
+        self.assertIn("✓ proj: track", r["reason"])
+        self.assertIsNone(e.hook("SessionStart", source="startup"))     # decided: not asked again
+        e.hook("UserPromptSubmit", prompt="/tally:project off")
+        e.hook("UserPromptSubmit", prompt="/tally:todo something")
+        self.assertIsNone(e.hook("SessionStart", source="startup"))     # off: no reminder either
+
+    def test_track_mode_counts_every_session(self):
+        e = self.env
+        e.hook("SessionStart", source="startup")
+        e.hook("UserPromptSubmit", prompt="/tally:project track")
+        t = time.time() - 1                                               # clearly before the task below
+        e.append(e.main(), user(t, "no task here", prompt_id="P0"), assistant(t + 0.01, "free", "rf", out=40))
+        e.hook("Stop")                                                    # no task, still ingested
+        e.hook("UserPromptSubmit", prompt="/tally:start with task")
+        time.sleep(0.01)
+        e.append(e.main(), assistant(time.time(), "in_task", "rt", out=60))
+        e.hook("Stop")
+        from tally import db, projects
+        st = projects.stats(db.connect(), "proj")
+        self.assertEqual(st["mode"], "track")
+        self.assertEqual(st["totals"]["output"], 100)                    # whole project
+        self.assertEqual(st["sessions"], 1)
+        self.assertEqual(st["tasks"]["count"], 1)
+        self.assertAlmostEqual(st["tasks"]["share"], 1270 / 2520.0, places=3)   # the task call / all calls
+        self.assertEqual(sum(d["output"] for d in st["daily"]), 100)
+        r = e.hook("UserPromptSubmit", prompt="/tally:project")
+        self.assertIn("Project proj", r["reason"])
+        r = e.hook("UserPromptSubmit", prompt="/tally:projects")
+        self.assertIn("proj", r["reason"])
+
+    def test_tasks_mode_counts_only_tasks(self):
+        e = self.env
+        e.hook("SessionStart", source="startup")
+        e.hook("UserPromptSubmit", prompt="/tally:project tasks")
+        t = time.time()
+        e.append(e.main(), assistant(t, "free", "rf", out=40))
+        e.hook("Stop")                                                    # not tracked, no task: skipped
+        e.hook("UserPromptSubmit", prompt="/tally:start counted")
+        time.sleep(0.01)
+        e.append(e.main(), assistant(time.time(), "in_task", "rt", out=60))
+        e.hook("Stop")
+        from tally import db, projects
+        st = projects.stats(db.connect(), "proj")
+        self.assertEqual(st["totals"]["output"], 60)
+        self.assertIsNone(st["tasks"]["share"])
 
 
 class CliSmoke(unittest.TestCase):

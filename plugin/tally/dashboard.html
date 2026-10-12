@@ -24,6 +24,7 @@
   --seq: #2a78d6;       /* token share (single hue, magnitude) */
   --seq-track: #e1e0d9;
   --good: #0ca30c;
+  --critical: #d03b3b;
   --muted-status: #898781;
 }
 @media (prefers-color-scheme: dark) {
@@ -121,27 +122,84 @@ tr:hover td { background: var(--hover); }
   display: none; max-width: 320px; }
 #tip b { display: block; margin-bottom: 2px; }
 .note { color: var(--text-muted); font-size: 12px; padding: 0 20px 18px; }
+nav.tabs { display: flex; gap: 2px; margin-left: 12px; }
+nav.tabs a { color: var(--text-secondary); text-decoration: none; padding: 5px 12px; border-radius: 6px; font-weight: 550; }
+nav.tabs a:hover { background: var(--hover); }
+nav.tabs a.on { background: var(--select); color: var(--text-primary); }
+.view { display: none; }
+.view.on { display: block; }
+#view-tasks.on { display: grid; }
+.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.crit { color: var(--critical); font-weight: 600; }
+.wrap { padding: 20px 24px; }
+.addbar { display: flex; gap: 8px; margin-bottom: 16px; }
+.addbar input { flex: 1; font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.addbar .hint { color: var(--text-muted); font-size: 12px; align-self: center; }
+.board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .board { grid-template-columns: repeat(2, minmax(220px, 1fr)); } }
+.col { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 120px; }
+.col h3 { font-size: 12px; margin: 2px 4px 10px; color: var(--text-secondary); display: flex; justify-content: space-between; }
+.tcard { border: 1px solid var(--border); border-radius: 8px; padding: 10px 11px; margin-bottom: 8px; background: var(--page); }
+.tcard .ttl { font-weight: 600; overflow-wrap: anywhere; }
+.tcard .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.tcard select { font-size: 12px; padding: 2px 6px; }
+.tcard details { margin-top: 6px; font-size: 13px; }
+.tcard summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
+.tcard .steps { list-style: none; padding: 4px 0 0; margin: 0; }
+.tcard .steps li { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; }
+.tcard .steps li.done span { color: var(--text-muted); text-decoration: line-through; }
+.prog { display: flex; align-items: center; gap: 6px; }
+.prog .track { width: 80px; height: 6px; background: var(--seq-track); border-radius: 3px; overflow: hidden; }
+.prog .bar { height: 100%; background: var(--seq); }
+.settings { max-width: 760px; }
+.setrow { display: grid; grid-template-columns: 200px 180px 1fr; gap: 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border); }
+.setrow:first-of-type { border-top: none; }
+.setrow code { font-size: 12px; }
+.setrow .d { color: var(--text-secondary); font-size: 13px; }
+.setrow .ok { color: var(--good); font-size: 12px; margin-left: 6px; }
+.toolbar { display: flex; gap: 6px; align-items: center; }
+.ptable td.ptxt { white-space: normal; max-width: 0; width: 38%; color: var(--text-secondary); text-align: left; }
+.ptable th:nth-child(2) { text-align: left; }
+.ptable td.ptxt span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
 </head>
 <body>
 <div class="viz-root">
   <header>
     <h1>tally</h1>
-    <span class="sub" id="sub">tokens &amp; time per Claude Code task</span>
+    <nav class="tabs" aria-label="Views">
+      <a href="#tasks" data-view="tasks">Tasks</a><a href="#todos" data-view="todos">Todos</a><a href="#projects" data-view="projects">Projects</a><a href="#settings" data-view="settings">Settings</a>
+    </nav>
     <span class="spacer"></span>
+    <select id="project" aria-label="Project"><option value="">All projects</option></select>
     <span class="sub num" id="updated"></span>
     <select id="theme" aria-label="Theme">
       <option value="">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
     </select>
     <button id="refresh">Refresh</button>
   </header>
-  <main>
+  <main id="view-tasks" class="view">
     <section class="card tasklist" aria-label="Tasks">
       <h2>Tasks</h2>
       <div id="tasks"><div class="empty">Loading…</div></div>
     </section>
     <section class="card" id="detail"><div class="empty">Select a task.</div></section>
   </main>
+  <div id="view-todos" class="view wrap">
+    <form class="addbar" id="addform" autocomplete="off">
+      <input id="addtext" placeholder="Add a todo… e.g. Fix login redirect @web !! due:fri -- check Safari" aria-label="New todo">
+      <button type="submit">Add</button>
+    </form>
+    <div class="board" id="board"></div>
+  </div>
+  <div id="view-projects" class="view wrap">
+    <section class="card"><h2>Projects</h2><div id="projtable"></div></section>
+    <section class="card" id="projdetail" style="margin-top:20px"></section>
+  </div>
+  <div id="view-settings" class="view wrap">
+    <section class="card settings"><h2>Settings</h2><div id="settings"></div></section>
+    <p class="note" style="padding:12px 0">Stored in ~/.claude/tally/config.json. Also: <code>/tally:settings</code> in Claude Code or <code>tally settings</code>.</p>
+  </div>
   <div id="tip" role="tooltip"></div>
 </div>
 <script>
@@ -187,8 +245,39 @@ document.addEventListener("mousemove", e => {
 });
 
 // ---------------------------------------------------------------- state
-let selected = Number(location.hash.slice(1)) || null;
+function parseHash() {
+  const h = location.hash.slice(1);
+  if (/^\d+$/.test(h)) return {view: "tasks", id: Number(h)};
+  const [v, id] = h.split("/");
+  return {view: ["tasks", "todos", "projects", "settings"].includes(v) ? v : "tasks", id: Number(id) || null};
+}
+let view = parseHash().view;
+let selected = parseHash().id;
 let tasks = [];
+let project = localStorage.getItem("tc-project") || "";
+async function postJSON(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json", "X-Tally": "1"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d;
+}
+function setView(v) {
+  view = v;
+  document.querySelectorAll(".view").forEach(el => el.classList.toggle("on", el.id === "view-" + v));
+  document.querySelectorAll("nav.tabs a").forEach(a => a.classList.toggle("on", a.dataset.view === v));
+  if (v === "todos") loadTodos();
+  if (v === "settings") loadSettings();
+  if (v === "projects") loadProjectsView();
+  if (v === "tasks") refreshAll();
+}
+async function loadProjects() {
+  const d = await getJSON("/api/projects");
+  const sel = $("#project");
+  sel.innerHTML = '<option value="">All projects</option>' + d.projects.map(p =>
+    `<option value="${esc(p.project)}">${esc(p.project)}${p.open_todos ? " · " + p.open_todos + " open" : ""}</option>`).join("");
+  sel.value = d.projects.some(p => p.project === project) ? project : "";
+}
+$("#project").onchange = e => { project = e.target.value; localStorage.setItem("tc-project", project); selected = null; setView(view); };
 const collapsed = new Set();
 const seenKeys = new Set();       // nodes with many children start collapsed
 let lastDetail = null;
@@ -200,7 +289,7 @@ async function getJSON(url) {
 }
 
 async function loadTasks() {
-  const d = await getJSON("/api/tasks?limit=200");
+  const d = await getJSON("/api/tasks?limit=200" + (project ? "&project=" + encodeURIComponent(project) : ""));
   tasks = d.tasks;
   if (!selected && tasks.length) selected = tasks[0].id;
   renderTasks();
@@ -218,11 +307,11 @@ function renderTasks() {
       <span class="dot ${t.status === "active" ? "active" : ""}" title="${t.status}"></span>
       <span class="name" title="${esc(t.name)}">#${t.id} · ${esc(t.name)}</span>
       <span class="tok num">${fmtTok(t.total)}</span>
-      <span class="meta num"><span>${t.status === "active" ? "active" : "ended"}</span><span>${fmtWhen(t.started_at)}</span>
+      <span class="meta num"><span>${t.status === "active" ? "active" : "ended"}</span>${t.project && !project ? `<span class="chip">${esc(t.project)}</span>` : ""}<span>${fmtWhen(t.started_at)}</span>
         <span>wall ${fmtDur(t.wall_s)}</span><span>active ${fmtDur(t.active_s)}</span><span>${fmtCost(t.cost, t.cost_partial)}</span></span>
     </div>`).join("");
   el.querySelectorAll(".trow").forEach(r => {
-    const go = () => { selected = Number(r.dataset.id); location.hash = selected; renderTasks(); loadDetail(); };
+    const go = () => { selected = Number(r.dataset.id); history.replaceState(null, "", "#tasks/" + selected); renderTasks(); loadDetail(); };
     r.onclick = go; r.onkeydown = e => { if (e.key === "Enter") go(); };
   });
 }
@@ -257,6 +346,8 @@ function renderDetail(rep) {
   h.push(`<div class="dhead"><h2>#${t.id} · ${esc(t.name)}</h2>
     <div class="line"><span class="badge"><span class="dot ${active ? "active" : ""}"></span>${active ? "active" : "ended"}</span>
     <span class="num">${fmtWhen(t.started_at)}${t.ended_at ? " → " + fmtWhen(t.ended_at) : ""}</span>
+    ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
+    ${t.todo ? `<a class="chip" href="#todos" title="linked todo">todo #${t.todo.id} · ${esc(t.todo.status)}</a>` : ""}
     ${t.cwd ? `<span class="muted">${esc(t.cwd)}</span>` : ""}
     <span class="muted">${t.sessions.length} session${t.sessions.length === 1 ? "" : "s"} · ${t.prompt_count} prompt${t.prompt_count === 1 ? "" : "s"}</span></div></div>`);
   if (t.initial_prompt) h.push(`<div class="prompt">${esc(t.initial_prompt)}</div>`);
@@ -323,9 +414,33 @@ function renderDetail(rep) {
        <td class="muted" style="white-space:normal">${w.phases.map(p => `${esc(p.phase)} (${p.agents}) ${fmtTok(p.total)}`).join(" · ")}</td></tr>`) + `</div>`);
   }
 
+  const st = rep.stats || {};
+  if (st.prompts !== undefined) {
+    h.push(`<div class="section"><div class="section-title">Stats</div></div><div class="tiles" style="margin-top:0">
+      ${tile("Prompts", fmtFull(st.prompts), st.automatic_turns ? "+" + st.automatic_turns + " automatic turns" : "", "user prompts while the task was open; automatic turns are started by Claude Code itself (e.g. background agents finishing)")}
+      ${tile("Tokens / prompt", fmtTok(st.tokens_per_prompt), st.cost_per_prompt != null ? fmtCost(st.cost_per_prompt) + " per prompt" : "")}
+      ${tile("Avg turn", fmtDur(st.avg_turn_s), "longest " + fmtDur(st.max_turn_s))}
+      ${tile("Cache hit", st.cache_hit_ratio != null ? (st.cache_hit_ratio * 100).toFixed(0) + "%" : "–", "cache reads / all input", "share of input tokens served from the prompt cache")}
+      ${tile("Output / active min", fmtTok(st.output_per_active_min), "generation speed")}
+      ${tile("Tool calls", st.tool_calls != null ? fmtFull(st.tool_calls) : "–", st.tool_calls != null ? (st.tool_errors || 0) + " errors" : "log.depth = calls to enable", "")}
+    </div>`);
+  }
   if (rep.prompts && rep.prompts.length) {
-    h.push(`<div class="section"><div class="section-title">Prompts (${rep.prompts.length})</div><ol class="prompts">${
-      rep.prompts.map(p => `<li><time class="num">${fmtWhen(p.ts)}</time>${esc(p.prompt.length > 600 ? p.prompt.slice(0, 600) + "…" : p.prompt)}</li>`).join("")}</ol></div>`);
+    const maxTok = Math.max(...rep.prompts.map(p => p.total), 1);
+    h.push(`<div class="section"><div class="section-title">Per prompt (${rep.prompts.length})</div><table class="ptable"><thead><tr><th>#</th><th>prompt</th><th>tokens</th><th></th><th>output</th><th>cost</th><th>took</th><th>calls</th><th>agents</th>${st.tool_calls != null ? "<th>tools</th>" : ""}</tr></thead><tbody>${
+      rep.prompts.map(p => `<tr><td class="num muted">${p.index}</td><td class="ptxt"><span title="${esc(p.prompt || "")}">${p.prompt != null ? esc(p.prompt) : '<i class="muted">not stored</i>'}</span></td>
+        <td class="num">${fmtTok(p.total)}</td><td><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.total, maxTok)}%"></div></div></div></td>
+        <td class="num">${fmtTok(p.output)}</td><td class="num">${fmtCost(p.cost, p.cost_partial)}</td><td class="num">${fmtDur(p.duration_s)}</td><td class="num">${p.calls}</td><td class="num">${p.agents || ""}</td>${st.tool_calls != null ? `<td class="num">${p.tool_calls ?? ""}</td>` : ""}</tr>`).join("")}
+      ${st.automatic ? `<tr><td></td><td class="ptxt muted">automatic turns (${st.automatic.turns})</td><td class="num">${fmtTok(st.automatic.total)}</td><td></td><td class="num">${fmtTok(st.automatic.output)}</td><td class="num">${fmtCost(st.automatic.cost)}</td><td></td><td class="num">${st.automatic.calls}</td><td></td>${st.tool_calls != null ? "<td></td>" : ""}</tr>` : ""}
+      </tbody></table></div>`);
+  } else if (rep.prompt_list && rep.prompt_list.length) {
+    h.push(`<div class="section"><div class="section-title">Prompts (${rep.prompt_list.length})</div><ol class="prompts">${
+      rep.prompt_list.map(p => `<li><time class="num">${fmtWhen(p.ts)}</time>${p.prompt != null ? esc(p.prompt.length > 600 ? p.prompt.slice(0, 600) + "…" : p.prompt) : '<i>not stored</i>'}</li>`).join("")}</ol></div>`);
+  }
+  if (st.tools && st.tools.length) {
+    const maxT = st.tools[0].calls;
+    h.push(`<div class="section"><div class="section-title">Tools</div><table><thead><tr><th>tool</th><th>calls</th><th></th><th>errors</th></tr></thead><tbody>${
+      st.tools.slice(0, 25).map(x => `<tr><td>${esc(x.tool)}</td><td class="num">${fmtFull(x.calls)}</td><td><div class="share"><div class="track"><div class="bar" style="width:${pct(x.calls, maxT)}%"></div></div></div></td><td class="num ${x.errors ? "crit" : "muted"}">${x.errors || ""}</td></tr>`).join("")}</tbody></table></div>`);
   }
   const un = rep.unlogged || {};
   if ((un.status === "estimated" || un.status === "partial") && un.total) {
@@ -339,16 +454,130 @@ function renderDetail(rep) {
   });
 }
 
+// ---------------------------------------------------------------- todos
+const COLS = [["doing", "▶ Doing"], ["todo", "○ Todo"], ["blocked", "⏸ Blocked"], ["done", "✓ Done (14 days)"]];
+const PRIO = {1: "!", 2: "!!", 3: "!!!"};
+function dueLabel(t, now) {
+  if (!t.due_at) return "";
+  const d = new Date(t.due_at * 1000), today = new Date(now * 1000);
+  const day = d.toLocaleDateString([], {weekday: "short", day: "numeric", month: "numeric"});
+  if (t.due_at < now && ["todo", "doing", "blocked"].includes(t.status)) return `<span class="crit">⚠ overdue ${day}</span>`;
+  return d.toDateString() === today.toDateString() ? "due today" : "due " + day;
+}
+async function loadTodos() {
+  const d = await getJSON("/api/todos?status=board" + (project ? "&project=" + encodeURIComponent(project) : ""));
+  const by = {doing: [], todo: [], blocked: [], done: []};
+  d.todos.forEach(t => (by[t.status === "dropped" ? "done" : t.status] || by.todo).push(t));
+  $("#board").innerHTML = COLS.map(([k, label]) => `<div class="col"><h3><span>${label}</span><span class="num">${by[k].length}</span></h3>${
+    by[k].map(t => card(t, d.now)).join("") || '<div class="empty" style="padding:16px">—</div>'}</div>`).join("");
+  $("#board").querySelectorAll("select[data-id]").forEach(el => el.onchange = async () => {
+    try { await postJSON("/api/todos/" + el.dataset.id, {status: el.value}); loadTodos(); } catch (e) { alertBox(e); }
+  });
+  $("#board").querySelectorAll("input[type=checkbox][data-step]").forEach(el => el.onchange = async () => {
+    try { await postJSON("/api/todos/" + el.dataset.step, {status: el.checked ? "done" : "todo"}); loadTodos(); } catch (e) { alertBox(e); }
+  });
+  $("#updated").textContent = "updated " + new Date().toLocaleTimeString();
+}
+function card(t, now) {
+  const [done, total] = t.progress, w = t.work;
+  return `<div class="tcard"><div class="ttl">${PRIO[t.priority] ? `<b style="color:var(--series-2)">${PRIO[t.priority]}</b> ` : ""}${esc(t.title)} <span class="muted num">#${t.id}</span></div>
+    <div class="row">${!project && t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}${dueLabel(t, now)}
+      ${total ? `<span class="prog"><span class="track"><span class="bar" style="display:block;width:${pct(done, total)}%"></span></span><span class="num">${done}/${total}</span></span>` : ""}</div>
+    ${w.tasks ? `<div class="row num" data-tip="measured over ${w.tasks} task(s)${w.active_task ? " · task #" + w.active_task + " running" : ""}">${w.active_task ? '<span class="dot active" style="margin:0"></span>' : ""}${fmtTok(w.total)} tok · ${fmtCost(w.cost)} · ${fmtDur(w.active_s)} active</div>` : ""}
+    <div class="row"><select data-id="${t.id}" aria-label="status of todo ${t.id}">${["todo", "doing", "blocked", "done", "dropped"].map(s => `<option ${s === t.status ? "selected" : ""}>${s}</option>`).join("")}</select>
+      <span class="muted" title="pick up in Claude Code">/tally:do ${t.id}</span></div>
+    ${(t.notes || t.steps.length) ? `<details><summary>${t.steps.length ? t.steps.length + " steps" : "notes"}</summary>${t.notes ? `<div class="muted" style="white-space:pre-wrap;margin:4px 0">${esc(t.notes)}</div>` : ""}
+      <ul class="steps">${t.steps.map(c => `<li class="${c.status === "done" ? "done" : ""}"><input type="checkbox" data-step="${c.id}" ${c.status === "done" ? "checked" : ""} aria-label="step ${c.id} done"><span>${esc(c.title)}</span></li>`).join("")}</ul></details>` : ""}
+  </div>`;
+}
+function alertBox(e) { $("#updated").textContent = "error: " + e.message; }
+$("#addform").onsubmit = async e => {
+  e.preventDefault();
+  const text = $("#addtext").value.trim();
+  if (!text) return;
+  try { await postJSON("/api/todos", {text, project: project || null}); $("#addtext").value = ""; loadTodos(); loadProjects(); }
+  catch (err) { alertBox(err); }
+};
+
+// ---------------------------------------------------------------- projects
+const MODE_HELP = {track: "every session counted", tasks: "only tasks", off: "ignored", ask: "not set up yet"};
+async function loadProjectsView() {
+  const d = await getJSON("/api/projects?full=1");
+  if (!d.projects.length) { $("#projtable").innerHTML = '<div class="empty">No projects yet.</div>'; $("#projdetail").innerHTML = ""; return; }
+  $("#projtable").innerHTML = `<table><thead><tr><th>project</th><th>tracking</th><th>30 days</th><th>30d cost</th><th>all time</th><th>cost</th><th>sessions</th><th>tasks</th><th>open todos</th><th>last active</th></tr></thead><tbody>${
+    d.projects.map(p => `<tr data-p="${esc(p.project)}" style="cursor:pointer"><td><b>${esc(p.project)}</b></td>
+      <td><select data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
+      <td class="num">${fmtTok(p.last_30d.total)}</td><td class="num">${fmtCost(p.last_30d.cost)}</td><td class="num">${fmtTok(p.totals.total)}</td><td class="num">${fmtCost(p.totals.cost)}</td>
+      <td class="num">${p.sessions}</td><td class="num">${p.tasks}</td><td class="num">${p.open_todos}</td><td class="num muted">${p.last_activity ? fmtWhen(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
+    <div class="note" style="padding:10px 0 0">track = every session in the project is counted · tasks = only tasks you start · off = ignored</div>`;
+  $("#projtable").querySelectorAll("select[data-mode]").forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = async () => {
+    try { await postJSON("/api/projects/" + encodeURIComponent(el.dataset.mode), {mode: el.value}); loadProjectsView(); } catch (e) { alertBox(e); } }; });
+  $("#projtable").querySelectorAll("tr[data-p]").forEach(tr => tr.onclick = () => { project = tr.dataset.p; localStorage.setItem("tc-project", project); $("#project").value = project; loadProjectDetail(project); });
+  loadProjectDetail(project && d.projects.some(p => p.project === project) ? project : d.projects[0].project);
+}
+async function loadProjectDetail(name) {
+  const st = await getJSON("/api/projects/" + encodeURIComponent(name) + "?days=&series=30");
+  const peak = Math.max(...st.daily.map(x => x.total), 1);
+  const W = Math.max(320, ($("#projdetail").clientWidth || 760) - 40), H = 150, bw = W / st.daily.length;
+  const bars = st.daily.map((x, i) => {
+    const h = x.total ? Math.max(2, (H - 20) * x.total / peak) : 0;
+    return `<g data-tip="<b>${x.day}</b>${fmtFull(x.total)} tokens · ${fmtCost(x.cost)}"><rect x="${i * bw}" y="0" width="${bw}" height="${H}" fill="transparent"/>${h ? `<rect x="${i * bw + 2}" y="${H - 16 - h}" width="${bw - 4}" height="${h}" rx="3" fill="var(--seq)"/>` : ""}</g>`;
+  }).join("");
+  const td = st.todos, tk = st.tasks;
+  $("#projdetail").innerHTML = `<div class="dhead"><h2>${esc(st.project)}</h2><div class="line"><span class="badge">${esc(st.mode)} · ${MODE_HELP[st.mode] || ""}</span>${st.path ? `<span class="muted">${esc(st.path)}</span>` : ""}</div></div>
+    <div class="tiles">
+      ${tile("All time", fmtTok(st.totals.total), fmtCost(st.totals.cost) + " · " + fmtFull(st.totals.calls) + " calls")}
+      ${tile("Last 30 days", fmtTok(st.last_30d.total), fmtCost(st.last_30d.cost))}
+      ${tile("Last 7 days", fmtTok(st.last_7d.total), fmtCost(st.last_7d.cost))}
+      ${tile("Sessions", fmtFull(st.sessions), st.last_activity ? "last " + fmtWhen(st.last_activity) : "")}
+      ${tile("Tasks", fmtFull(tk.count), tk.share != null ? (tk.share * 100).toFixed(0) + "% of tokens via tasks" : (tk.active ? tk.active + " active" : ""))}
+      ${tile("Todos", fmtFull(td.todo + td.doing + td.blocked) + " open", td.done + " done")}
+    </div>
+    <div class="section"><div class="section-title">Tokens per day · last 30 days</div>
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="tokens per day" style="display:block">${bars}
+        <line x1="0" x2="${W}" y1="${H - 16}" y2="${H - 16}" stroke="var(--baseline)"/>
+        <text x="0" y="${H - 2}" font-size="11" fill="var(--text-muted)">${st.daily[0].day}</text>
+        <text x="${W}" y="${H - 2}" font-size="11" fill="var(--text-muted)" text-anchor="end">${st.daily[st.daily.length - 1].day}</text>
+        <text x="0" y="12" font-size="11" fill="var(--text-muted)">peak ${fmtTok(peak)}</text></svg></div>
+    ${st.by_model.length ? `<div class="section two"><div><div class="section-title">By model</div><table><thead><tr><th>model</th><th>tokens</th><th>output</th><th>cost</th></tr></thead><tbody>${st.by_model.map(m => `<tr><td>${esc(m.model)}</td><td class="num">${fmtTok(m.total)}</td><td class="num">${fmtTok(m.output)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join("")}</tbody></table></div>
+      <div><div class="section-title">Recent tasks</div><table><thead><tr><th>task</th><th>tokens</th><th>cost</th><th>active</th></tr></thead><tbody>${tk.recent.map(t => `<tr><td><a href="#tasks/${t.id}">#${t.id} ${esc(t.name)}</a></td><td class="num">${fmtTok(t.total)}</td><td class="num">${fmtCost(t.cost)}</td><td class="num">${fmtDur(t.active_s)}</td></tr>`).join("") || '<tr><td class="muted">none</td></tr>'}</tbody></table></div></div>` : ""}`;
+}
+
+// ---------------------------------------------------------------- settings
+async function loadSettings() {
+  const d = await getJSON("/api/settings");
+  $("#settings").innerHTML = d.settings.map(s => {
+    let ctl;
+    if (s.allowed === "on/off") ctl = `<select data-key="${s.key}"><option value="on" ${s.value ? "selected" : ""}>on</option><option value="off" ${!s.value ? "selected" : ""}>off</option></select>`;
+    else if (s.allowed === "number") ctl = `<input data-key="${s.key}" type="number" min="0" value="${esc(s.value)}" style="width:100px">`;
+    else ctl = `<select data-key="${s.key}">${s.allowed.split("|").map(v => `<option ${v === s.value ? "selected" : ""}>${v}</option>`).join("")}</select>`;
+    return `<div class="setrow"><code>${s.key}</code><span>${ctl}<span class="ok" id="ok-${s.key.replace(/\./g, "-")}"></span></span><span class="d">${esc(s.description)}</span></div>`;
+  }).join("");
+  $("#settings").querySelectorAll("[data-key]").forEach(el => el.onchange = async () => {
+    const ok = $("#ok-" + el.dataset.key.replace(/\./g, "-"));
+    try { await postJSON("/api/settings", {key: el.dataset.key, value: el.value}); ok.textContent = "saved"; setTimeout(() => ok.textContent = "", 1500); }
+    catch (e) { ok.textContent = e.message; }
+  });
+}
+
+// ---------------------------------------------------------------- boot
 async function refreshAll() {
   try { await loadTasks(); await loadDetail(); }
   catch (e) { $("#updated").textContent = "server not reachable"; }
 }
-$("#refresh").onclick = refreshAll;
-window.addEventListener("hashchange", () => { const id = Number(location.hash.slice(1)); if (id && id !== selected) { selected = id; renderTasks(); loadDetail(); } });
-refreshAll();
+$("#refresh").onclick = () => { loadProjects(); setView(view); };
+window.addEventListener("hashchange", () => {
+  const h = parseHash();
+  if (h.view !== view) setView(h.view);
+  if (h.view === "tasks" && h.id && h.id !== selected) { selected = h.id; renderTasks(); loadDetail(); }
+});
+loadProjects().catch(() => {}).then(() => setView(view));
 setInterval(() => {
-  const cur = tasks.find(t => t.id === selected);
   if (document.hidden) return;
+  if (view === "todos") { loadTodos().catch(() => {}); return; }
+  if (view === "projects") return;
+  if (view !== "tasks") return;
+  const cur = tasks.find(t => t.id === selected);
   if (tasks.some(t => t.status === "active")) loadTasks().catch(() => {});
   if (cur && cur.status === "active") loadDetail();
 }, 5000);

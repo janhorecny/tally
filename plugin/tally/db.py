@@ -7,7 +7,7 @@ from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -19,8 +19,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     ended_at        REAL,
     cwd             TEXT,
     origin_session  TEXT,
-    created_by      TEXT,                                -- command | new | auto | cli
-    end_note        TEXT
+    created_by      TEXT,                                -- command | new | auto | cli | todo
+    end_note        TEXT,
+    project         TEXT,
+    todo_id         INTEGER
 );
 CREATE INDEX IF NOT EXISTS tasks_status ON tasks(status);
 
@@ -44,8 +46,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     cwd              TEXT,
     claude_pid       INTEGER,
     first_seen       REAL,
-    last_seen        REAL
+    last_seen        REAL,
+    project          TEXT
 );
+CREATE INDEX IF NOT EXISTS sessions_project ON sessions(project);
 
 -- Incremental ingest bookkeeping, one row per transcript file.
 CREATE TABLE IF NOT EXISTS files (
@@ -54,7 +58,8 @@ CREATE TABLE IF NOT EXISTS files (
     agent_id         TEXT NOT NULL DEFAULT '',
     workflow_run_id  TEXT,
     offset           INTEGER NOT NULL DEFAULT 0,
-    meta_loaded      INTEGER NOT NULL DEFAULT 0
+    meta_loaded      INTEGER NOT NULL DEFAULT 0,
+    last_prompt_id   TEXT                                 -- prompt the next lines belong to
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -100,7 +105,8 @@ CREATE TABLE IF NOT EXISTS usage (
     cache_read      INTEGER NOT NULL DEFAULT 0,
     cache_write_5m  INTEGER NOT NULL DEFAULT 0,
     cache_write_1h  INTEGER NOT NULL DEFAULT 0,
-    web_search      INTEGER NOT NULL DEFAULT 0
+    web_search      INTEGER NOT NULL DEFAULT 0,
+    prompt_id       TEXT                                 -- user prompt that caused the call
 );
 CREATE INDEX IF NOT EXISTS usage_session_ts ON usage(session_id, ts);
 
@@ -109,7 +115,8 @@ CREATE TABLE IF NOT EXISTS turns (
     uuid         TEXT PRIMARY KEY,
     session_id   TEXT NOT NULL,
     ts_end       REAL NOT NULL,
-    duration_ms  INTEGER NOT NULL
+    duration_ms  INTEGER NOT NULL,
+    prompt_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts_end);
 
@@ -118,9 +125,44 @@ CREATE TABLE IF NOT EXISTS prompts (
     task_id     INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
     session_id  TEXT,
     ts          REAL NOT NULL,
-    prompt      TEXT
+    prompt      TEXT,
+    prompt_id   TEXT
 );
 CREATE INDEX IF NOT EXISTS prompts_task ON prompts(task_id);
+
+-- Todo list: per project, status, priority, due date. Plan imports create
+-- parent/child items. Tasks link back via tasks.todo_id.
+CREATE TABLE IF NOT EXISTS todos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project     TEXT,
+    title       TEXT NOT NULL,
+    notes       TEXT,
+    status      TEXT NOT NULL DEFAULT 'todo',             -- todo | doing | blocked | done | dropped
+    priority    INTEGER NOT NULL DEFAULT 0,               -- 0 none, 1 low, 2 medium, 3 high
+    due_at      REAL,
+    parent_id   INTEGER REFERENCES todos(id) ON DELETE CASCADE,
+    position    INTEGER,
+    source      TEXT,                                     -- user | claude | import | dashboard
+    source_ref  TEXT,                                     -- plan file + item key (re-import)
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL,
+    done_at     REAL
+);
+CREATE INDEX IF NOT EXISTS todos_project_status ON todos(project, status);
+CREATE INDEX IF NOT EXISTS todos_parent ON todos(parent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS todos_source_ref ON todos(source_ref) WHERE source_ref IS NOT NULL;
+
+-- Tool calls (log depth "calls"): one row per tool_use block.
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id          TEXT PRIMARY KEY,                         -- tool_use id
+    session_id  TEXT NOT NULL,
+    agent_id    TEXT NOT NULL DEFAULT '',
+    prompt_id   TEXT,
+    ts          REAL NOT NULL,
+    tool        TEXT NOT NULL,
+    is_error    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS tool_calls_session_ts ON tool_calls(session_id, ts);
 
 -- Final report frozen when a task ends (survives transcript cleanup).
 CREATE TABLE IF NOT EXISTS task_snapshots (
@@ -141,11 +183,25 @@ CREATE TABLE IF NOT EXISTS session_costs (
     updated_at   REAL                -- when the current cost record was stored
 );
 
+-- Projects (git repositories) Tally has seen, and how to track them:
+-- ask (not decided yet) | track (every session counts) | tasks (only tasks) | off
+CREATE TABLE IF NOT EXISTS projects (
+    name        TEXT PRIMARY KEY,
+    path        TEXT,
+    mode        TEXT NOT NULL DEFAULT 'ask',
+    first_seen  REAL,
+    decided_at  REAL
+);
+
 CREATE TABLE IF NOT EXISTS kv (
     key    TEXT PRIMARY KEY,
     value  TEXT
 );
 """
+
+
+# SCHEMA is split on ";" -- comments must not contain one.
+assert not any(";" in line.split("--", 1)[1] for line in SCHEMA.splitlines() if "--" in line)
 
 
 def connect(path: Optional[Path] = None) -> sqlite3.Connection:
@@ -175,14 +231,47 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if version < SCHEMA_VERSION:
             if version and version < 3:
                 _migrate_to_3(conn)
-            for stmt in SCHEMA.split(";"):
-                if stmt.strip():
+            stmts = [x.strip() for x in SCHEMA.split(";") if x.strip()]
+            for stmt in stmts:                       # tables first ...
+                if "CREATE TABLE" in stmt:
                     conn.execute(stmt)
+            _ensure_columns(conn)                    # ... columns added in later versions ...
+            for stmt in stmts:                       # ... then indexes, which may use them
+                if "CREATE TABLE" not in stmt:
+                    conn.execute(stmt)
+            if version and version < 4:
+                _fill_projects(conn)
             conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
         raise
+
+
+# Columns added after a table first shipped: (table, column, type).
+_ADDED_COLUMNS = [
+    ("task_snapshots", "summary_json", "TEXT"),
+    ("session_costs", "updated_at", "REAL"),
+    ("tasks", "project", "TEXT"),
+    ("tasks", "todo_id", "INTEGER"),
+    ("files", "last_prompt_id", "TEXT"),
+    ("usage", "prompt_id", "TEXT"),
+    ("turns", "prompt_id", "TEXT"),
+    ("prompts", "prompt_id", "TEXT"),
+    ("sessions", "project", "TEXT"),
+]
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    for table, column, ctype in _ADDED_COLUMNS:
+        if column not in _columns(conn, table):
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, ctype))
+
+
+def _fill_projects(conn: sqlite3.Connection) -> None:
+    from . import projects
+    for row in conn.execute("SELECT id, cwd FROM tasks WHERE project IS NULL AND cwd IS NOT NULL").fetchall():
+        conn.execute("UPDATE tasks SET project = ? WHERE id = ?", (projects.detect(row[1]), row[0]))
 
 
 def _migrate_to_3(conn: sqlite3.Connection) -> None:
@@ -198,11 +287,7 @@ def _migrate_to_3(conn: sqlite3.Connection) -> None:
             "INSERT INTO task_sessions(task_id, session_id, attached_at, detached_at, reason) "
             "SELECT task_id, session_id, attached_at, detached_at, reason FROM task_sessions_v2 ORDER BY attached_at")
         conn.execute("DROP TABLE task_sessions_v2")
-    if "summary_json" not in _columns(conn, "task_snapshots"):
-        conn.execute("ALTER TABLE task_snapshots ADD COLUMN summary_json TEXT")
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    if "session_costs" in tables and "updated_at" not in _columns(conn, "session_costs"):
-        conn.execute("ALTER TABLE session_costs ADD COLUMN updated_at REAL")
+
 
 
 @contextmanager

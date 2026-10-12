@@ -14,6 +14,19 @@ DEFAULT_CONFIG = {
     # {"claude-opus-5-5": {"input": 4, "output": 20, "cache_read": 0.2,
     #                      "cache_write_5m": 5, "cache_write_1h": 8}}
     "pricing": {},
+    "log": {
+        # summary: task totals and the agent tree
+        # prompts: + per-prompt breakdown (tokens, cost, time, agents per prompt)
+        # calls:   + tool-call statistics (which tools, how often, errors)
+        "depth": "prompts",
+        # full | preview (first 300 characters) | off (prompt text never stored)
+        "prompts": "full",
+    },
+    "todos": {
+        # show open todos of the project when a Claude Code session starts
+        "reminder": True,
+        "reminder_limit": 5,
+    },
 }
 
 
@@ -50,13 +63,20 @@ def projects_dir() -> Path:
     return claude_dir() / "projects"
 
 
+def _merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_config() -> dict:
-    cfg = dict(DEFAULT_CONFIG)
+    cfg = _merge(DEFAULT_CONFIG, {})
     try:
         with open(config_path()) as fh:
             user = json.load(fh)
         if isinstance(user, dict):
-            cfg.update(user)
+            cfg = _merge(cfg, user)
     except FileNotFoundError:
         pass
     except (OSError, ValueError):
