@@ -243,7 +243,9 @@ class EndToEnd(unittest.TestCase):
         types = {x["agent_type"]: x for x in rep["by_type"]}
         self.assertEqual(types["workflow-subagent"]["agents"], 3)
         self.assertEqual(types["general-purpose"]["agents"], 1)
-        self.assertAlmostEqual(rep["time"]["active_s"], 0.3, delta=0.05)
+        # union of the 0.3 s turn_duration and the real prompt→Stop time the hooks measured
+        self.assertGreaterEqual(rep["time"]["active_s"], 0.29)
+        self.assertLessEqual(rep["time"]["active_s"], rep["time"]["wall_s"] + 0.01)
         self.assertEqual(rep["time"]["turns"], 1)
 
         # end the task; usage written afterwards is not counted
