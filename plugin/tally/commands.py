@@ -1,4 +1,4 @@
-"""Slash commands (/task:start, /task:end, ...).
+"""Slash commands (/tally:start, /tally:end, ...).
 
 The UserPromptSubmit hook intercepts these before they reach the model and
 blocks them, so running a command costs zero tokens. The same functions back
@@ -10,23 +10,23 @@ from typing import Optional
 
 from . import fmt, report, tasks
 
-PREFIX_RE = re.compile(r"^\s*/task:([a-z][a-z-]*)(?:[ \t]+(.*))?\s*$", re.S)
+PREFIX_RE = re.compile(r"^\s*/tally:([a-z][a-z-]*)(?:[ \t]+(.*))?\s*$", re.S)
 
-HELP = """task-counter: tracks tokens and time per task, including subagents and workflows.
+HELP = """Tally: tokens and time per task, including subagents and workflows.
 
-  /task:start [name]       start a task here (the next prompt is stored as its initial prompt)
-  /task:new <prompt>       start a task AND send <prompt> to Claude as its first instruction
-  /task:status [id]        live totals for the current task (or task #id)
-  /task:end [id] [note]    end the task and print the final report
-  /task:list [n|all]       recent tasks
-  /task:show <id>          full report of any task
-  /task:resume <id>        continue counting task #id in this session (also reopens an ended task)
-  /task:rename [id] <name> rename a task
-  /task:dashboard          open the local web dashboard
-  /task:help               this help
+  /tally:start [name]         start a task here (the next prompt is stored as its initial prompt)
+  /tally:new <prompt>         start a task AND send <prompt> to Claude as its first instruction
+  /tally:status [id]          live totals for the current task (or task #id)
+  /tally:end [id] [note]      end the task and print the final report
+  /tally:list [n|all]         recent tasks
+  /tally:show <id>            full report of any task
+  /tally:resume <id>          continue counting task #id in this session (also reopens an ended task)
+  /tally:rename [id] <name>   rename a task
+  /tally:dashboard            open the local web dashboard
+  /tally:help                 this help
 
 Commands run inside the hook and never reach the model, so they cost no tokens.
-CLI: task-counter --help   Data: ~/.claude/task-counter/tasks.db"""
+CLI: tally --help   Data: ~/.claude/tally/tally.db"""
 
 KNOWN = {"start", "new", "end", "stop", "status", "list", "ls", "show", "report", "resume",
          "attach", "rename", "dashboard", "help"}
@@ -58,13 +58,13 @@ def _split_id(args: str):
 
 def _no_task_here(conn) -> str:
     act = tasks.active_tasks(conn)
-    msg = ["No active task in this session. Start one with /task:start <name> or /task:new <prompt>."]
+    msg = ["No active task in this session. Start one with /tally:start <name> or /tally:new <prompt>."]
     if act:
         msg.append("")
         msg.append("Active tasks in other sessions:")
         for t in act[:10]:
             msg.append("  #%d  %s  (started %s, %s)" % (t["id"], t["name"], fmt.when(t["started_at"]), t["cwd"] or ""))
-        msg.append("Use /task:status <id>, /task:end <id> or /task:resume <id>.")
+        msg.append("Use /tally:status <id>, /tally:end <id> or /tally:resume <id>.")
     return "\n".join(msg)
 
 
@@ -86,12 +86,12 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
             out.append("  Your next prompt becomes the task name and initial prompt.")
         else:
             out.append("  Your next prompt is stored as the initial prompt.")
-        out.append("  /task:status for live totals · /task:end to finish")
+        out.append("  /tally:status for live totals · /tally:end to finish")
         return Result("\n".join(out))
 
     if cmd == "new":
         if not args:
-            return Result("Usage: /task:new <prompt>  (starts a task and sends the prompt to Claude)")
+            return Result("Usage: /tally:new <prompt>  (starts a task and sends the prompt to Claude)")
         tasks.start(conn, session_id, initial_prompt=args, cwd=cwd,
                     transcript_path=transcript_path, created_by="new")
         return Result(None, block=False)
@@ -138,7 +138,7 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
     if cmd in ("resume", "attach"):
         task_id, _ = _split_id(args)
         if not task_id:
-            return Result("Usage: /task:resume <id>")
+            return Result("Usage: /tally:resume <id>")
         task = tasks.get(conn, task_id)
         if task is None:
             return Result("Task #%d not found." % task_id)
@@ -158,7 +158,7 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
         task_id, name = _split_id(args)
         task = tasks.get(conn, task_id) if task_id else tasks.active_for_session(conn, session_id)
         if task is None or not name:
-            return Result("Usage: /task:rename [id] <new name>")
+            return Result("Usage: /tally:rename [id] <new name>")
         task = tasks.rename(conn, task["id"], name)
         return Result("Task #%d renamed to: %s" % (task["id"], task["name"]))
 

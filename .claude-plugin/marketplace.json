@@ -1,20 +1,27 @@
 {
-  "name": "task-counter",
+  "name": "tally",
   "owner": {
     "name": "Galton",
     "email": "office@galton.sk"
   },
   "metadata": {
-    "description": "Local marketplace for task-counter: per-task token and time tracking for Claude Code.",
+    "description": "Local marketplace for tally: per-task token and time tracking for Claude Code.",
     "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "task",
+      "name": "tally",
       "source": "./plugin",
       "description": "Track tokens and time per task, including subagents and workflows. Local SQLite, zero-token commands.",
       "version": "0.1.0",
-      "keywords": ["tokens", "usage", "cost", "time-tracking", "subagents", "workflows"]
+      "keywords": [
+        "tokens",
+        "usage",
+        "cost",
+        "time-tracking",
+        "subagents",
+        "workflows"
+      ]
     }
   ]
 }

@@ -1,4 +1,4 @@
-"""Command line interface: `task-counter <command>`."""
+"""Command line interface: `tally <command>`."""
 
 import argparse
 import csv
@@ -42,7 +42,7 @@ def cmd_hook(args):
 
 
 def cmd_slash(args):
-    """Run a /task:<cmd> exactly as the hook would (used by command fallbacks)."""
+    """Run a /tally:<cmd> exactly as the hook would (used by command fallbacks)."""
     conn = db.connect()
     text = " ".join(args.args).strip()
     if text.startswith("--"):
@@ -244,7 +244,7 @@ def cmd_config(args):
 
 
 def cmd_doctor(args):
-    print("task-counter %s · python %s" % (__version__, sys.version.split()[0]))
+    print("tally %s · python %s" % (__version__, sys.version.split()[0]))
     print("data dir      %s" % paths.home())
     print("database      %s" % paths.db_path())
     conn = db.connect()
@@ -262,7 +262,7 @@ def cmd_doctor(args):
     inst = paths.claude_dir() / "plugins" / "installed_plugins.json"
     try:
         data = json.load(open(inst))
-        found = [k for k in json.dumps(data).split('"') if k.startswith("task@")]
+        found = [k for k in json.dumps(data).split('"') if k.startswith("tally@")]
         print("plugin        %s" % (", ".join(sorted(set(found))) or "not installed (run ./install.sh)"))
     except Exception:
         print("plugin        unknown (%s not readable)" % inst)
@@ -273,15 +273,15 @@ def cmd_doctor(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="task-counter", description="Per-task token and time tracking for Claude Code.")
-    p.add_argument("--version", action="version", version="task-counter " + __version__)
+    p = argparse.ArgumentParser(prog="tally", description="Per-task token and time tracking for Claude Code.")
+    p.add_argument("--version", action="version", version="tally " + __version__)
     sub = p.add_subparsers(dest="cmd")
 
     s = sub.add_parser("hook", help="(internal) run a Claude Code hook; JSON on stdin")
     s.add_argument("event")
     s.set_defaults(func=cmd_hook)
 
-    s = sub.add_parser("slash", help="(internal) run a /task:<command> for a session")
+    s = sub.add_parser("slash", help="(internal) run a /tally:<command> for a session")
     s.add_argument("--session")
     s.add_argument("command")
     s.add_argument("args", nargs=argparse.REMAINDER)

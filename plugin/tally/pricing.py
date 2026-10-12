@@ -3,7 +3,7 @@
 List prices in $ per million tokens (Anthropic first-party API, cached
 2026-10-06). Cache writes are 1.25x input for the 5-minute TTL and 2x for the
 1-hour TTL; cache reads vary by model. Override or extend in
-~/.claude/task-counter/config.json under "pricing".
+~/.claude/tally/config.json under "pricing".
 
 These are estimates at list price. Subscription plans (Pro/Max) are not billed
 per token; the figure is still useful to compare tasks.

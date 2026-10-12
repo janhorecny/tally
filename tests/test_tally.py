@@ -62,7 +62,7 @@ def turn(ts, dur_ms, uid):
 
 
 class Env:
-    """Isolated TASK_COUNTER_HOME + fake ~/.claude/projects."""
+    """Isolated TALLY_HOME + fake ~/.claude/projects."""
 
     def __init__(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="tc-test-"))
@@ -70,8 +70,8 @@ class Env:
         self.projects = self.tmp / "projects"
         self.proj = self.projects / "-Users-me-proj"
         self.proj.mkdir(parents=True)
-        os.environ["TASK_COUNTER_HOME"] = str(self.home)
-        os.environ["TASK_COUNTER_PROJECTS_DIR"] = str(self.projects)
+        os.environ["TALLY_HOME"] = str(self.home)
+        os.environ["TALLY_PROJECTS_DIR"] = str(self.projects)
         os.environ["CLAUDE_PID"] = "4242"
 
     def main(self, sid=SID) -> Path:
@@ -91,7 +91,7 @@ class Env:
         path.write_text(json.dumps(meta))
 
     def hook(self, event, sid=SID, **fields):
-        from task_counter import hooks
+        from tally import hooks
         payload = {"session_id": sid, "transcript_path": str(self.main(sid)), "cwd": "/Users/me/proj",
                    "hook_event_name": event}
         payload.update(fields)
@@ -106,19 +106,19 @@ class Env:
 
 class CommandParsing(unittest.TestCase):
     def test_parse(self):
-        from task_counter import commands
-        self.assertEqual(commands.parse("/task:start Fix login"), ("start", "Fix login"))
-        self.assertEqual(commands.parse("  /task:end 12 done  "), ("end", "12 done"))
-        self.assertEqual(commands.parse("/task:status"), ("status", ""))
-        self.assertEqual(commands.parse("/task:new line one\nline two"), ("new", "line one\nline two"))
-        self.assertIsNone(commands.parse("/task:unknown x"))
-        self.assertIsNone(commands.parse("please /task:start"))
+        from tally import commands
+        self.assertEqual(commands.parse("/tally:start Fix login"), ("start", "Fix login"))
+        self.assertEqual(commands.parse("  /tally:end 12 done  "), ("end", "12 done"))
+        self.assertEqual(commands.parse("/tally:status"), ("status", ""))
+        self.assertEqual(commands.parse("/tally:new line one\nline two"), ("new", "line one\nline two"))
+        self.assertIsNone(commands.parse("/tally:unknown x"))
+        self.assertIsNone(commands.parse("please /tally:start"))
         self.assertIsNone(commands.parse("/tasks"))
 
 
 class Pricing(unittest.TestCase):
     def test_models(self):
-        from task_counter.pricing import Pricer, normalize_model
+        from tally.pricing import Pricer, normalize_model
         self.assertEqual(normalize_model("claude-opus-5-5[1m]"), "claude-opus-5-5")
         self.assertEqual(normalize_model("claude-haiku-4-5-20251001"), "claude-haiku-4-5")
         self.assertEqual(normalize_model("us.anthropic.claude-sonnet-4-5-20250929-v1:0"), "claude-sonnet-4-5")
@@ -149,7 +149,7 @@ class EndToEnd(unittest.TestCase):
         e.append(e.main(), user(now - 300), assistant(now - 290, "msg_old", "req_old", out=5000))
         self.assertIsNone(e.hook("SessionStart", source="startup"))
 
-        res = e.hook("UserPromptSubmit", prompt="/task:start Fix login bug")
+        res = e.hook("UserPromptSubmit", prompt="/tally:start Fix login bug")
         self.assertEqual(res["decision"], "block")
         self.assertIn("Task #1 started: Fix login bug", res["reason"])
 
@@ -193,12 +193,12 @@ class EndToEnd(unittest.TestCase):
         self.assertIsNone(e.hook("Stop"))
         self.assertIsNone(e.hook("SubagentStop", agent_id="aaa111", agent_type="general-purpose"))
 
-        status = e.hook("UserPromptSubmit", prompt="/task:status")
+        status = e.hook("UserPromptSubmit", prompt="/tally:status")
         self.assertEqual(status["decision"], "block")
         self.assertIn("Fix login bug", status["reason"])
         self.assertIn("workflow · review-changes", status["reason"])
 
-        from task_counter import db, report, tasks
+        from tally import db, report, tasks
         conn = db.connect()
         task = tasks.get(conn, 1)
         self.assertEqual(task["initial_prompt"], "Please fix the redirect loop in login")
@@ -211,7 +211,7 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(tot["cache_write"], 200 + 300 + 100 + 30)
         self.assertEqual(tot["input"], 10 + 5 + 10 + 10 + 10 + 30)
         # cost: opus-5-5 main + fork; sonnet-5-5 subagent + workflow
-        from task_counter.pricing import Pricer
+        from tally.pricing import Pricer
         p = Pricer()
         expected = (p.cost("claude-opus-5-5", 10, 120, 1000, 200) + p.cost("claude-opus-5-5", 5, 80, 2000, 0, 300)
                     + p.cost("claude-opus-5-5", 10, 40, 400, 0)
@@ -244,7 +244,7 @@ class EndToEnd(unittest.TestCase):
 
         # end the task; usage written afterwards is not counted
         time.sleep(max(0.0, t + 0.5 - time.time()))   # all synthetic usage is now in the past
-        ended = e.hook("UserPromptSubmit", prompt="/task:end shipped")
+        ended = e.hook("UserPromptSubmit", prompt="/tally:end shipped")
         self.assertIn("Task #1 ended", ended["reason"])
         time.sleep(0.05)
         e.append(main, assistant(time.time() + 5, "msg_after", "req_after", out=9999))
@@ -256,15 +256,15 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(snap["totals"]["output"], tot["output"])
 
         # list shows it
-        lst = e.hook("UserPromptSubmit", prompt="/task:list")
+        lst = e.hook("UserPromptSubmit", prompt="/tally:list")
         self.assertIn("Fix login bug", lst["reason"])
 
     def test_task_new_passes_prompt_through(self):
         e = self.env
         e.append(e.main(), user(time.time() - 10))
-        res = e.hook("UserPromptSubmit", prompt="/task:new Implement the export feature")
+        res = e.hook("UserPromptSubmit", prompt="/tally:new Implement the export feature")
         self.assertIsNone(res)                       # not blocked: the model gets the prompt
-        from task_counter import db, tasks
+        from tally import db, tasks
         conn = db.connect()
         t = tasks.active_for_session(conn, SID)
         self.assertEqual(t["name"], "Implement the export feature")
@@ -274,17 +274,17 @@ class EndToEnd(unittest.TestCase):
     def test_untitled_start_takes_name_from_next_prompt(self):
         e = self.env
         e.append(e.main(), user(time.time() - 10))
-        e.hook("UserPromptSubmit", prompt="/task:start")
+        e.hook("UserPromptSubmit", prompt="/tally:start")
         e.hook("UserPromptSubmit", prompt="Refactor the billing module\nand add tests")
-        from task_counter import db, tasks
+        from tally import db, tasks
         t = tasks.active_for_session(db.connect(), SID)
         self.assertEqual(t["name"], "Refactor the billing module and add tests")
 
     def test_start_while_active_ends_previous(self):
         e = self.env
         e.append(e.main(), user(time.time() - 10))
-        e.hook("UserPromptSubmit", prompt="/task:start one")
-        res = e.hook("UserPromptSubmit", prompt="/task:start two")
+        e.hook("UserPromptSubmit", prompt="/tally:start one")
+        res = e.hook("UserPromptSubmit", prompt="/tally:start two")
         self.assertIn("Task #1 ended", res["reason"])
         self.assertIn("Task #2 started: two", res["reason"])
 
@@ -292,14 +292,14 @@ class EndToEnd(unittest.TestCase):
         e = self.env
         e.append(e.main(SID), user(time.time() - 10))
         e.hook("SessionStart", sid=SID, source="startup")
-        e.hook("UserPromptSubmit", sid=SID, prompt="/task:start long task")
+        e.hook("UserPromptSubmit", sid=SID, prompt="/tally:start long task")
         e.hook("SessionEnd", sid=SID, reason="clear")
         e.append(e.main(SID2), user(time.time()))
         e.hook("SessionStart", sid=SID2, source="clear")
         t = time.time()
         e.append(e.main(SID2), assistant(t + 1, "msg_after_clear", "r1", out=77))
         e.hook("Stop", sid=SID2)
-        from task_counter import db, report, tasks
+        from tally import db, report, tasks
         conn = db.connect()
         task = tasks.active_for_session(conn, SID2)
         self.assertIsNotNone(task)
@@ -310,33 +310,33 @@ class EndToEnd(unittest.TestCase):
         e = self.env
         e.append(e.main(SID), user(time.time() - 10))
         e.append(e.main(SID2), user(time.time() - 10))
-        e.hook("UserPromptSubmit", sid=SID, prompt="/task:start shared")
-        res = e.hook("UserPromptSubmit", sid=SID2, prompt="/task:resume 1")
+        e.hook("UserPromptSubmit", sid=SID, prompt="/tally:start shared")
+        res = e.hook("UserPromptSubmit", sid=SID2, prompt="/tally:resume 1")
         self.assertIn("resumed", res["reason"])
-        e.hook("UserPromptSubmit", sid=SID2, prompt="/task:end")
-        res = e.hook("UserPromptSubmit", sid=SID2, prompt="/task:resume 1")
+        e.hook("UserPromptSubmit", sid=SID2, prompt="/tally:end")
+        res = e.hook("UserPromptSubmit", sid=SID2, prompt="/tally:resume 1")
         self.assertIn("resumed", res["reason"])
-        from task_counter import db, tasks
+        from tally import db, tasks
         self.assertEqual(tasks.get(db.connect(), 1)["status"], "active")
 
     def test_no_task_messages(self):
         e = self.env
-        res = e.hook("UserPromptSubmit", prompt="/task:status")
+        res = e.hook("UserPromptSubmit", prompt="/tally:status")
         self.assertIn("No active task", res["reason"])
-        res = e.hook("UserPromptSubmit", prompt="/task:end")
+        res = e.hook("UserPromptSubmit", prompt="/tally:end")
         self.assertIn("No active task", res["reason"])
-        res = e.hook("UserPromptSubmit", prompt="/task:help")
-        self.assertIn("/task:start", res["reason"])
+        res = e.hook("UserPromptSubmit", prompt="/tally:help")
+        self.assertIn("/tally:start", res["reason"])
         self.assertIsNone(e.hook("UserPromptSubmit", prompt="normal prompt"))
 
     def test_auto_start(self):
         e = self.env
-        from task_counter import paths
+        from tally import paths
         paths.save_config({"auto_start": "session"})
         e.append(e.main(), user(time.time() - 10))
         self.assertIsNone(e.hook("UserPromptSubmit", prompt="Build a CSV exporter"))
         self.assertIsNone(e.hook("UserPromptSubmit", prompt="second prompt"))
-        from task_counter import db, tasks
+        from tally import db, tasks
         conn = db.connect()
         t = tasks.active_for_session(conn, SID)
         self.assertEqual(t["name"], "Build a CSV exporter")
@@ -347,12 +347,12 @@ class EndToEnd(unittest.TestCase):
         """cost-state at session exit: the unlogged part is pro-rated to the task."""
         e = self.env
         e.append(e.main(), user(time.time() - 10))
-        e.hook("UserPromptSubmit", prompt="/task:start reconcile me")
+        e.hook("UserPromptSubmit", prompt="/tally:start reconcile me")
         t = time.time()
         e.append(e.main(), assistant(t + 0.01, "m1", "r1", inp=0, out=100, read=900, w5=0))
         e.hook("Stop")
         time.sleep(max(0.0, t + 0.05 - time.time()))
-        e.hook("UserPromptSubmit", prompt="/task:end")
+        e.hook("UserPromptSubmit", prompt="/tally:end")
         # history before the task: same size as the task's usage -> task share = 50%
         hist = [assistant(t - 100, "h1", "rh", inp=0, out=100, read=900, w5=0)]
         content = e.main().read_text()
@@ -361,7 +361,7 @@ class EndToEnd(unittest.TestCase):
         e.append(e.main(), {"type": "cost-state", "sessionId": SID, "totalCostUSD": 1.0, "modelUsage": {
             "claude-opus-5-5[1m]": {"inputTokens": 0, "outputTokens": 200, "cacheReadInputTokens": 3800,
                                     "cacheCreationInputTokens": 0, "costUSD": 1.0}}})
-        from task_counter import db, report, tasks
+        from tally import db, report, tasks
         conn = db.connect()
         rep = report.summary_for(conn, tasks.get(conn, 1))
         un = rep["unlogged"]
@@ -372,7 +372,7 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(rep["totals"]["output"], 100)  # exact numbers unchanged
 
     def test_hook_never_fails(self):
-        from task_counter import hooks
+        from tally import hooks
         out = io.StringIO()
         self.assertEqual(hooks.main("Stop", stdin=io.StringIO("not json"), stdout=out), 0)
         self.assertEqual(out.getvalue(), "")
@@ -381,7 +381,7 @@ class EndToEnd(unittest.TestCase):
         """Parallel SubagentStop hooks (real processes) must not double count or error."""
         e = self.env
         e.append(e.main(), user(time.time() - 10))
-        e.hook("UserPromptSubmit", prompt="/task:start parallel")
+        e.hook("UserPromptSubmit", prompt="/tally:start parallel")
         t = time.time()
         sub = e.sdir() / "subagents"
         for i in range(8):
@@ -392,7 +392,7 @@ class EndToEnd(unittest.TestCase):
         procs = []
         payload = json.dumps({"session_id": SID, "transcript_path": str(e.main()), "hook_event_name": "SubagentStop"})
         for _ in range(8):
-            p = subprocess.Popen([sys.executable, str(PLUGIN / "bin" / "task-counter"), "hook", "SubagentStop"],
+            p = subprocess.Popen([sys.executable, str(PLUGIN / "bin" / "tally"), "hook", "SubagentStop"],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ)
             p.stdin.write(payload.encode())
             p.stdin.close()
@@ -400,7 +400,7 @@ class EndToEnd(unittest.TestCase):
         for p in procs:
             self.assertEqual(p.wait(timeout=60), 0)
             self.assertEqual(p.stdout.read(), b"")
-        from task_counter import db, paths, report, tasks
+        from tally import db, paths, report, tasks
         self.assertFalse(paths.error_log_path().exists(), paths.error_log_path().read_text()
                          if paths.error_log_path().exists() else "")
         conn = db.connect()
@@ -417,7 +417,7 @@ class CliSmoke(unittest.TestCase):
         self.env.cleanup()
 
     def run_cli(self, *args):
-        return subprocess.run([sys.executable, str(PLUGIN / "bin" / "task-counter")] + list(args),
+        return subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally")] + list(args),
                               capture_output=True, text=True, env=os.environ, timeout=60)
 
     def test_cli(self):
@@ -429,7 +429,7 @@ class CliSmoke(unittest.TestCase):
         e.append(e.main(), assistant(time.time() + 1, "m1", "r1", out=42))
         r = self.run_cli("status", "1", "--json")
         self.assertEqual(json.loads(r.stdout)["totals"]["output"], 42)
-        r = subprocess.run([sys.executable, str(PLUGIN / "bin" / "task-counter"), "statusline"],
+        r = subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally"), "statusline"],
                            input=json.dumps({"session_id": SID}), capture_output=True, text=True, env=os.environ)
         self.assertIn("▶ #1 CLI task · 1.3k tok", r.stdout)
         r = self.run_cli("slash", "--session", SID, "end", "--", "1 finished via fallback")

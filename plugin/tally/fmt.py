@@ -160,7 +160,7 @@ def render_report(rep: dict, detail: bool = True) -> str:
 
 def render_list(rows: List[dict]) -> str:
     if not rows:
-        return "No tasks yet. Start one with /task:start <name> or /task:new <prompt>."
+        return "No tasks yet. Start one with /tally:start <name> or /tally:new <prompt>."
     out = ["%4s  %-8s %-16s %9s %9s %9s %8s  %s" % ("#", "status", "started", "wall", "active", "tokens", "cost", "name")]
     for r in rows:
         out.append("%4d  %-8s %-16s %9s %9s %9s %8s  %s" % (

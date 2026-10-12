@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 DEFAULT_CONFIG = {
-    # "off": tasks only start via /task:start or /task:new.
+    # "off": tasks only start via /tally:start or /tally:new.
     # "session": the first prompt of every session starts a task automatically.
     "auto_start": "off",
     "dashboard_host": "127.0.0.1",
@@ -18,14 +18,14 @@ DEFAULT_CONFIG = {
 
 
 def home() -> Path:
-    override = os.environ.get("TASK_COUNTER_HOME")
+    override = os.environ.get("TALLY_HOME")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".claude" / "task-counter"
+    return Path.home() / ".claude" / "tally"
 
 
 def db_path() -> Path:
-    return home() / "tasks.db"
+    return home() / "tally.db"
 
 
 def config_path() -> Path:
@@ -44,7 +44,7 @@ def claude_dir() -> Path:
 
 
 def projects_dir() -> Path:
-    override = os.environ.get("TASK_COUNTER_PROJECTS_DIR")
+    override = os.environ.get("TALLY_PROJECTS_DIR")
     if override:
         return Path(override).expanduser()
     return claude_dir() / "projects"

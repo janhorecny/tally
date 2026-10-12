@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Install task-counter into Claude Code as a local plugin.
+# Install tally into Claude Code as a local plugin.
 #
 #   ./install.sh            install (or update) for your user
-#   ./install.sh --no-cli   skip the ~/.local/bin/task-counter symlink
+#   ./install.sh --no-cli   skip the ~/.local/bin/tally symlink
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MARKETPLACE="task-counter"
-PLUGIN="task@${MARKETPLACE}"
+MARKETPLACE="tally"
+PLUGIN="tally@${MARKETPLACE}"
 WITH_CLI=1
 for arg in "$@"; do
   case "$arg" in
@@ -25,6 +25,25 @@ import sys, sqlite3
 assert sys.version_info >= (3, 8)
 EOF
 command -v claude >/dev/null || die "the claude CLI (Claude Code) is required"
+
+# Migrate an install made under the previous name (task-counter, plugin "task").
+OLD_HOME="$HOME/.claude/task-counter"
+if claude plugin list 2>/dev/null | grep -q "task@task-counter"; then
+  say "migrating: removing old plugin task@task-counter"
+  claude plugin uninstall "task@task-counter" >/dev/null 2>&1 || true
+fi
+if claude plugin marketplace list 2>/dev/null | grep -q "task-counter"; then
+  claude plugin marketplace remove "task-counter" >/dev/null 2>&1 || true
+fi
+[ -L "$HOME/.local/bin/task-counter" ] && rm "$HOME/.local/bin/task-counter"
+pkill -f "task-counter dashboard" 2>/dev/null || true
+if [ -z "${TALLY_HOME:-}" ] && [ -d "$OLD_HOME" ] && [ ! -e "$HOME/.claude/tally" ]; then
+  say "migrating: $OLD_HOME -> ~/.claude/tally"
+  mv "$OLD_HOME" "$HOME/.claude/tally"
+  for ext in "" "-wal" "-shm"; do
+    [ -e "$HOME/.claude/tally/tasks.db$ext" ] && mv "$HOME/.claude/tally/tasks.db$ext" "$HOME/.claude/tally/tally.db$ext"
+  done
+fi
 
 say "1/4 validating plugin"
 claude plugin validate "$REPO" >/dev/null
@@ -45,26 +64,26 @@ else
 fi
 
 if [ "$WITH_CLI" = 1 ]; then
-  say "4/4 linking CLI ~/.local/bin/task-counter"
+  say "4/4 linking CLI ~/.local/bin/tally"
   mkdir -p "$HOME/.local/bin"
-  chmod +x "$REPO/plugin/bin/task-counter"
-  ln -sf "$REPO/plugin/bin/task-counter" "$HOME/.local/bin/task-counter"
+  chmod +x "$REPO/plugin/bin/tally"
+  ln -sf "$REPO/plugin/bin/tally" "$HOME/.local/bin/tally"
   case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
-    *) echo "   note: add ~/.local/bin to PATH to use 'task-counter' directly" ;;
+    *) echo "   note: add ~/.local/bin to PATH to use 'tally' directly" ;;
   esac
 else
   say "4/4 skipping CLI symlink"
 fi
 
-python3 "$REPO/plugin/bin/task-counter" doctor | sed 's/^/   /'
+python3 "$REPO/plugin/bin/tally" doctor | sed 's/^/   /'
 cat <<'EOF'
 
 Installed. Restart Claude Code (or run /reload-plugins in an open session), then:
 
-  /task:start Fix the login bug     start tracking (zero tokens)
-  /task:new <prompt>                start a task and send <prompt> to Claude
-  /task:status                      live tokens / cost / time incl. subagents & workflows
-  /task:end                         final report
-  /task:list   /task:dashboard      history and the local web dashboard
+  /tally:start Fix the login bug     start tracking (zero tokens)
+  /tally:new <prompt>                start a task and send <prompt> to Claude
+  /tally:status                      live tokens / cost / time incl. subagents & workflows
+  /tally:end                         final report
+  /tally:list   /tally:dashboard     history and the local web dashboard
 EOF

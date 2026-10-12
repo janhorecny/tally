@@ -1,4 +1,4 @@
-# task-counter
+# Tally
 
 Per-task **token** and **time** tracking for Claude Code. It runs entirely locally and stores everything in SQLite.
 
@@ -11,9 +11,9 @@ You start a task inside Claude Code and keep working. Everything that happens wh
 When you end the task you get totals plus subtotals per agent, subagent, agent type, workflow and model. The task name and initial prompt are stored with it.
 
 ```
-/task:start Fix login redirect loop
+/tally:start Fix login redirect loop
 … work as usual …
-/task:end
+/tally:end
 ```
 
 ```
@@ -39,15 +39,15 @@ Task #3 · Fix login redirect loop   [■ ended]
 Requirements: Claude Code 2.1+, and `python3` 3.8 or newer. On macOS the Command Line Tools version works. No pip packages are needed.
 
 ```bash
-git clone <this repo> cc-task-counter && cd cc-task-counter
+git clone <this repo> tally && cd tally
 ./install.sh
 ```
 
 `install.sh` does three things:
 
-1. Registers this folder as a local plugin marketplace (`task-counter`).
-2. Installs the plugin `task@task-counter` at user scope, so it is active in every project.
-3. Links the CLI to `~/.local/bin/task-counter`.
+1. Registers this folder as a local plugin marketplace (`tally`).
+2. Installs the plugin `tally@tally` at user scope, so it is active in every project.
+3. Links the CLI to `~/.local/bin/tally`.
 
 After installing, restart Claude Code or run `/reload-plugins`. Running `install.sh` again updates the plugin. Run `./uninstall.sh` to remove it; it keeps your history unless you pass `--purge`.
 
@@ -55,29 +55,29 @@ After installing, restart Claude Code or run `/reload-plugins`. Running `install
 
 | command | what it does |
 |---|---|
-| `/task:start [name]` | Start a task in this session. If you leave out the name, your next prompt becomes the name. The next prompt is stored as the initial prompt either way. |
-| `/task:new <prompt>` | Start a task and send `<prompt>` to Claude as its first instruction. |
-| `/task:status [id]` | Show live totals for the current task, or for task `#id`. |
-| `/task:end [id] [note]` | End the task and print the final report, which is then frozen in the database. |
-| `/task:list [n\|all]` | List recent tasks with wall time, active time, tokens and cost. |
-| `/task:show <id>` | Show the full report of any task. |
-| `/task:resume <id>` | Keep counting task `#id` in this session, for example after a restart or in a second terminal. Also reopens an ended task. |
-| `/task:rename [id] <name>` | Rename a task. |
-| `/task:dashboard` | Open the local web dashboard at http://127.0.0.1:8765. |
-| `/task:help` | Show the help text. |
+| `/tally:start [name]` | Start a task in this session. If you leave out the name, your next prompt becomes the name. The next prompt is stored as the initial prompt either way. |
+| `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude as its first instruction. |
+| `/tally:status [id]` | Show live totals for the current task, or for task `#id`. |
+| `/tally:end [id] [note]` | End the task and print the final report, which is then frozen in the database. |
+| `/tally:list [n\|all]` | List recent tasks with wall time, active time, tokens and cost. |
+| `/tally:show <id>` | Show the full report of any task. |
+| `/tally:resume <id>` | Keep counting task `#id` in this session, for example after a restart or in a second terminal. Also reopens an ended task. |
+| `/tally:rename [id] <name>` | Rename a task. |
+| `/tally:dashboard` | Open the local web dashboard at http://127.0.0.1:8765. |
+| `/tally:help` | Show the help text. |
 
-**The commands cost no tokens.** A `UserPromptSubmit` hook answers them and blocks the prompt, so the model is never called. `/task:new` is the exception, because its prompt is meant to reach Claude.
+**The commands cost no tokens.** A `UserPromptSubmit` hook answers them and blocks the prompt, so the model is never called. `/tally:new` is the exception, because its prompt is meant to reach Claude.
 
 ### Rules
 
 - **One task per session.** Starting a new one ends the previous one, and you see its report.
 - **`/clear` keeps the task.** Claude Code starts a new session ID on `/clear`, and the task follows it automatically because it is the same Claude Code process.
-- **Several sessions can run tasks in parallel,** for example one per terminal. `/task:status`, `/task:end` and `/task:resume` take a task ID when you need to act on a task from another session.
-- **Optional auto mode:** run `task-counter config auto_start session`. Every new session then starts a task from its first prompt.
+- **Several sessions can run tasks in parallel,** for example one per terminal. `/tally:status`, `/tally:end` and `/tally:resume` take a task ID when you need to act on a task from another session.
+- **Optional auto mode:** run `tally config auto_start session`. Every new session then starts a task from its first prompt.
 
 ## Dashboard
 
-`/task:dashboard` (or `task-counter dashboard --open`) serves a single-page dashboard on localhost. It shows:
+`/tally:dashboard` (or `tally dashboard --open`) serves a single-page dashboard on localhost. It shows:
 
 - the task list;
 - KPI tiles: total tokens, output, cost, wall and active time, API calls;
@@ -89,45 +89,45 @@ Active tasks refresh every 5 seconds. Light and dark themes are both supported.
 
 ## Status line (optional)
 
-`task-counter statusline` prints a one-line segment for the active task of the current session. It reads Claude Code's status line JSON on stdin and prints nothing when no task is running:
+`tally statusline` prints a one-line segment for the active task of the current session. It reads Claude Code's status line JSON on stdin and prints nothing when no task is running:
 
 ```
 ▶ #3 Fix login redirect loop · 4.21M tok · $3.12 · 44m 10s
 ```
 
-- **If you use ccstatusline:** add a *Custom Command* widget with the command `task-counter statusline`.
+- **If you use ccstatusline:** add a *Custom Command* widget with the command `tally statusline`.
 - **Without another status line,** set this in `~/.claude/settings.json`:
-  `"statusLine": {"type": "command", "command": "task-counter statusline", "refreshInterval": 10}`
+  `"statusLine": {"type": "command", "command": "tally statusline", "refreshInterval": 10}`
 
 ## CLI
 
 ```
-task-counter list                 # recent tasks
-task-counter status [id] [--json] # live report
-task-counter show <id> --prompts  # report and every prompt of the task
-task-counter end [id] --note "…"
-task-counter export --format csv -o tasks.csv
-task-counter session <session-id|transcript.jsonl>   # analyse ANY past session, no task needed
-task-counter dashboard --open
-task-counter config auto_start session
-task-counter statusline           # one-line segment for your status line
-task-counter doctor               # installation / hook health check
+tally list                 # recent tasks
+tally status [id] [--json] # live report
+tally show <id> --prompts  # report and every prompt of the task
+tally end [id] --note "…"
+tally export --format csv -o tasks.csv
+tally session <session-id|transcript.jsonl>   # analyse ANY past session, no task needed
+tally dashboard --open
+tally config auto_start session
+tally statusline           # one-line segment for your status line
+tally doctor               # installation / hook health check
 ```
 
 ## How it works
 
 ```
-Claude Code ── hooks ──▶ task-counter (python3, stdlib only) ──▶ ~/.claude/task-counter/tasks.db
+Claude Code ── hooks ──▶ tally (python3, stdlib only) ──▶ ~/.claude/tally/tally.db
      │                          ▲
      └── transcripts (.jsonl) ──┘  main session + subagents/agent-*.jsonl + subagents/workflows/<run>/agent-*.jsonl
 ```
 
 ### Hooks
 
-- `UserPromptSubmit` handles the `/task:*` commands and stores the task's prompts.
+- `UserPromptSubmit` handles the `/tally:*` commands and stores the task's prompts.
 - `Stop`, `SubagentStop`, `PreCompact` and `SessionEnd` read new transcript lines into the database. This happens only while the session has an active task.
 - `SessionStart` follows `/clear`.
-- Hooks never break Claude Code. On any error they exit silently and log to `~/.claude/task-counter/errors.log`.
+- Hooks never break Claude Code. On any error they exit silently and log to `~/.claude/tally/errors.log`.
 
 ### Tokens
 
@@ -149,7 +149,7 @@ Cost is an estimate at API list price.
 
 - **Exact cache pricing:** 1-hour and 5-minute cache writes are priced separately, because the transcript records which was used.
 - **Fast mode** is billed at 2×.
-- **Overrides:** you can change or add prices in `~/.claude/task-counter/config.json` under `"pricing"`.
+- **Overrides:** you can change or add prices in `~/.claude/tally/config.json` under `"pricing"`.
 - **Subscriptions:** Pro and Max plans are not billed per token, but the figure is still useful for comparing tasks.
 
 ### Accuracy, and Claude Code's own calls
@@ -162,10 +162,10 @@ Claude Code makes some API calls for itself that it never writes to a transcript
 - memory extraction;
 - compaction.
 
-They are part of what a task costs, so task-counter estimates them:
+They are part of what a task costs, so tally estimates them:
 
 1. When a session exits, Claude Code appends a `cost-state` record with exact per-model totals for the whole session.
-2. task-counter compares that record with what the transcripts logged.
+2. tally compares that record with what the transcripts logged.
 3. It gives each task a share of the difference, in proportion to the task's share of the session's logged tokens.
 
 This estimate is reported separately, on the `unlogged ≈ +…` line and in a dashboard note. It does not change the exact per-agent numbers, and it appears once the session has exited.
@@ -183,7 +183,7 @@ Prices follow what Claude Code itself bills. One example: Sonnet 5.5 cache reads
 
 ## Data
 
-- **Where it lives:** SQLite at `~/.claude/task-counter/tasks.db`. Set `TASK_COUNTER_HOME` to use a different location.
+- **Where it lives:** SQLite at `~/.claude/tally/tally.db`. Set `TALLY_HOME` to use a different location.
 - **Tables:** `tasks`, `task_sessions`, `usage` (one row per API call), `agents`, `workflows`, `turns`, `prompts`, `session_costs`, and `task_snapshots`. `task_snapshots` holds the final report frozen when a task ends, so it survives Claude Code's transcript cleanup.
 
 ## Development

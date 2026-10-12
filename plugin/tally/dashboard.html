@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>task-counter</title>
+<title>tally</title>
 <style>
 .viz-root {
   color-scheme: light;
@@ -126,7 +126,7 @@ tr:hover td { background: var(--hover); }
 <body>
 <div class="viz-root">
   <header>
-    <h1>task-counter</h1>
+    <h1>tally</h1>
     <span class="sub" id="sub">tokens &amp; time per Claude Code task</span>
     <span class="spacer"></span>
     <span class="sub num" id="updated"></span>
@@ -210,7 +210,7 @@ async function loadTasks() {
 function renderTasks() {
   const el = $("#tasks");
   if (!tasks.length) {
-    el.innerHTML = '<div class="empty">No tasks yet.<br>In Claude Code run <b>/task:start &lt;name&gt;</b> or <b>/task:new &lt;prompt&gt;</b>.</div>';
+    el.innerHTML = '<div class="empty">No tasks yet.<br>In Claude Code run <b>/tally:start &lt;name&gt;</b> or <b>/tally:new &lt;prompt&gt;</b>.</div>';
     return;
   }
   el.innerHTML = tasks.map(t => `

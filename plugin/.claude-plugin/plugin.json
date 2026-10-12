@@ -1,10 +1,17 @@
 {
-  "name": "task",
+  "name": "tally",
   "version": "0.1.0",
-  "description": "task-counter: track tokens and time per task (main session, subagents, workflows) in a local SQLite database. /task:start, /task:end, /task:status, /task:list, /task:dashboard.",
+  "description": "tally: track tokens and time per task (main session, subagents, workflows) in a local SQLite database. /tally:start, /tally:end, /tally:status, /tally:list, /tally:dashboard.",
   "author": {
     "name": "Galton",
     "email": "office@galton.sk"
   },
-  "keywords": ["tokens", "usage", "cost", "time-tracking", "subagents", "workflows"]
+  "keywords": [
+    "tokens",
+    "usage",
+    "cost",
+    "time-tracking",
+    "subagents",
+    "workflows"
+  ]
 }

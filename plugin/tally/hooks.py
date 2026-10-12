@@ -1,8 +1,8 @@
-"""Claude Code hook entry point: `task-counter hook <EventName>` reads JSON on stdin.
+"""Claude Code hook entry point: `tally hook <EventName>` reads JSON on stdin.
 
 Rules: never break Claude Code. Any error is logged to
-~/.claude/task-counter/errors.log and the hook exits 0 with no output. Only a
-recognised /task:* command produces output (a block decision whose reason is
+~/.claude/tally/errors.log and the hook exits 0 with no output. Only a
+recognised /tally:* command produces output (a block decision whose reason is
 shown to the user, so the command costs no model tokens).
 """
 
@@ -96,7 +96,7 @@ def _prompt(conn, sid, p, tpath, cwd):
         res = commands.run(conn, sid, cmd, args, cwd=cwd, transcript_path=tpath)
         if res.block:
             return {"decision": "block", "reason": res.text, "suppressOriginalPrompt": True}
-        _open_turn(conn, sid)  # /task:new: the prompt continues to the model
+        _open_turn(conn, sid)  # /tally:new: the prompt continues to the model
         return None
 
     task = tasks.active_for_session(conn, sid)

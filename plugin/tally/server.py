@@ -15,11 +15,11 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__, commands, db, paths, report, tasks
 
 HTML = Path(__file__).with_name("dashboard.html")
-BIN = Path(__file__).resolve().parent.parent / "bin" / "task-counter"
+BIN = Path(__file__).resolve().parent.parent / "bin" / "tally"
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "task-counter/" + __version__
+    server_version = "tally/" + __version__
 
     def log_message(self, *args):  # quiet
         pass
@@ -43,7 +43,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, HTML.read_bytes(), "text/html; charset=utf-8")
                 return
             if url.path == "/api/health":
-                self._json({"app": "task-counter", "version": __version__})
+                self._json({"app": "tally", "version": __version__})
                 return
             conn = db.connect()
             try:
@@ -71,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False) -> None:
     httpd = ThreadingHTTPServer((host, port), Handler)
     url = "http://%s:%d/" % (host, port)
-    print("task-counter dashboard on %s (Ctrl+C to stop)" % url, flush=True)
+    print("tally dashboard on %s (Ctrl+C to stop)" % url, flush=True)
     if open_browser:
         webbrowser.open(url)
     try:
@@ -83,7 +83,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False)
 def is_running(host: str, port: int) -> bool:
     try:
         with urllib.request.urlopen("http://%s:%d/api/health" % (host, port), timeout=0.5) as r:
-            return json.loads(r.read()).get("app") == "task-counter"
+            return json.loads(r.read()).get("app") == "tally"
     except Exception:
         return False
 
@@ -103,7 +103,7 @@ def ensure_running(open_browser: bool = False):
     if not is_running(host, port):
         if not _port_free(host, port):
             raise RuntimeError("port %d is used by another program; set another with "
-                               "`task-counter config dashboard_port 8766`" % port)
+                               "`tally config dashboard_port 8766`" % port)
         paths.home().mkdir(parents=True, exist_ok=True)
         log = open(paths.home() / "dashboard.log", "a")
         subprocess.Popen(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-check task-counter's transcript parsing against Claude Code's own numbers.
+"""Cross-check tally's transcript parsing against Claude Code's own numbers.
 
 Claude Code appends a `cost-state` record (per-model token totals and cost,
 including subagents) to the main transcript. This script ingests each such
@@ -43,9 +43,9 @@ def main():
     ap.add_argument("--projects", default=os.path.expanduser("~/.claude/projects"))
     args = ap.parse_args()
 
-    os.environ["TASK_COUNTER_HOME"] = tempfile.mkdtemp(prefix="tc-validate-")
-    from task_counter import db, ingest, reconcile
-    from task_counter.pricing import Pricer, normalize_model
+    os.environ["TALLY_HOME"] = tempfile.mkdtemp(prefix="tally-validate-")
+    from tally import db, ingest, reconcile
+    from tally.pricing import Pricer, normalize_model
 
     conn = db.connect()
     pricer = Pricer()
