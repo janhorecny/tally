@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 (2026-10-12)
+
+### Sessions overview
+
+- **Every session, every agent:** `/tally:sessions [days|all] [agent] [here]`, `tally sessions` and the dashboard's new *Sessions* tab list every session of Claude Code, Codex and pi, with or without a task. Each row shows agent, project, title, span, active time, prompts, API calls, tokens, cost and models, with totals per agent.
+- **Sessions index:** whole sessions are read from the agents' own transcripts into a separate cache, `~/.claude/tally/sessions.db`, so the task database keeps skipping history before a task start. The index is incremental: a first run over 30 days (1,138 transcripts, 4.1 GB) took 19 s, and a refresh with nothing new takes 0.05 s. Projects set to `off` are left out.
+- **Prompts of whole sessions:** the prompts you typed are recorded per session. Background-agent notifications and tool results are shown as automatic turns.
+- **`tally session <id>`** now works for Codex and pi too, accepts an id prefix and uses the index instead of a throw-away database.
+- **Dashboard:** period and agent filters, a scrollable table and a full report per session (per prompt, agents, models).
+
+### Fixes
+
+- `projects.detect_root` returned a single `None` instead of `(None, None)` for an unusable path.
+
 ## 0.3.0 (2026-10-12)
 
 ### Codex and pi support

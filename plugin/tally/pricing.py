@@ -129,6 +129,13 @@ class Pricer:
         self._cache[norm] = found
         return found
 
+    def row_cost(self, r) -> Optional[float]:
+        """Cost of one usage row: what the agent reported (pi, Codex), else list price."""
+        if r["cost"] is not None:
+            return r["cost"]
+        return self.cost(r["model"], r["input"], r["output"], r["cache_read"], r["cache_write_5m"],
+                         r["cache_write_1h"], r["speed"])
+
     def cost(self, model, input_tokens=0, output_tokens=0, cache_read=0,
              cache_write_5m=0, cache_write_1h=0, speed=None, tiers=True) -> Optional[float]:
         """Cost of ONE API call. Pass tiers=False for summed usage of many

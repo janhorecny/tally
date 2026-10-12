@@ -43,6 +43,19 @@ The data model, the reports, the todos and the projects are the same for every a
 - **Agent per session:** `sessions.agent` records which agent a session belongs to.
 - **Reported cost:** `usage.cost` holds the cost an agent reported itself. It wins over the price table.
 
+## The sessions index
+
+The task database holds what tasks (and projects in `track` mode) count. History before a task start is skipped on purpose. The sessions overview (`/tally:sessions`, `tally sessions`, the dashboard's *Sessions* tab) needs whole sessions instead. It reads them into a second database, `~/.claude/tally/sessions.db`, with the same schema and the same readers:
+
+- **Discovery:** transcripts modified in the requested period, found by a stat call each:
+  - Claude Code: `~/.claude/projects/*/<session>.jsonl`, with its subagents and workflow agents;
+  - Codex: root threads in `~/.codex/sessions/…`; subagent threads are read with their root;
+  - pi: `~/.pi/agent/sessions/*/*.jsonl`.
+- **Incremental:** byte offsets per file, as in the task database. A transcript whose size and modification time are unchanged and which has been quiet for an hour is not opened at all.
+- **Prompts:** the prompts you typed are recorded per session (`prompts` with `task_id` NULL). Claude Code tool results, background-agent notifications and meta lines are not prompts, so their turns show up as automatic.
+- **Summary:** each session's totals, models, time and unlogged estimate are stored as JSON next to it, so listing hundreds of sessions takes about 10 ms.
+- **Cache:** the index is derived data. Deleting `sessions.db` is safe, and it is rebuilt on the next refresh. A format change rebuilds it automatically.
+
 ## Components
 
 | path | role |
@@ -203,6 +216,8 @@ The heaviest session on the development machine had 527 transcript files, 298 MB
 | ending a task (read + report + snapshot) | 90 ms |
 | `/tally:list` and the dashboard list (from snapshot summaries) | 2 ms |
 | reading a whole session from scratch (`tally session`) | 1.3 s |
+| sessions index, first run over 30 days (1,138 transcripts, 4.1 GB) | 19 s |
+| sessions index refresh with nothing new (1,138 transcripts) | 0.05 s |
 | one-off rescan when a new `cost-state` appears | ~0.7 s |
 
 ## Security and privacy

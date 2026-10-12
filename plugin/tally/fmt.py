@@ -3,6 +3,8 @@
 import time
 from typing import List, Optional
 
+AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex", "pi": "pi"}
+
 
 def tokens(n: Optional[int]) -> str:
     if n is None:
@@ -119,7 +121,12 @@ def render_report(rep: dict, detail: bool = True) -> str:
     tm = rep["time"]
     tot = rep["totals"]
     out = []
-    out.append("Task #%d · %s   [%s]" % (t["id"], _cut(t["name"], 70), status_mark(t["status"])))
+    sess = rep.get("session")
+    if sess:
+        out.append("Session %s · %s   [%s]" % (sess["session_id"], _cut(sess.get("title") or "", 60),
+                                              AGENT_NAMES.get(sess["agent"], sess["agent"])))
+    else:
+        out.append("Task #%d · %s   [%s]" % (t["id"], _cut(t["name"], 70), status_mark(t["status"])))
     where = []
     if t.get("project"):
         where.append("project " + t["project"])
@@ -290,4 +297,44 @@ def render_project(st: dict) -> str:
         for x in tk["recent"][:5]:
             out.append("    #%-4d %-40s %9s %8s %s" % (x["id"], _cut(x["name"], 40), tokens(x["total"]),
                                                     money(x), "● active" if x["status"] == "active" else ""))
+    return "\n".join(out)
+
+
+
+def _short_model(m: str) -> str:
+    return m.replace("claude-", "").split("/")[-1]
+
+
+def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
+    t = ov["totals"]
+    span = ("last %g day%s" % (ov["days"], "" if ov["days"] == 1 else "s")) if ov["days"] else "all time"
+    out = ["Sessions, %s: %d · %s tokens · %s · %d prompts · active %s" % (
+        span, t["sessions"], tokens(t["total"]), money(t), t["prompts"], duration(t["active_s"]))]
+    if len(ov["by_agent"]) > 1:
+        out.append("  " + "   ".join("%s %d · %s · %s" % (AGENT_NAMES.get(a["agent"], a["agent"]), a["sessions"],
+                                                         tokens(a["total"]), money(a)) for a in ov["by_agent"]))
+    rows = ov["sessions"][:limit] if limit else ov["sessions"]
+    if not rows:
+        out.append("  no sessions with API calls in this period")
+        return "\n".join(out)
+    out.append("")
+    out.append("  %-8s %-16s %-6s %-18s %8s %8s %5s %8s %9s  %-24s %s" % (
+        "id", "last activity", "agent", "project", "span", "active", "prm", "tokens", "cost", "models", "title / tasks"))
+    for s in rows:
+        st = s["totals"]
+        cost = dict(st, cost=st.get("cost_with_unlogged", st["cost"]))
+        models = ", ".join(_short_model(m["model"]) for m in s["models"][:2])
+        if len(s["models"]) > 2:
+            models += " +%d" % (len(s["models"]) - 2)
+        label = s["title"] or ""
+        if s["tasks"]:
+            label = ("#" + " #".join(str(x["id"]) for x in s["tasks"]) + " " + label).strip()
+        out.append("  %-8s %-16s %-6s %-18s %8s %8s %5d %8s %9s  %-24s %s" % (
+            s["session_id"][:8], when(s["last_ts"]), s["agent"], _cut(s["project"] or "-", 18), duration(s["wall_s"]),
+            duration(s["active_s"]), s["prompts"], tokens(st["total"]), money(cost), _cut(models, 24),
+            _cut(label, 48)))
+    if limit and len(ov["sessions"]) > limit:
+        out.append("  … %d more (--limit 0 for all)" % (len(ov["sessions"]) - limit))
+    out.append("")
+    out.append("  tally session <id or id prefix> for the full report of one session")
     return "\n".join(out)

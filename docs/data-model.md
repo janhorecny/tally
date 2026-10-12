@@ -78,7 +78,7 @@ One row per API response, deduplicated by `msg_key = message.id:requestId`. The 
 | `web_search` | Count of server-side web search requests. |
 | `prompt_id` | The user prompt that caused the call. It comes from the `promptId` on transcript user lines; a subagent inherits the prompt that spawned it. |
 
-Rows exist only for transcript bytes read while a task was active, or by `tally session`. History before a task is never parsed.
+Rows exist only for transcript bytes read while a task was active (or for every session of a project in `track` mode). History before a task is never parsed here. Whole sessions are read into the separate sessions index (see below).
 
 ### `agents`
 
@@ -155,6 +155,25 @@ FROM tasks t JOIN task_snapshots s ON s.task_id = t.id ORDER BY t.id DESC;
 ```
 
 For spreadsheets, `tally export --format csv` is simpler. It gives one row per task with totals, times, the number of subagents and workflows, and the initial prompt.
+
+## The sessions index (`sessions.db`)
+
+`~/.claude/tally/sessions.db` has the same tables, filled from whole transcripts for the sessions overview, plus one more:
+
+### `indexed`
+
+One row per session of any agent: `session_id`, `agent`, `path`, `cwd`, `project`, `title`, the transcript's `size` and `mtime` when it was last read, `summary_json` (totals, models, prompts, automatic turns, wall and active time, unlogged estimate) and `indexed_at`. `prompt_offset` and `prompt_turn` track how far the main transcript was scanned for prompts. In this database `prompts.task_id` is NULL: the rows are the session's own prompts.
+
+It is a cache. Delete it whenever you like; `tally sessions` rebuilds it.
+
+```sql
+-- sessions.db: cost per agent and day, last 14 days
+SELECT agent, date(json_extract(summary_json, '$.last_ts'), 'unixepoch', 'localtime') AS day,
+       COUNT(*) AS sessions, ROUND(SUM(json_extract(summary_json, '$.totals.cost')), 2) AS cost
+FROM indexed WHERE summary_json IS NOT NULL
+  AND json_extract(summary_json, '$.last_ts') > strftime('%s', 'now') - 14 * 86400
+GROUP BY agent, day ORDER BY day DESC;
+```
 
 ## Schema migrations
 

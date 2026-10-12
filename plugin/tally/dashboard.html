@@ -158,6 +158,13 @@ nav.tabs a.on { background: var(--select); color: var(--text-primary); }
 .setrow .d { color: var(--text-secondary); font-size: 13px; }
 .setrow .ok { color: var(--good); font-size: 12px; margin-left: 6px; }
 .toolbar { display: flex; gap: 6px; align-items: center; }
+#stable { max-height: 58vh; overflow: auto; }
+.stbl thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
+.stbl td.ttl { white-space: normal; max-width: 0; width: 28%; }
+.stbl td.ttl span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stbl th:nth-child(-n+4), .stbl td:nth-child(-n+4), .stbl th:last-child, .stbl td:last-child { text-align: left; }
+.stbl tr { cursor: pointer; }
+.stbl tr.sel td { background: var(--select); }
 .ptable td.ptxt { white-space: normal; max-width: 0; width: 38%; color: var(--text-secondary); text-align: left; }
 .ptable th:nth-child(2) { text-align: left; }
 .ptable td.ptxt span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -168,7 +175,7 @@ nav.tabs a.on { background: var(--select); color: var(--text-primary); }
   <header>
     <h1>tally</h1>
     <nav class="tabs" aria-label="Views">
-      <a href="#tasks" data-view="tasks">Tasks</a><a href="#todos" data-view="todos">Todos</a><a href="#projects" data-view="projects">Projects</a><a href="#settings" data-view="settings">Settings</a>
+      <a href="#tasks" data-view="tasks">Tasks</a><a href="#todos" data-view="todos">Todos</a><a href="#projects" data-view="projects">Projects</a><a href="#sessions" data-view="sessions">Sessions</a><a href="#settings" data-view="settings">Settings</a>
     </nav>
     <span class="spacer"></span>
     <select id="project" aria-label="Project"><option value="">All projects</option></select>
@@ -195,6 +202,15 @@ nav.tabs a.on { background: var(--select); color: var(--text-primary); }
   <div id="view-projects" class="view wrap">
     <section class="card"><h2>Projects</h2><div id="projtable"></div></section>
     <section class="card" id="projdetail" style="margin-top:20px"></section>
+  </div>
+  <div id="view-sessions" class="view wrap">
+    <div class="toolbar" style="margin-bottom:14px">
+      <select id="sdays" aria-label="Period"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="">All time</option></select>
+      <select id="sagent" aria-label="Agent"><option value="">All agents</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="pi">pi</option></select>
+      <span class="sub num" id="sindex"></span>
+    </div>
+    <section class="card"><div id="stiles"></div><div id="stable"><div class="empty">Loading…</div></div></section>
+    <section class="card" id="sdetail" style="margin-top:20px; display:none"></section>
   </div>
   <div id="view-settings" class="view wrap">
     <section class="card settings"><h2>Settings</h2><div id="settings"></div></section>
@@ -249,6 +265,7 @@ function parseHash() {
   const h = location.hash.slice(1);
   if (/^\d+$/.test(h)) return {view: "tasks", id: Number(h)};
   const [v, id] = h.split("/");
+  if (v === "sessions") return {view: v, id: null, sid: id ? decodeURIComponent(id) : null};
   return {view: ["tasks", "todos", "projects", "settings"].includes(v) ? v : "tasks", id: Number(id) || null};
 }
 let view = parseHash().view;
@@ -268,6 +285,7 @@ function setView(v) {
   if (v === "todos") loadTodos();
   if (v === "settings") loadSettings();
   if (v === "projects") loadProjectsView();
+  if (v === "sessions") loadSessions();
   if (v === "tasks") refreshAll();
 }
 async function loadProjects() {
@@ -332,8 +350,9 @@ function tile(label, value, hint, tipText) {
     <div class="value num">${value}</div><div class="hint num">${hint || "&nbsp;"}</div></div>`;
 }
 
-function renderDetail(rep) {
-  const t = rep.task, tm = rep.time, tot = rep.totals;
+function renderDetail(rep, target) {
+  const el = target || $("#detail");
+  const t = rep.task, tm = rep.time, tot = rep.totals, sess = rep.session;
   const active = t.status === "active";
   const agents = rep.by_type.filter(x => x.agent_type !== "main").reduce((a, x) => a + x.agents, 0);
   const comp = [
@@ -343,7 +362,13 @@ function renderDetail(rep) {
     ["Cache read", tot.cache_read, "--series-4", "tokens served from the prompt cache"],
   ];
   const h = [];
-  h.push(`<div class="dhead"><h2>#${t.id} · ${esc(t.name)}</h2>
+  if (sess) h.push(`<div class="dhead"><h2>${esc(sess.title || "Session " + sess.session_id)}</h2>
+    <div class="line"><span class="badge">${esc(AGENTS[sess.agent] || sess.agent)}</span>
+    <span class="num">${fmtWhen(t.started_at)} → ${fmtWhen(t.ended_at)}</span>
+    ${sess.project ? `<span class="chip">${esc(sess.project)}</span>` : ""}
+    ${sess.cwd ? `<span class="muted">${esc(sess.cwd)}</span>` : ""}
+    <span class="muted num">${esc(sess.session_id)}</span></div></div>`);
+  else h.push(`<div class="dhead"><h2>#${t.id} · ${esc(t.name)}</h2>
     <div class="line"><span class="badge"><span class="dot ${active ? "active" : ""}"></span>${active ? "active" : "ended"}</span>
     <span class="num">${fmtWhen(t.started_at)}${t.ended_at ? " → " + fmtWhen(t.ended_at) : ""}</span>
     ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
@@ -356,7 +381,7 @@ function renderDetail(rep) {
     ${tile("Output tokens", fmtTok(tot.output), fmtFull(tot.output))}
     ${tile("Est. cost", fmtCost(tot.cost, tot.cost_partial), "at API list price", "Estimate from token counts and list prices; subscription plans are not billed per token.")}
     ${tile("Wall time", fmtDur(tm.wall_s), active ? "running" : "start → end")}
-    ${tile("Active time", fmtDur(tm.active_s), tm.turns + " turn" + (tm.turns === 1 ? "" : "s"), "time Claude was working on turns in this task")}
+    ${tile("Active time", fmtDur(tm.active_s), tm.turns + " turn" + (tm.turns === 1 ? "" : "s"), "time the agent was working on turns")}
     ${tile("API calls", fmtFull(tot.calls), agents + " agent" + (agents === 1 ? "" : "s"))}
   </div>`);
 
@@ -447,10 +472,13 @@ function renderDetail(rep) {
     h.push(`<div class="note">Plus ≈ <b class="num">${fmtTok(un.total)}</b> tokens (<span class="num">${fmtCost(un.cost)}</span>) of Claude Code's own calls that are not written to transcripts (background-agent summaries, prompt suggestions, titles). Estimated from the session cost record Claude Code writes on exit${un.status === "partial" ? "; partial, the session continued afterwards" : ""}. Not included in the totals above.</div>`);
   }
   if (t.end_note) h.push(`<div class="note">Note: ${esc(t.end_note)}</div>`);
-  h.push(`<div class="note">Token counts come from Claude Code transcripts (main session, subagents, workflow agents). Cost is an estimate at API list price.</div>`);
-  $("#detail").innerHTML = h.join("");
-  $("#detail").querySelectorAll(".tw[data-key]").forEach(el => el.onclick = () => {
-    const k = el.dataset.key; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); renderDetail(lastDetail);
+  h.push(sess && sess.agent !== "claude"
+    ? `<div class="note">Token counts come from the agent's own session files. Cost is what the agent reported, else an estimate at API list price.</div>`
+    : `<div class="note">Token counts come from Claude Code transcripts (main session, subagents, workflow agents). Cost is an estimate at API list price.</div>`);
+  el.innerHTML = h.join("");
+  el._rep = rep;
+  el.querySelectorAll(".tw[data-key]").forEach(tw => tw.onclick = () => {
+    const k = tw.dataset.key; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); renderDetail(el._rep, el);
   });
 }
 
@@ -543,6 +571,78 @@ async function loadProjectDetail(name) {
       <div><div class="section-title">Recent tasks</div><table><thead><tr><th>task</th><th>tokens</th><th>cost</th><th>active</th></tr></thead><tbody>${tk.recent.map(t => `<tr><td><a href="#tasks/${t.id}">#${t.id} ${esc(t.name)}</a></td><td class="num">${fmtTok(t.total)}</td><td class="num">${fmtCost(t.cost)}</td><td class="num">${fmtDur(t.active_s)}</td></tr>`).join("") || '<tr><td class="muted">none</td></tr>'}</tbody></table></div></div>` : ""}`;
 }
 
+// ---------------------------------------------------------------- sessions
+const AGENTS = {claude: "Claude Code", codex: "Codex", pi: "pi"};
+let sessSel = parseHash().sid || null;
+let sessPoll = null, sessLoaded = 0;
+$("#sdays").value = localStorage.getItem("tc-sdays") ?? "30";
+$("#sagent").value = localStorage.getItem("tc-sagent") || "";
+$("#sdays").onchange = e => { localStorage.setItem("tc-sdays", e.target.value); loadSessions(); };
+$("#sagent").onchange = e => { localStorage.setItem("tc-sagent", e.target.value); loadSessions(); };
+const shortModel = m => m.replace(/^claude-/, "").split("/").pop();
+async function loadSessions(force) {
+  clearTimeout(sessPoll);
+  const q = new URLSearchParams({days: $("#sdays").value, agent: $("#sagent").value, project, refresh: force ? "1" : ""});
+  const d = await getJSON("/api/sessions?" + q);
+  sessLoaded = Date.now();
+  renderSessions(d);
+  const ix = d.indexing || {};
+  $("#sindex").textContent = ix.running ? `reading transcripts ${ix.done}/${ix.total || "…"}`
+    : d.indexed_at ? "index updated " + new Date(d.indexed_at * 1000).toLocaleTimeString() : "";
+  if (ix.running && view === "sessions") sessPoll = setTimeout(() => loadSessions().catch(() => {}), 1500);
+  $("#updated").textContent = "updated " + new Date().toLocaleTimeString();
+  if (sessSel && !$("#sdetail")._rep) selectSession(sessSel, false);
+}
+function renderSessions(d) {
+  const t = d.totals;
+  $("#stiles").innerHTML = `<div class="tiles" style="margin-top:0;border-top:none">
+    ${tile("Sessions", fmtFull(t.sessions), d.by_agent.map(a => (AGENTS[a.agent] || a.agent) + " " + a.sessions).join(" · "))}
+    ${tile("Total tokens", fmtTok(t.total), fmtTok(t.output) + " output")}
+    ${tile("Est. cost", fmtCost(t.cost), d.by_agent.length > 1 ? d.by_agent.map(a => (AGENTS[a.agent] || a.agent) + " " + fmtCost(a.cost)).join(" · ") : "at API list price", "Agent-reported cost where the agent records one (pi, Codex), else list price; Claude Code sessions include its own unlogged calls when its cost record exists.")}
+    ${tile("Prompts", fmtFull(t.prompts), fmtFull(t.calls) + " API calls")}
+    ${tile("Active time", fmtDur(t.active_s), "wall " + fmtDur(t.wall_s), "time agents were working on turns; wall = first to last API call of each session")}
+  </div>`;
+  if (!d.sessions.length) {
+    $("#stable").innerHTML = `<div class="empty">${d.indexing && d.indexing.running ? "Reading transcripts…" : "No sessions with API calls in this period."}</div>`;
+    return;
+  }
+  const max = Math.max(...d.sessions.map(s => s.totals.total), 1);
+  $("#stable").innerHTML = `<table class="stbl"><thead><tr><th>last activity</th><th>agent</th><th>project</th><th>session</th><th>span</th><th>active</th><th>prompts</th><th>calls</th><th>tokens</th><th></th><th>cost</th><th>models</th></tr></thead><tbody>${
+    d.sessions.map(s => {
+      const st = s.totals, cost = st.cost_with_unlogged ?? st.cost;
+      const label = s.title || s.session_id;
+      const tasksHtml = s.tasks.map(x => `<a class="chip" href="#tasks/${x.id}" title="${esc(x.name)}">#${x.id}</a>`).join(" ");
+      const mtip = s.models.map(m => `${esc(m.model)} · ${fmtTok(m.total)} · ${fmtCost(m.cost)}`).join("<br>");
+      return `<tr data-sid="${esc(s.session_id)}" class="${s.session_id === sessSel ? "sel" : ""}">
+        <td class="num">${fmtWhen(s.last_ts)}</td><td>${esc(AGENTS[s.agent] || s.agent)}</td><td>${esc(s.project || "–")}</td>
+        <td class="ttl"><span title="${esc(s.session_id + (s.cwd ? " · " + s.cwd : ""))}">${tasksHtml} ${esc(label)}</span></td>
+        <td class="num">${fmtDur(s.wall_s)}</td><td class="num">${fmtDur(s.active_s)}</td><td class="num">${fmtFull(s.prompts)}</td><td class="num">${fmtFull(st.calls)}</td>
+        <td class="num">${fmtTok(st.total)}</td><td><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(st.total, max)}%"></div></div></div></td>
+        <td class="num"${s.unlogged ? ` data-tip="<b>${fmtCost(cost)}</b>incl. ≈ ${fmtCost(s.unlogged.cost)} of Claude Code's own unlogged calls"` : ""}>${fmtCost(cost, st.cost_partial)}</td>
+        <td class="muted" data-tip="${esc(mtip)}">${esc(s.models.slice(0, 2).map(m => shortModel(m.model)).join(", "))}${s.models.length > 2 ? " +" + (s.models.length - 2) : ""}</td></tr>`;
+    }).join("")}</tbody></table>${d.count > d.sessions.length ? `<div class="note" style="padding:10px 16px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : ""}`;
+  $("#stable").querySelectorAll("tr[data-sid]").forEach(tr => tr.onclick = e => {
+    if (e.target.closest("a")) return;
+    selectSession(tr.dataset.sid, true);
+  });
+}
+async function selectSession(sid, scroll) {
+  sessSel = sid;
+  history.replaceState(null, "", "#sessions/" + encodeURIComponent(sid));
+  document.querySelectorAll(".stbl tr[data-sid]").forEach(tr => tr.classList.toggle("sel", tr.dataset.sid === sid));
+  const el = $("#sdetail");
+  try {
+    const rep = await getJSON("/api/sessions/" + encodeURIComponent(sid));
+    el.style.display = "";
+    renderDetail(rep, el);
+    if (scroll) el.scrollIntoView({behavior: "smooth", block: "start"});
+  } catch (e) {
+    el.style.display = "";
+    el._rep = null;
+    el.innerHTML = '<div class="empty">Session not found in the index.</div>';
+  }
+}
+
 // ---------------------------------------------------------------- settings
 async function loadSettings() {
   const d = await getJSON("/api/settings");
@@ -565,17 +665,19 @@ async function refreshAll() {
   try { await loadTasks(); await loadDetail(); }
   catch (e) { $("#updated").textContent = "server not reachable"; }
 }
-$("#refresh").onclick = () => { loadProjects(); setView(view); };
+$("#refresh").onclick = () => { loadProjects(); if (view === "sessions") loadSessions(true); else setView(view); };
 window.addEventListener("hashchange", () => {
   const h = parseHash();
   if (h.view !== view) setView(h.view);
   if (h.view === "tasks" && h.id && h.id !== selected) { selected = h.id; renderTasks(); loadDetail(); }
+  if (h.view === "sessions" && h.sid && h.sid !== sessSel) selectSession(h.sid, true);
 });
 loadProjects().catch(() => {}).then(() => setView(view));
 setInterval(() => {
   if (document.hidden) return;
   if (view === "todos") { loadTodos().catch(() => {}); return; }
   if (view === "projects") return;
+  if (view === "sessions") { if (Date.now() - sessLoaded > 30000) loadSessions().catch(() => {}); return; }
   if (view !== "tasks") return;
   const cur = tasks.find(t => t.id === selected);
   if (tasks.some(t => t.status === "active")) loadTasks().catch(() => {});

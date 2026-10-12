@@ -8,7 +8,7 @@ import os
 import sys
 import time
 
-from . import __version__, commands, db, fmt, ingest, paths, report, tasks
+from . import __version__, commands, db, fmt, paths, report, tasks
 
 
 def _session(args) -> str:
@@ -167,47 +167,43 @@ def cmd_export(args):
 
 
 def cmd_session(args):
-    """Analyse a whole session (no task needed): ingest everything and report.
+    """Report of one whole session (no task needed), any agent: id or transcript path.
 
-    Uses a throw-away database: the main one only holds what tasks counted
-    (history before a task start is skipped there on purpose).
+    Read into the sessions index (sessions.db): the main database only holds
+    what tasks counted (history before a task start is skipped there on purpose).
     """
-    import shutil
-    import tempfile
-    from pathlib import Path
-    tmp = tempfile.mkdtemp(prefix="tally-session-")
-    try:
-        _session_report(args, db.connect(Path(tmp) / "session.db"))
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    from . import sessions
+    ref = args.session_id
+    path = ref if ref.endswith(".jsonl") or os.sep in ref else None
+    found = sessions.index_session(ref, path)
+    if found is None:
+        sys.exit("Transcript for session %s not found (Claude Code, Codex and pi sessions are searched)." % ref)
+    rep = sessions.detail(found["session_id"])
+    if rep is None or rep.get("empty"):
+        sys.exit("Session %s has no API calls." % found["session_id"])
+    print(json.dumps(rep, indent=2) if args.json else fmt.render_report(rep))
 
 
-def _session_report(args, conn):
-    sid = args.session_id
-    if sid.endswith(".jsonl"):
-        path = sid
-        sid = os.path.basename(sid)[:-6]
-    else:
-        path = None
-    st = ingest.ingest_session(conn, sid, path)
-    main = ingest.resolve_transcript(conn, sid, path)
-    if main is None:
-        sys.exit("Transcript for session %s not found under %s" % (sid, paths.projects_dir()))
-    span = conn.execute("SELECT MIN(ts), MAX(ts) FROM usage WHERE session_id = ?", (sid,)).fetchone()
-    t0 = conn.execute("SELECT MIN(first_ts) FROM agents WHERE session_id = ?", (sid,)).fetchone()[0]
-    start = min(x for x in (span[0], t0) if x) if (span[0] or t0) else time.time()
-    end = span[1] or start
-    whole = {"id": 0, "name": "session " + sid, "initial_prompt": None, "status": "ended",
-             "started_at": start - 1, "ended_at": end + 1, "cwd": None, "created_by": "session",
-             "end_note": None}
-    from . import reconcile
-    reconcile.refresh(conn, sid)
-    rep = report.build(conn, whole, windows=[(sid, start - 1, end + 1)])
+def cmd_sessions(args):
+    """All sessions across agents with their tokens, cost, models and time."""
+    from . import sessions
+    days = None if args.all else args.days
+    if not args.no_refresh:
+        tty = sys.stderr.isatty()
+
+        def progress(done, total):
+            if tty and total > 50:
+                sys.stderr.write("\r  indexing sessions %d/%d" % (done, total))
+                sys.stderr.flush()
+        sessions.refresh(days, [args.agent] if args.agent else None, on_progress=progress)
+        if tty:
+            sys.stderr.write("\r\033[K")
+    ov = sessions.overview(days, agent=args.agent, project=args.project)
     if args.json:
-        print(json.dumps(rep, indent=2))
+        ov["sessions"] = ov["sessions"][: args.limit] if args.limit else ov["sessions"]
+        print(json.dumps(ov, indent=2))
     else:
-        print(fmt.render_report(rep))
-        print("\n  ingested %s" % st.as_dict())
+        print(fmt.render_sessions(ov, limit=args.limit))
 
 
 def cmd_dashboard(args):
@@ -554,10 +550,20 @@ def build_parser():
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_export)
 
-    s = sub.add_parser("session", help="analyse any session transcript (id or path), no task needed")
+    s = sub.add_parser("session", help="report of one whole session (id or transcript path), any agent")
     s.add_argument("session_id")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_session)
+
+    s = sub.add_parser("sessions", help="all sessions across agents: tokens, cost, models, time")
+    s.add_argument("--days", type=float, default=30, help="sessions active in the last N days (default 30)")
+    s.add_argument("--all", action="store_true", help="all history")
+    s.add_argument("--agent", choices=["claude", "codex", "pi"])
+    s.add_argument("-p", "--project")
+    s.add_argument("--limit", type=int, default=40, help="rows to show (0 = all)")
+    s.add_argument("--no-refresh", action="store_true", help="show the index as is, without reading transcripts")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_sessions)
 
     s = sub.add_parser("dashboard", aliases=["serve"], help="local web dashboard")
     s.add_argument("--host")

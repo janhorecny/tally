@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Local marketplace for tally: per-task token and time tracking for Claude Code.",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "tally",
       "source": "./plugin",
       "description": "Track tokens and time per task (Claude Code, Codex, pi), including subagents and workflows. Local SQLite, zero-token commands.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "keywords": [
         "tokens",
         "usage",

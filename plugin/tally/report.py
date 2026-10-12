@@ -91,8 +91,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         for r in conn.execute(
             "SELECT * FROM usage WHERE session_id = ? AND ts >= ? AND ts <= ? ORDER BY ts", (sid, a, b)
         ):
-            c = r["cost"] if r["cost"] is not None else pricer.cost(r["model"], r["input"], r["output"], r["cache_read"],
-                            r["cache_write_5m"], r["cache_write_1h"], r["speed"])
+            c = pricer.row_cost(r)
             totals.add_row(r, c)
             mkey = normalize_model(r["model"]) or "unknown"
             by_model.setdefault(mkey, Tot()).add_row(r, c)
@@ -299,7 +298,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         prompt_count = conn.execute("SELECT COUNT(*) FROM prompts WHERE task_id = ?", (task["id"],)).fetchone()[0]
     else:
         sessions = [{"session_id": s, "attached_at": a, "detached_at": b, "reason": "session"} for s, a, b in windows]
-        prompt_count = 0
+        prompt_count = None             # set from the session's prompts below
 
     from . import reconcile, settings
     unlogged = reconcile.estimate(conn, windows, pricer)
@@ -308,7 +307,9 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
     tools = _tool_stats(conn, windows) if settings.depth_at_least("calls", cfg) else None
     prompt_rows, automatic = _prompt_rows(conn, task, windows, per_prompt, prompt_agents, prompt_span,
                                           tools, active_ivals)
-    n_prompts = len(prompt_rows) if task["id"] else 0
+    n_prompts = len(prompt_rows)
+    if prompt_count is None:
+        prompt_count = n_prompts
     tot_d = totals.as_dict()
     durations = [p["duration_s"] for p in prompt_rows if p["duration_s"]]
     stats = {
@@ -401,22 +402,27 @@ def _prompt_rows(conn, task, windows, per_prompt, prompt_agents, prompt_span, to
         if len(iv) > 3 and iv[3]:
             by_prompt_turns.setdefault(iv[3], []).append(iv)
     if task["id"]:
-        for i, p in enumerate(conn.execute("SELECT * FROM prompts WHERE task_id = ? ORDER BY ts, id",
-                                           (task["id"],)).fetchall(), 1):
-            pid = p["prompt_id"]
-            if pid:
-                known.add(pid)
-            tot = per_prompt.get(pid) if pid else None
-            if pid in by_prompt_turns:
-                dur = _union_length(by_prompt_turns[pid])
-            elif pid in prompt_span:
-                dur = max(0.0, prompt_span[pid][1] - p["ts"])
-            else:
-                dur = 0.0
-            rows.append(dict(
-                (tot or Tot()).as_dict(), index=i, ts=p["ts"], prompt=p["prompt"], prompt_id=pid,
-                agents=len(prompt_agents.get(pid, ())) if pid else 0, duration_s=round(dur, 1),
-                tool_calls=tool_counts.get(pid) if tools is not None and pid else None))
+        prompt_list = conn.execute("SELECT * FROM prompts WHERE task_id = ? ORDER BY ts, id", (task["id"],)).fetchall()
+    else:                       # a whole session (sessions index): its own prompts
+        prompt_list = []
+        for sid, a, b in windows:
+            prompt_list.extend(conn.execute("SELECT * FROM prompts WHERE task_id IS NULL AND session_id = ? "
+                                            "AND ts >= ? AND ts <= ? ORDER BY ts, id", (sid, a, b)).fetchall())
+    for i, p in enumerate(prompt_list, 1):
+        pid = p["prompt_id"]
+        if pid:
+            known.add(pid)
+        tot = per_prompt.get(pid) if pid else None
+        if pid in by_prompt_turns:
+            dur = _union_length(by_prompt_turns[pid])
+        elif pid in prompt_span:
+            dur = max(0.0, prompt_span[pid][1] - p["ts"])
+        else:
+            dur = 0.0
+        rows.append(dict(
+            (tot or Tot()).as_dict(), index=i, ts=p["ts"], prompt=p["prompt"], prompt_id=pid,
+            agents=len(prompt_agents.get(pid, ())) if pid else 0, duration_s=round(dur, 1),
+            tool_calls=tool_counts.get(pid) if tools is not None and pid else None))
     auto = Tot()
     auto_ids = [pid for pid in per_prompt if pid and pid not in known]
     for pid in auto_ids:

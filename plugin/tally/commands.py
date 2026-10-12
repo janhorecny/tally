@@ -37,6 +37,8 @@ Todos
 Projects
   /tally:project [mode]       this project's overall stats; mode: track | tasks | off
   /tally:projects             all projects with their tracking mode and totals
+  /tally:sessions [days|all] [agent] [here]
+                              all sessions across agents: tokens, cost, models, time (default 7 days)
 
 Other
   /tally:settings [key val]   show or change settings (log.depth, log.prompts, todos.reminder, …)
@@ -49,7 +51,7 @@ CLI: tally --help   Data: ~/.claude/tally/tally.db"""
 
 KNOWN = {"start", "new", "end", "stop", "status", "stats", "list", "ls", "show", "report", "resume",
          "attach", "rename", "dashboard", "help", "todo", "todos", "take", "do", "done", "mark", "settings",
-         "project", "projects"}
+         "project", "projects", "sessions"}
 
 
 class Result:
@@ -102,6 +104,9 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
 
     if cmd in ("project", "projects"):
         return Result(_project_command(conn, cmd, args, cwd))
+
+    if cmd == "sessions":
+        return Result(_sessions_command(args, cwd))
 
     if cmd == "stats":
         task_id, _ = _split_id(args)
@@ -340,6 +345,25 @@ def _settings_command(args: str) -> str:
         lines.append("  %-22s %-10s [%s]" % (key, value, allowed))
         lines.append("  %-22s %s" % ("", desc))
     return "\n".join(lines)
+
+
+def _sessions_command(args: str, cwd: Optional[str]) -> str:
+    """/tally:sessions [days|all] [claude|codex|pi] [here]"""
+    from . import projects, sessions
+    days, agent, project = 7.0, None, None
+    for word in args.lower().split():
+        if word == "all":
+            days = None
+        elif re.match(r"^\d+(\.\d+)?d?$", word):
+            days = float(word.rstrip("d"))
+        elif word in ("claude", "codex", "pi"):
+            agent = word
+        elif word == "here":
+            project = projects.detect(cwd)
+        else:
+            return "Usage: /tally:sessions [days|all] [claude|codex|pi] [here]"
+    sessions.refresh(days, [agent] if agent else None)
+    return fmt.render_sessions(sessions.overview(days, agent=agent, project=project), limit=20)
 
 
 def _project_command(conn, cmd: str, args: str, cwd: Optional[str]) -> str:

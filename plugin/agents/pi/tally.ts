@@ -7,7 +7,7 @@
  *
  *   /tally start [name]   /tally status   /tally stats   /tally end [note]
  *   /tally todo <text>    /tally todos    /tally take <id>   /tally do <id>   /tally done
- *   /tally project [track|tasks|off]      /tally settings    /tally help
+ *   /tally project [track|tasks|off]      /tally sessions [days|all]   /tally settings    /tally help
  *
  * The same commands also work typed as a prompt, "tally:<cmd> args" (as in
  * Codex); tally:do / tally:new then turn the prompt itself into the work,
@@ -23,7 +23,7 @@ const PYTHON = process.env.TALLY_PYTHON || "python3";
 
 const SUBCOMMANDS = [
   "start", "new", "status", "stats", "end", "list", "show", "resume", "rename",
-  "todo", "todos", "take", "do", "done", "mark", "project", "projects", "settings", "dashboard", "help",
+  "todo", "todos", "take", "do", "done", "mark", "project", "projects", "sessions", "settings", "dashboard", "help",
 ];
 
 type RunResult = { code: number; stdout: string; stderr: string };

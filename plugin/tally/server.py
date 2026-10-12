@@ -79,6 +79,29 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/health":
                 self._json({"app": "tally", "version": __version__})
                 return
+            if url.path == "/api/sessions":
+                from . import sessions
+                days = arg("days", "30")
+                days = float(days) if days else None
+                agent = arg("agent") or None
+                # progress first: a refresh ending during overview() still reports
+                # running, so the page polls once more and gets the final numbers
+                ix = sessions.refresh_async(days, min_interval=0 if arg("refresh") == "1" else 20)
+                ov = sessions.overview(days, agent=agent, project=arg("project") or None,
+                                       limit=int(arg("limit") or 500))
+                ov["indexing"] = ix
+                self._json(ov)
+                return
+            m = re.match(r"^/api/sessions/([^/]+)$", url.path)
+            if m:
+                from urllib.parse import unquote
+                from . import sessions
+                rep = sessions.detail(unquote(m.group(1)))
+                if rep is None or rep.get("empty"):
+                    self._json({"error": "not found"}, 404)
+                    return
+                self._json(rep)
+                return
             conn = db.connect()
             try:
                 if url.path == "/api/tasks":

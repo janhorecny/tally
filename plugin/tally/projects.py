@@ -28,7 +28,7 @@ def detect_root(cwd: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     try:
         p = Path(cwd).expanduser()
     except (TypeError, ValueError):
-        return None
+        return None, None
     home = Path.home()
     for d in [p, *p.parents]:
         git = d / ".git"
@@ -152,8 +152,7 @@ def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30) ->
         if r["msg_key"] in seen:
             continue
         seen.add(r["msg_key"])
-        c = r["cost"] if r["cost"] is not None else pricer.cost(r["model"], r["input"], r["output"], r["cache_read"], r["cache_write_5m"],
-                        r["cache_write_1h"], r["speed"])
+        c = pricer.row_cost(r)
         add(totals, r, c)
         if r["ts"] >= now - 7 * 86400:
             add(last7, r, c)

@@ -77,6 +77,9 @@ class Env:
         os.environ["TALLY_HOME"] = str(self.home)
         os.environ["TALLY_PROJECTS_DIR"] = str(self.projects)
         os.environ["CLAUDE_PID"] = "4242"
+        # never read the real Codex / pi session folders (tally sessions discovers them)
+        os.environ["CODEX_HOME"] = str(self.tmp / "codex")
+        os.environ["PI_CODING_AGENT_DIR"] = str(self.tmp / "pi-agent")
 
     def main(self, sid=SID) -> Path:
         return self.proj / (sid + ".jsonl")
@@ -1084,6 +1087,150 @@ class Installer(unittest.TestCase):
             self.assertEqual(installer.choose(None, assume_yes=True), ["claude", "pi"])
         with self.assertRaises(SystemExit):
             installer.choose(["vim"], assume_yes=True)
+
+
+class SessionsOverview(unittest.TestCase):
+    """Whole sessions of every agent, indexed into sessions.db."""
+
+    def setUp(self):
+        self.env = Env()
+        self.codex = Path(os.environ["CODEX_HOME"])
+        self.pi = Path(os.environ["PI_CODING_AGENT_DIR"])
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def make_sessions(self):
+        e = self.env
+        t0 = time.time() - 600
+        # Claude Code: history, then a task starts (the main DB skips the history)
+        e.append(e.main(), dict(user(t0, "build the parser", prompt_id="p1"), cwd="/Users/me/proj"),
+                 assistant(t0 + 1, "c1", "r1", out=300),
+                 user(t0 + 2, prompt_id="p1", content=[{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]),
+                 user(t0 + 3, "<task-notification>agent done</task-notification>", prompt_id="p0"),
+                 assistant(t0 + 4, "c0", "r0", out=7),
+                 {"type": "ai-title", "aiTitle": "Parser work", "sessionId": SID})
+        e.hook("UserPromptSubmit", prompt="/tally:start parser")
+        e.append(e.main(), user(time.time(), "next", prompt_id="p2"), assistant(time.time() + 0.01, "c2", "r2", out=50))
+        e.hook("Stop")
+        # Codex: a root thread with one subagent thread
+        day = self.codex / "sessions" / time.strftime("%Y/%m/%d")
+        day.mkdir(parents=True)
+        root = day / "rollout-2026-10-12T08-00-00-T1.jsonl"
+        e.append(root, codex_line(t0, "session_meta", {"session_id": "T1", "id": "T1", "cwd": "/Users/me/proj",
+                                                       "source": "cli"}),
+                 codex_line(t0, "event_msg", {"type": "task_started", "turn_id": "k1"}),
+                 codex_line(t0, "event_msg", {"type": "user_message", "message": "fix the flaky test"}),
+                 codex_line(t0, "turn_context", {"turn_id": "k1", "model": "gpt-6.1-sol"}),
+                 codex_tokens(t0 + 1, 2000, 1000, 200))
+        sub = day / "rollout-2026-10-12T08-00-01-S1.jsonl"
+        e.append(sub, codex_line(t0, "session_meta", {"session_id": "T1", "id": "S1", "parent_thread_id": "T1",
+                                                      "cwd": "/Users/me/proj"}),
+                 codex_line(t0, "turn_context", {"turn_id": "k1", "model": "gpt-6-luna"}),
+                 codex_tokens(t0 + 2, 500, 0, 40))
+        # pi: a session with the cost pi reported
+        pis = self.pi / "sessions" / "--Users-me-other--" / "2026-10-12T08-00-00-000Z_P1.jsonl"
+        usage = {"input": 100, "output": 20, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 120,
+                 "cost": {"total": 0.25}}
+        e.append(pis, {"type": "session", "version": 3, "id": "P1", "timestamp": iso(t0), "cwd": "/Users/me/other"},
+                 {"type": "message", "id": "u1", "timestamp": iso(t0 + 1),
+                  "message": {"role": "user", "content": [{"type": "text", "text": "write docs"}]}},
+                 {"type": "message", "id": "a1", "timestamp": iso(t0 + 2),
+                  "message": {"role": "assistant", "provider": "zai", "model": "glm-5.2", "usage": usage,
+                              "stopReason": "stop", "content": []}})
+        return root, sub, pis
+
+    def test_overview_covers_whole_sessions_of_every_agent(self):
+        self.make_sessions()
+        from tally import sessions
+        r = sessions.refresh(None)
+        self.assertEqual(r["changed"], 3)                       # Claude, Codex root, pi (not the subagent)
+        ov = sessions.overview(None)
+        rows = {s["agent"]: s for s in ov["sessions"]}
+        self.assertEqual(set(rows), {"claude", "codex", "pi"})
+        c = rows["claude"]
+        self.assertEqual(c["totals"]["output"], 357)            # history before the task included
+        self.assertEqual((c["title"], c["project"], c["prompts"]), ("Parser work", "proj", 2))
+        self.assertEqual(c["automatic_turns"], 1)               # the background-agent notification
+        self.assertEqual([t["name"] for t in c["tasks"]], ["parser"])
+        x = rows["codex"]
+        self.assertEqual(x["session_id"], "T1")
+        self.assertEqual(x["totals"]["output"], 240)            # the subagent thread counts with its root
+        self.assertEqual((x["title"], x["agents"]), ("fix the flaky test", 1))
+        self.assertEqual({m["model"] for m in x["models"]}, {"gpt-6.1-sol", "gpt-6-luna"})
+        p = rows["pi"]
+        self.assertAlmostEqual(p["totals"]["cost"], 0.25)       # cost reported by pi
+        self.assertEqual((p["title"], p["project"]), ("write docs", "other"))
+        self.assertEqual(ov["totals"]["sessions"], 3)
+        self.assertEqual(ov["totals"]["output"], 357 + 240 + 20)
+        self.assertEqual(ov["totals"]["prompts"], 4)
+        rep = sessions.detail(SID)
+        self.assertEqual([p["prompt"] for p in rep["prompts"]], ["build the parser", "next"])
+        self.assertEqual(rep["prompts"][0]["output"], 300)
+        self.assertEqual(rep["stats"]["automatic"]["output"], 7)
+        self.assertEqual(len(ov["by_agent"]), 3)
+        self.assertEqual(sessions.overview(None, agent="pi")["count"], 1)
+        self.assertEqual(sessions.overview(None, project="proj")["count"], 2)
+        rep = sessions.detail("T1")
+        self.assertEqual(rep["totals"]["output"], 240)
+        self.assertEqual(rep["session"]["agent"], "codex")
+
+    def test_refresh_is_incremental_and_skips_off_projects(self):
+        root, sub, pis = self.make_sessions()
+        from tally import db, projects, sessions
+        sessions.refresh(None)
+        old = time.time() - 2 * sessions.STABLE_S
+        for f in (self.env.main(), root, sub, pis):
+            os.utime(f, (old, old))
+        self.assertEqual(sessions.refresh(None)["changed"], 3)    # mtime changed once
+        self.assertEqual(sessions.refresh(None)["changed"], 0)    # quiet and unchanged: not read again
+        self.env.append(pis, {"type": "message", "id": "a2", "timestamp": iso(time.time()),
+                              "message": {"role": "assistant", "model": "glm-5.2", "stopReason": "stop",
+                                          "usage": {"input": 1, "output": 5, "totalTokens": 6}, "content": []}})
+        self.assertEqual(sessions.refresh(None)["changed"], 1)
+        rows = {s["agent"]: s for s in sessions.overview(None)["sessions"]}
+        self.assertEqual(rows["pi"]["totals"]["output"], 25)
+        conn = db.connect()
+        with db.transaction(conn):
+            projects.set_mode(conn, "proj", "off")
+        self.assertEqual({s["agent"] for s in sessions.overview(None)["sessions"]}, {"pi"})
+
+    def test_cli_and_dashboard(self):
+        self.make_sessions()
+        run = lambda *a: subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally")] + list(a),  # noqa: E731
+                                        capture_output=True, text=True, env=os.environ, timeout=60, check=False)
+        r = run("sessions", "--all")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Sessions, all time: 3", r.stdout)
+        self.assertIn("Parser work", r.stdout)
+        data = json.loads(run("sessions", "--json", "--agent", "codex", "--no-refresh").stdout)
+        self.assertEqual([s["session_id"] for s in data["sessions"]], ["T1"])
+        r = run("session", "T1")                                   # Codex session by id
+        self.assertIn("Session T1", r.stdout)
+        self.assertIn("[Codex]", r.stdout)
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from tally import server
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % httpd.server_address[1]
+        try:
+            get = lambda path: json.loads(urllib.request.urlopen(base + path, timeout=10).read())  # noqa: E731
+            ov = get("/api/sessions?days=")
+            self.assertEqual(ov["count"], 3)
+            rep = get("/api/sessions/P1")
+            self.assertEqual(rep["session"]["agent"], "pi")
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(base + "/api/sessions/nope", timeout=10)
+            cm.exception.close()
+        finally:
+            from tally import sessions
+            deadline = time.time() + 20
+            while sessions.progress()["running"] and time.time() < deadline:   # background index of this env
+                time.sleep(0.05)
+            httpd.shutdown()
+            httpd.server_close()
 
 
 class CliSmoke(unittest.TestCase):

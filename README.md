@@ -52,7 +52,8 @@ Task #3 · Fix login redirect loop   [■ ended]
 - **Accurate.** Tokens come from Claude Code's own transcripts. Its internal calls that never reach a transcript are reconciled from its session cost record. The result matches Claude Code's own cost to within 2% on 40 of 40 validated sessions.
 - **Your choice of detail.** `log.depth` is `summary`, `prompts` or `calls`. `log.prompts` is `full`, `preview` or `off`, for privacy.
 - **Robust and fast.** It survives `/clear`, multiple sessions and parallel terminals, and takes about 33 ms per hook. Reports are frozen when a task ends.
-- **Dashboard.** A local dashboard with tasks, a todo board, projects and settings. There is also a status line segment, a CLI, and CSV/JSON export.
+- **All sessions at a glance.** `/tally:sessions`, `tally sessions` and the dashboard's Sessions tab list every session of every agent, with or without a task: agent, project, time, prompts, tokens, cost and models. It reads the agents' own transcripts into a separate index, so it also covers history from before Tally was installed.
+- **Dashboard.** A local dashboard with tasks, a todo board, projects, sessions and settings. There is also a status line segment, a CLI, and CSV/JSON export.
 - **Three agents, one ledger.** Claude Code, Codex and pi feed the same database: the same tasks, todos, projects and reports, whichever agent did the work.
 
 ## Install
@@ -96,10 +97,11 @@ Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in
 | projects and more | |
 |---|---|
 | `/tally:project [track\|tasks\|off]` · `/tally:projects` | Overall statistics of this project, or set its mode · all projects. |
+| `/tally:sessions [days\|all] [agent] [here]` | Every session of every agent with tokens, cost, models and time (default: 7 days). |
 | `/tally:settings [key value]` | `log.depth`, `log.prompts`, `todos.reminder`, `auto_start` … |
 | `/tally:dashboard` · `/tally:help` | Local dashboard (http://127.0.0.1:8765) · help. |
 
-The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | settings | export | session <id> | dashboard | statusline | doctor`. See [usage](docs/usage.md#cli).
+The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | export | dashboard | statusline | doctor`. See [usage](docs/usage.md#cli).
 
 ## Documentation
 
@@ -116,7 +118,7 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # 41 end-to-end tests (Claude Code, Codex and pi transcripts)
+python3 -m unittest discover -s tests -v       # 44 end-to-end tests (Claude Code, Codex and pi transcripts)
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg

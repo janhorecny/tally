@@ -31,6 +31,7 @@ The examples below use the Claude Code form. In every agent the commands are ans
 | `/tally:mark <id> <status>` | `todo`, `doing`, `blocked`, `done` or `dropped`. |
 | `/tally:project [track\|tasks\|off]` | This project's overall statistics, or set how it is tracked. |
 | `/tally:projects` | All projects with their tracking mode and totals. |
+| `/tally:sessions [days\|all] [agent] [here]` | Every session of every agent: time, prompts, tokens, cost, models (default: 7 days). |
 | `/tally:settings [key value]` | Show or change settings: logging depth and type, reminders, auto start. |
 | `/tally:dashboard` | Start the local dashboard if needed, and open it in the browser. |
 | `/tally:help` | Show the help text. |
@@ -162,6 +163,39 @@ The first time Claude Code opens in a git repository Tally does not know yet, it
 
 `/tally:projects` lists all projects. The dashboard has a *Projects* tab where you can switch modes and see a 30-day chart. Until a project is set up, the status line shows a hint.
 
+## Sessions
+
+Tasks measure what you choose to measure. The sessions overview answers a different question: what did every session cost, with or without a task?
+
+```
+/tally:sessions                 # last 7 days, every agent
+/tally:sessions 30 codex        # last 30 days, Codex only
+/tally:sessions all here        # all history of this project
+tally sessions [--days 30 | --all] [--agent claude|codex|pi] [-p project] [--limit 40] [--json]
+tally session <id or id prefix> # the full report of one session
+```
+
+```
+Sessions, last 7 days: 42 · 1.12B tokens · $512.40 · 318 prompts · active 21h 05m
+  Claude Code 37 · 1.09B · $498.10   Codex 3 · 24.1M · $13.90   pi 2 · 310.2k · $0.40
+
+  id       last activity    agent  project      span   active  prm   tokens      cost  models                   title / tasks
+  3f9c2a1b 2026-10-12 14:47 claude web-app    44m 10s  31m 02s   12    4.21M     $3.12  opus-5-5, sonnet-5-5     #3 Fix login redirect loop
+  9b81e0d4 2026-10-12 11:20 codex  api        1h 05m   22m 40s    6    8.40M     $4.75  gpt-6.1-sol, gpt-6-luna  add pagination to /orders
+  c2d7f6a0 2026-10-11 17:02 pi     docs       12m 30s        -    3   180.4k     $0.21  zai/glm-5.2              write the API changelog
+```
+
+- **What is listed:** every session with at least one API call, newest first. That covers Claude Code, Codex and pi, with or without a task, including sessions from before Tally was installed. Projects set to `off` are left out.
+- **Columns:**
+  - **span:** first prompt to last API call.
+  - **active:** time the agent was working on turns (Claude Code's turn records).
+  - **prm:** prompts you typed. Automatic turns, such as a background agent reporting back, are not counted.
+  - **cost:** includes Claude Code's own unlogged calls when its session cost record exists.
+  - **title / tasks:** Claude Code's session title (the first prompt for Codex and pi) and the Tally tasks that counted the session.
+- **How it is read:** sessions are read from the agents' own transcripts into a separate index, `~/.claude/tally/sessions.db`. The task database is not touched. The first run reads every transcript of the period; on 1,100 sessions (4.1 GB) that took 19 s. After that only new bytes are read, typically in well under a second.
+- **Dashboard:** the *Sessions* tab has the same list with period and agent filters (the project filter in the header applies too). Click a session for its full report: per-prompt breakdown, agents, models.
+- **Privacy:** session titles follow `log.prompts`. With `off`, no titles or prompt texts are stored in the index.
+
 ## Detailed statistics
 
 `/tally:stats` (or `tally stats [id]`) adds the following to the report:
@@ -265,6 +299,8 @@ Task #3 · Fix login redirect loop   [■ ended]
 - tables by model, by agent type and by workflow;
 - the prompts of the task.
 
+Further tabs: *Todos* (a board), *Projects* (modes, 30-day chart), *Sessions* (every session of every agent, see [Sessions](#sessions)) and *Settings*.
+
 Hover the bars for exact numbers. Light and dark themes follow the system, or the selector in the header.
 
 The dashboard keeps running in the background after you close the page. To stop it: `pkill -f "tally dashboard"`.
@@ -303,7 +339,8 @@ tally projects [--json]
 tally settings [key [value]]
 tally delete <id> [-y]
 tally export --format csv|json [-o file]
-tally session <session-id | path/to/transcript.jsonl> [--json]
+tally sessions [--days N | --all] [--agent claude|codex|pi] [-p project] [--limit N] [--no-refresh] [--json]
+tally session <session-id | id prefix | path/to/transcript.jsonl> [--json]   # any agent
 tally dashboard [--open] [--background] [--port 8766]
 tally config [key [value]]
 tally statusline
@@ -317,7 +354,11 @@ tally doctor
 tally export --format csv -o ~/Desktop/claude-tasks.csv
 
 # what did a past session cost, including subagents? (no task needed)
-tally session <session-id>        # ids: ls ~/.claude/projects/*/
+tally sessions --days 7           # find it (first column: id prefix)
+tally session 3f9c2a1b            # its full report
+
+# the ten most expensive sessions of the last 30 days
+tally sessions --json --limit 0 | python3 -c "import json,sys; r=json.load(sys.stdin)['sessions']; [print(s['session_id'][:8], s['agent'], round(s['totals']['cost'],2), s['title']) for s in sorted(r, key=lambda s: -s['totals']['cost'])[:10]]"
 
 # the five most expensive tasks
 tally list --all --json | python3 -c "import json,sys; r=json.load(sys.stdin); [print(t['id'], round(t['cost'],2), t['name']) for t in sorted(r, key=lambda t: -t['cost'])[:5]]"
