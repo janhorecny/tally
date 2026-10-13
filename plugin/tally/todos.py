@@ -116,7 +116,7 @@ def add(conn, title: str, project: Optional[str] = None, priority: int = 0, due_
 
 
 def update(conn, todo_id: int, **fields):
-    allowed = {"title", "notes", "project", "priority", "due_at", "status", "parent_id", "position"}
+    allowed = {"title", "notes", "project", "priority", "due_at", "status", "parent_id", "position", "rank"}
     sets = {k: v for k, v in fields.items() if k in allowed}
     if "status" in sets and sets["status"] not in STATUSES:
         raise ValueError("status must be one of: %s" % ", ".join(STATUSES))
@@ -225,6 +225,12 @@ def projects(conn) -> List[str]:
         "SELECT project FROM todos WHERE project IS NOT NULL UNION SELECT project FROM tasks WHERE project IS NOT NULL"
     ).fetchall()
     return sorted({r[0] for r in rows}, key=str.lower)
+
+
+def reorder(conn, ids: list) -> None:
+    """The dashboard's board: the cards of a column in this order (top first)."""
+    for i, tid in enumerate(ids):
+        conn.execute("UPDATE todos SET rank = ? WHERE id = ? AND parent_id IS NULL", (float(i), int(tid)))
 
 
 def linked_stats(conn, todo_id: int) -> dict:

@@ -55,6 +55,7 @@ Two further columns on `tasks`:
 | `priority` | 0 none, 1 low, 2 medium, 3 high. |
 | `due_at` | Unix seconds, at the end of the due day. |
 | `parent_id`, `position` | Plan structure (plan → task → step), in plan order. |
+| `rank` | Place on the dashboard's board, set by dragging a card (lowest first); empty until then. |
 | `source`, `source_ref` | Where the todo came from: `user`, `claude`, `import` or `dashboard`. For plan imports, the file plus the item key, which makes re-imports idempotent. |
 | `created_at`, `updated_at`, `done_at` | |
 
@@ -197,7 +198,7 @@ GROUP BY agent, day ORDER BY day DESC;
 
 ## Schema migrations
 
-`PRAGMA user_version` holds the schema version (currently 7). `db.connect()` migrates inside one `BEGIN IMMEDIATE` transaction, so two hooks starting at once cannot both migrate.
+`PRAGMA user_version` holds the schema version (currently 8). `db.connect()` migrates inside one `BEGIN IMMEDIATE` transaction, so two hooks starting at once cannot both migrate.
 
 - **v1 → v3:** `task_sessions` changes from one row per (task, session) to one row per interval.
 - **v2 → v3:** `summary_json` and `updated_at` are added.
@@ -205,6 +206,7 @@ GROUP BY agent, day ORDER BY day DESC;
 - **v4 → v5:** adds `projects` and `sessions.project`.
 - **v5 → v6:** adds `sessions.agent`, `usage.cost` and `files.state` (Codex and pi).
 - **v6 → v7:** adds `added_sessions`.
+- **v7 → v8:** adds `todos.rank`, the order of the cards on the dashboard's board.
 
 The migration creates tables first, then adds missing columns, then indexes. So any older version upgrades in one step.
 

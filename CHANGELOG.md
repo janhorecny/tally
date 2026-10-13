@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0 (2026-10-13)
+
+### A kanban board
+
+- **Todo → Doing → Blocked → Done:** the *Todos* tab is a kanban board in the order work flows. Drag a card to another column to change its status, or within a column to change its place; the order is kept (`todos.rank`, schema v8).
+- **Cards** show the priority as a coloured edge, the due date (red when overdue), the project, steps, notes and what the work cost, and stay compact.
+- **Click a card** to open it: edit everything, tick or add steps, see what it cost, copy `/tally:do`, delete. A finished todo offers neither `/tally:do` nor the hint to measure it.
+- **⋯ on a card** moves, copies `/tally:do` or deletes without dragging; **＋ Add a card** adds to a column; **a filter** above the board (`/`) narrows the cards.
+- **API:** `POST /api/todos` takes `status` and `parent` (a step); `POST /api/todos/<id>` takes `order`, the ids of the column after a drop, and answers 404 for a missing todo.
+
+### Fixed
+
+- **Two hooks opening a new database at once:** switching it to WAL failed with "database is locked" (SQLite does not wait there); it is tried again for a moment.
+- **`tally todo add Fix login -- check Safari`:** the shell's `--` was swallowed and the notes became part of the title.
+
 ## 0.10.1 (2026-10-13)
 
 - **A command runs once per prompt:** when an agent calls the prompt hook twice for one prompt (hooks registered twice, for example right after `/reload-plugins` with a new version), `/tally:todo` added the todo twice. The second call now waits for the first and gives the same answer. The same command typed again after 3 seconds runs again.

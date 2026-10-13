@@ -929,6 +929,11 @@ def build_parser():
 
 def main(argv=None) -> int:
     parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:2] in (["todo", "add"],) and "--" in argv[2:]:
+        # `tally todo add Fix login -- check Safari`: argparse would swallow the --, so keep it as text
+        i = argv.index("--", 2)
+        argv = argv[:i] + [" -- " + " ".join(argv[i + 1:])] if argv[i + 1:] else argv[:i]
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
         print(overview())

@@ -868,8 +868,31 @@ class TodosAndStats(unittest.TestCase):
             self.assertEqual(cm.exception.code, 400)
             board = json.loads(urllib.request.urlopen(base + "/api/todos?project=web", timeout=5).read())
             self.assertEqual(board["todos"][0]["status"], "blocked")
+            # the board: a card added in a column, a step, and a card dropped into a column at a place
+            h = {"X-Tally": "1"}
+            second = json.loads(post("/api/todos", {"text": "Second !!", "status": "doing", "project": "web"}, h).read())
+            self.assertEqual((second["status"], second["priority"], second["project"]), ("doing", 2, "web"))
+            step = json.loads(post("/api/todos", {"text": "A step", "parent": second["id"]}, h).read())
+            self.assertEqual((step["parent_id"], step["project"]), (second["id"], "web"))
+            post("/api/todos/%d" % todo["id"], {"status": "doing", "order": [todo["id"], second["id"]]}, h)
+            board = json.loads(urllib.request.urlopen(base + "/api/todos?project=web", timeout=5).read())
+            by = {t["id"]: t for t in board["todos"]}
+            self.assertEqual(set(by), {todo["id"], second["id"]})               # steps are not cards
+            self.assertEqual((by[todo["id"]]["status"], by[todo["id"]]["rank"], by[second["id"]]["rank"]),
+                             ("doing", 0, 1))
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                post("/api/todos/999", {"status": "done"}, h)
+            self.assertEqual(cm.exception.code, 404)
         finally:
             httpd.shutdown()
+        # the CLI keeps "-- notes" (argparse would swallow the --)
+        r = subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally"), "todo", "add", "Rotate keys", "@api", "--",
+                            "staging", "first"], capture_output=True, text=True, env=os.environ, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        from tally import db
+        conn = db.connect()
+        row = conn.execute("SELECT title, notes FROM todos WHERE title = 'Rotate keys'").fetchone()
+        self.assertEqual(tuple(row), ("Rotate keys", "staging first"))
 
     def test_dashboard_task_actions(self):
         import threading

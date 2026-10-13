@@ -1,13 +1,14 @@
 """SQLite storage. One file, WAL mode, safe for concurrent hook processes."""
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -145,6 +146,7 @@ CREATE TABLE IF NOT EXISTS todos (
     due_at      REAL,
     parent_id   INTEGER REFERENCES todos(id) ON DELETE CASCADE,
     position    INTEGER,
+    rank        REAL,                                     -- order on the dashboard's board (drag and drop)
     source      TEXT,                                     -- user | claude | import | dashboard
     source_ref  TEXT,                                     -- plan file + item key (re-import)
     created_at  REAL NOT NULL,
@@ -219,11 +221,26 @@ def connect(path: Optional[Path] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path), timeout=15, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 15000")
-    conn.execute("PRAGMA journal_mode = WAL")
+    _wal(conn)
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     _migrate(conn)
     return conn
+
+
+def _wal(conn: sqlite3.Connection) -> None:
+    """WAL mode. Switching a new database to it needs a lock SQLite does not wait
+    for (busy_timeout does not apply), so two hooks opening a fresh database at
+    once would fail: try again for a moment."""
+    for attempt in range(100):
+        try:
+            if str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal":
+                conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError:
+            if attempt == 99:
+                raise
+            time.sleep(0.05)
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set:
@@ -271,6 +288,7 @@ _ADDED_COLUMNS = [
     ("sessions", "agent", "TEXT"),
     ("usage", "cost", "REAL"),
     ("files", "state", "TEXT"),
+    ("todos", "rank", "REAL"),
 ]
 
 

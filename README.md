@@ -47,7 +47,7 @@ When you end it, you get totals plus subtotals per agent, subagent, workflow, ag
 - **Zero-token commands.** `/tally:*` is answered inside a hook, so the model is never called.
 - **Everything is attributed.** The main agent, subagents, nested forks, background agents, and workflow runs with their phases and agents, as a tree with subtotals.
 - **Per-prompt statistics.** Tokens, cost, time, subagents and tool calls for every prompt. Attribution is exact, because each API call is linked to the prompt that caused it.
-- **Todo list.** Quick capture with `@project`, priority and due date. `/tally:take` and `/tally:do` pick a todo up and measure what it costs, and reminders appear at session start. Plans from superpowers and similar tools are imported, and a skill lets Claude keep the board current.
+- **Todo list and kanban board.** Quick capture with `@project`, priority and due date. `/tally:take` and `/tally:do` pick a todo up and measure what it costs, and reminders appear at session start. The dashboard's board moves cards by drag and drop, opens them for editing and steps, and filters them. Plans from superpowers and similar tools are imported, and a skill lets Claude keep the board current.
 - **Projects.** The first time you open a repository, Tally asks whether to track it. You then get overall statistics per project (7 and 30 days, a daily series, models, tasks, todos).
 - **Accurate.** Tokens come from Claude Code's own transcripts. Its internal calls that never reach a transcript are reconciled from its session cost record. The result matches Claude Code's own cost to within 2% on 40 of 40 validated sessions.
 - **Easy to keep current.** One line installs it; `tally update` updates it, and Tally says when a new version is out.

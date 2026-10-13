@@ -65,6 +65,17 @@ The first prompt of every new session then starts a task named after it. Use `/t
 
 A quick todo list per project. Each todo can be picked up as a measured task, so you can see what it really cost.
 
+### The board
+
+The dashboard's *Todos* tab is a kanban board: **Todo → Doing → Blocked → Done** (done in the last 14 days; dropped todos are there too, struck through).
+
+- **Drag a card** to another column to change its status, or within a column to change its place; the order is kept. Done ends a task that is still measuring the todo.
+- **Cards** show the priority as a colour on the left edge (red high, orange medium, blue low) and `!`, the due date (red when overdue), the project, steps done, notes, and what the work on it cost.
+- **Click a card** to open it: title, status, priority, due date, project, notes, steps (tick them, or add one with Enter), and what it cost. *Copy /tally:do* hands it to your agent, *Delete* removes it after asking.
+- **⋯ on a card** moves it, copies `/tally:do`, or deletes it, without dragging (keyboard, touch screens).
+- **＋ Add a card** at the bottom of a column adds one there, with the quick syntax. The field above the board adds to Todo.
+- **The filter** above the board keeps the cards whose title, notes, project, steps or `#id` contain every word; `/` jumps to it.
+
 ```
 /tally:todo Fix login redirect loop !! due:fri -- Safari only
 /tally:todo Write release notes @website due:zajtra
@@ -303,7 +314,7 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 | Tab | What you can do |
 |---|---|
 | *Tasks* | Before the first task: how to start one in each agent, and what your agents used in the last 30 days (or, before any project is tracked, how many sessions they ran). Then: filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
-| *Todos* | A board with Doing, Todo, Blocked and Done. Add todos with the quick syntax, change the status, tick plan steps, **edit** title, priority, due date, project and notes, or **delete** a todo. *Copy /tally:do* copies the command that hands a todo to your agent. |
+| *Todos* | A kanban board: Todo → Doing → Blocked → Done (the last 14 days). See [The board](#the-board). |
 | *Projects* | Every project with sessions in the last 30 days, in two cards. *Tracked*, most used first: sessions, tokens and cost from the [sessions index](#sessions). *Not tracked*: how many sessions each has and how large their transcripts are, not read; choose `track` or `tasks` right in the table and its sessions are read at once. A search box above both filters them by name (`/` jumps to it, Enter opens the only match). A click opens the project on its own page (`#projects/<name>`, with *← All projects* back): what Tally keeps for good, a daily chart, models and tasks; for a project that is not tracked, its sessions with an **Add** button each. |
 | *Sessions* | The tracked sessions of every agent, and the ones not tracked with an **Add** button; see [Sessions](#sessions). |
 | *Settings* | The same settings as `/tally:settings`, grouped and described. |

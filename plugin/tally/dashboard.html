@@ -253,36 +253,65 @@ tbody tr:hover td { background: var(--hover); }
 .banner b { color: var(--text-primary); }
 .banner code { background: var(--surface-2); border-radius: 4px; padding: 0 4px; }
 
-/* ---------------------------------------------------------------- todos */
+/* ---------------------------------------------------------------- todos: the board */
 .addbar { display: flex; gap: 8px; margin-bottom: 6px; }
 .addbar input { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 9px; }
-.addhint { color: var(--text-muted); font-size: 12px; margin: 0 2px 16px; }
+.addhint { color: var(--text-muted); font-size: 12px; margin: 0 2px 14px; }
 .addhint code { background: var(--surface-2); border-radius: 4px; padding: 0 4px; }
 .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .board { grid-template-columns: minmax(0, 1fr); } }
-.col { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 10px; min-height: 120px; }
+.col { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; }
 .col h3 { font-size: 12px; margin: 2px 4px 10px; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; }
-.col .empty { padding: 18px; font-size: 12px; }
-.tcard { border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px; margin-bottom: 8px; background: var(--page); }
-.tcard.dropped .ttl { text-decoration: line-through; color: var(--text-muted); }
-.tcard .ttl { font-weight: 600; overflow-wrap: anywhere; }
+.col h3 .num { background: var(--surface-2); border-radius: 999px; padding: 0 8px; font-weight: 600; }
+.col.s-doing h3 span:first-child { color: var(--good); }
+.col.s-blocked h3 span:first-child { color: var(--critical); }
+.cards { min-height: 64px; display: flex; flex-direction: column; gap: 8px; border-radius: 8px; padding: 2px; transition: background .12s; }
+.cards.over { background: var(--select); }
+.cards .empty { padding: 18px 8px; font-size: 12px; }
+.tcard { border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 9px; padding: 9px 10px 8px; background: var(--page); cursor: grab; position: relative; }
+.tcard:hover { border-top-color: var(--border-strong); border-right-color: var(--border-strong); border-bottom-color: var(--border-strong); }
+.tcard:focus-visible { outline: 2px solid var(--seq); }
+.tcard.p3 { border-left-color: var(--critical); }
+.tcard.p2 { border-left-color: var(--accent); }
+.tcard.p1 { border-left-color: var(--seq); }
+.tcard.dragging { opacity: .45; }
+.tcard.done .ttl, .tcard.dropped .ttl { color: var(--text-secondary); }
+.tcard.dropped .ttl { text-decoration: line-through; }
+.tcard .ttl { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; padding-right: 22px; }
 .tcard .ttl .prio { color: var(--accent); font-weight: 700; margin-right: 2px; }
-.tcard .row { display: flex; gap: 6px 8px; flex-wrap: wrap; align-items: center; margin-top: 7px; font-size: 12px; color: var(--text-muted); }
-.tcard .row .grow { flex: 1; }
-.tcard details { margin-top: 7px; font-size: 13px; }
-.tcard summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
-.tcard .steps { list-style: none; padding: 4px 0 0; margin: 0; }
-.tcard .steps li { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; }
-.tcard .steps li.done span { color: var(--text-muted); text-decoration: line-through; }
-.tcard form { display: grid; gap: 6px; margin-top: 8px; }
-.tcard form .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.tcard form label { font-size: 11px; color: var(--text-muted); display: grid; gap: 2px; }
-.tcard form input, .tcard form select, .tcard form textarea { font-size: 13px; width: 100%; }
-.tcard form .btns { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.tcard .meta { display: flex; gap: 5px 8px; flex-wrap: wrap; align-items: center; margin-top: 7px; font-size: 12px; color: var(--text-muted); }
+.tcard .more { position: absolute; top: 5px; right: 4px; border: 0; background: none; color: var(--text-muted); padding: 0 5px; font-size: 16px; line-height: 20px; border-radius: 5px; }
+.tcard .more:hover { background: var(--hover); color: var(--text-primary); }
+.drop-ph { height: 4px; border-radius: 2px; background: var(--seq); margin: -2px 0; }
+.addcard { margin-top: 8px; border: 1px dashed var(--border-strong); background: none; color: var(--text-muted); text-align: left; font-weight: 500; }
+.addcard:hover { color: var(--text-primary); background: var(--hover); }
+.addcard-form input { width: 100%; margin-top: 8px; }
+.cardmenu { position: fixed; z-index: 35; min-width: 190px; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 6px; }
+.cardmenu .grp { font-size: 11px; color: var(--text-muted); padding: 6px 10px 3px; font-weight: 600; }
+.cardmenu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 6px; font-weight: 400; font-size: 13px; }
+.cardmenu button:hover, .cardmenu button:focus-visible { background: var(--hover); }
+.cardmenu button.danger { color: var(--critical); }
 .prog { display: flex; align-items: center; gap: 6px; }
-.prog .track { width: 80px; height: 6px; background: var(--seq-track); border-radius: 3px; overflow: hidden; }
+.prog .track { width: 60px; height: 6px; background: var(--seq-track); border-radius: 3px; overflow: hidden; }
 .prog .bar { height: 100%; background: var(--seq); }
+/* one todo, opened */
+.modal { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.45); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; overflow: auto; }
+.modal-box { width: min(680px, 100%); padding: 18px 20px 16px; box-shadow: var(--shadow-lg); }
+.modal-box .mhead { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 12px; margin-bottom: 8px; }
+.modal-box .mhead .grow { flex: 1; }
+.modal-box .mtitle { width: 100%; font-size: 18px; font-weight: 650; border: 1px solid transparent; background: none; padding: 4px 6px; margin: 0 -6px 10px; }
+.modal-box .mtitle:hover, .modal-box .mtitle:focus { border-color: var(--border-strong); background: var(--surface-1); }
+.modal-box .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+@media (max-width: 640px) { .modal-box .grid3 { grid-template-columns: minmax(0, 1fr); } }
+.modal-box label { font-size: 12px; color: var(--text-muted); display: grid; gap: 3px; }
+.modal-box textarea, .modal-box .grid3 input, .modal-box .grid3 select { width: 100%; font-size: 13px; }
+.modal-box .steps { list-style: none; padding: 0; margin: 6px 0; }
+.modal-box .steps li { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; }
+.modal-box .steps li.done span { color: var(--text-muted); text-decoration: line-through; }
+.modal-box .work { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--text-secondary); margin-top: 12px; }
+.modal-box .mfoot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+.modal-box .mfoot .grow { flex: 1; }
 
 /* ---------------------------------------------------------------- projects, sessions, settings */
 #projtable, #resttable { overflow: auto; }
@@ -407,9 +436,11 @@ button svg.i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4p
       <button type="submit" class="primary">Add</button>
     </form>
     <div class="addhint" id="addhint"></div>
+    <div class="toolbar"><input type="search" id="bsearch" placeholder="Filter cards…  ( / )" aria-label="Filter cards" style="flex:1;max-width:420px"><span class="muted" id="bmatch" style="font-size:12px"></span><span class="grow" style="flex:1"></span><span class="muted" style="font-size:12px">Drag cards between columns or within one · click a card to open it</span></div>
     <div id="todobanner"></div>
     <div class="board" id="board"></div>
   </div>
+  <div id="tmodal" class="modal hide" role="dialog" aria-modal="true" aria-label="Todo"><div class="modal-box card" id="tmodalbox"></div></div>
 
   <div id="view-projects" class="view wrap">
     <div id="projlist">
@@ -945,82 +976,228 @@ function wireTaskActions(t) {
 }
 
 // ---------------------------------------------------------------- todos
-const COLS = [["doing", "Doing", "▶"], ["todo", "Todo", "○"], ["blocked", "Blocked", "⏸"], ["done", "Done · last 14 days", "✓"]];
+// the board: Todo → Doing → Blocked → Done. Cards are dragged between and within
+// columns (the order is kept), opened with a click, moved with ⋯ without a mouse.
+const COLS = [["todo", "Todo", "○"], ["doing", "Doing", "▶"], ["blocked", "Blocked", "⏸"], ["done", "Done · last 14 days", "✓"]];
 const PRIO = {1: "!", 2: "!!", 3: "!!!"};
-const STATUSES = ["todo", "doing", "blocked", "done", "dropped"];
-let todoData = null, editing = null;
+const STATUS_LABEL = {todo: "Todo", doing: "Doing", blocked: "Blocked", done: "Done", dropped: "Dropped"};
+const FINISHED = ["done", "dropped"];             // nothing left to hand to an agent
+let todoData = null, editing = null, dragId = null, addingTo = null;
 function dueLabel(t, now) {
   if (!t.due_at) return "";
   const d = new Date(t.due_at * 1000), today = new Date(now * 1000);
   const open = ["todo", "doing", "blocked"].includes(t.status);
   if (t.due_at < now && open) return `<span class="chip warn">overdue · ${WDAY.format(d)}</span>`;
-  return `<span>${sameDay(d, today) ? "due today" : "due " + WDAY.format(d)}</span>`;
+  return `<span class="chip${sameDay(d, today) && open ? " accent" : ""}">${sameDay(d, today) ? "due today" : "due " + WDAY.format(d)}</span>`;
 }
 const isoDay = ts => { const d = new Date(ts * 1000); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 async function loadTodos() {
   todoData = await getJSON("/api/todos?status=board" + (project ? "&project=" + encodeURIComponent(project) : ""));
   renderTodos();
 }
+// a column's cards: the order you dragged them into first, then as Tally sorts them (overdue, priority, due)
+function columnOf(t) { return t.status === "dropped" ? "done" : t.status; }
+function boardColumns() {
+  const by = {todo: [], doing: [], blocked: [], done: []};
+  todoData.todos.forEach((t, i) => { t._i = i; (by[columnOf(t)] || by.todo).push(t); });
+  Object.values(by).forEach(list => list.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || a._i - b._i));
+  return by;
+}
 function renderTodos() {
   const d = todoData;
-  const by = {doing: [], todo: [], blocked: [], done: []};
-  d.todos.forEach(t => (by[t.status === "dropped" ? "done" : t.status] || by.todo).push(t));
+  const by = boardColumns();
   $("#addhint").innerHTML = project
     ? `Adds to <b>${esc(project)}</b>. Write <code>!</code> <code>!!</code> <code>!!!</code> for priority, <code>due:fri</code>, <code>due:+3d</code>, and <code>-- notes</code>.`
     : `Adds without a project unless you write <code>@project</code>. Also <code>!!</code> for priority, <code>due:fri</code> and <code>-- notes</code>.`;
-  $("#todobanner").innerHTML = d.todos.length ? "" : `<div class="banner"><b>No todos${project ? " in " + esc(project) : ""} yet.</b> Add one above, or with <code>/tally:todo Fix the export !! due:fri</code> in your agent. A written plan becomes todos with <code>tally todo import plan.md</code>, and the <code>tally-todos</code> skill lets your agent keep the board current. <code>/tally:take &lt;id&gt;</code> then measures what a todo really cost.</div>`;
-  $("#board").innerHTML = COLS.map(([k, label, mark]) => `<div class="col"><h3><span>${mark} ${label}</span><span class="num">${by[k].length}</span></h3>${
-    by[k].map(t => card(t, d.now)).join("") || '<div class="empty">Nothing here</div>'}</div>`).join("");
-  const board = $("#board");
-  $$("select[data-id]", board).forEach(el => el.onchange = () => guard(postJSON("/api/todos/" + el.dataset.id, {status: el.value})
-    .then(() => { toast("Todo #" + el.dataset.id + " is now " + el.value); return loadTodos(); })));
-  $$("input[type=checkbox][data-step]", board).forEach(el => el.onchange = () => guard(postJSON("/api/todos/" + el.dataset.step, {status: el.checked ? "done" : "todo"}).then(loadTodos)));
-  $$("button[data-edit]", board).forEach(b => b.onclick = () => { editing = Number(b.dataset.edit); renderTodos(); const i = $(`form[data-form="${editing}"] input`); if (i) i.focus(); });
-  $$("button[data-docmd]", board).forEach(b => b.onclick = () => {
-    const text = "/tally:do " + b.dataset.docmd;
-    copyText(text).then(() => toast("Copied " + text), () => toast(text));
-  });
-  $$("form[data-form]", board).forEach(form => {
-    const id = Number(form.dataset.form);
-    form.onkeydown = e => { if (e.key === "Escape") { editing = null; renderTodos(); } };
-    $("[data-cancel]", form).onclick = () => { editing = null; renderTodos(); };
-    $("[data-del]", form).onclick = () => {
-      const btns = $(".btns", form);
-      btns.innerHTML = `<span class="confirm">Delete todo #${id}${$("[data-steps]", form) ? " and its steps" : ""}?</span><button type="button" class="sm danger primary" data-yes>Delete</button><button type="button" class="sm" data-no>Cancel</button>`;
-      $("[data-no]", btns).onclick = () => renderTodos();
-      $("[data-yes]", btns).onclick = () => guard(postJSON("/api/todos/" + id, {delete: true}).then(() => { editing = null; toast("Todo #" + id + " deleted"); return loadTodos(); }));
-    };
-    form.onsubmit = e => {
-      e.preventDefault();
-      const f = new FormData(form);
-      guard(postJSON("/api/todos/" + id, {title: f.get("title"), priority: Number(f.get("priority")), due: f.get("due"),
-        project: f.get("project") || null, notes: f.get("notes") || null})
-        .then(() => { editing = null; toast("Todo #" + id + " saved"); return Promise.all([loadTodos(), loadProjects()]); }));
-    };
-  });
+  $("#todobanner").innerHTML = d.todos.length ? "" : `<div class="banner"><b>No todos${project ? " in " + esc(project) : ""} yet.</b> Add one above or in a column, or with <code>/tally:todo Fix the export !! due:fri</code> in your agent. A written plan becomes todos with <code>tally todo import plan.md</code>, and the <code>tally-todos</code> skill lets your agent keep the board current. <code>/tally:take &lt;id&gt;</code> then measures what a todo really cost.</div>`;
+  $("#board").innerHTML = COLS.map(([k, label, mark]) => `<section class="col s-${k}" aria-label="${label}"><h3><span>${mark} ${label}</span><span class="num" data-count="${k}">${by[k].length}</span></h3>
+    <div class="cards" data-col="${k}">${by[k].map(t => card(t, d.now)).join("") || '<div class="empty">Nothing here</div>'}</div>
+    ${k === "done" ? "" : addingTo === k ? `<form class="addcard-form" data-addform="${k}"><input type="text" placeholder="Title, then Enter · Esc cancels" aria-label="new card in ${label}"></form>`
+      : `<button type="button" class="sm addcard" data-addto="${k}">＋ Add a card</button>`}</section>`).join("");
+  wireBoard();
+  filterCards();
 }
 function card(t, now) {
   const [done, total] = t.progress, w = t.work;
-  if (editing === t.id) return `<div class="tcard"><form data-form="${t.id}">
-      <label>Title<input type="text" name="title" value="${esc(t.title)}" required></label>
-      <div class="pair"><label>Priority<select name="priority">${[[0, "none"], [1, "! low"], [2, "!! medium"], [3, "!!! high"]].map(([v, l]) => `<option value="${v}" ${v === (t.priority || 0) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-        <label>Due<input type="text" name="due" value="${t.due_at ? isoDay(t.due_at) : ""}" placeholder="fri, +3d, 2026-10-20"></label></div>
+  return `<article class="tcard ${t.status} p${t.priority || 0}" draggable="true" tabindex="0" data-id="${t.id}" aria-label="todo ${t.id}: ${esc(t.title)}">
+    <button type="button" class="more" data-more="${t.id}" aria-label="actions for todo ${t.id}" title="move, copy, delete">⋯</button>
+    <div class="ttl">${PRIO[t.priority] ? `<span class="prio">${PRIO[t.priority]}</span> ` : ""}${esc(t.title)}</div>
+    <div class="meta"><span class="num">#${t.id}</span>${!project && t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}${dueLabel(t, now)}
+      ${total ? `<span class="prog" title="${done} of ${total} steps done"><span class="track"><span class="bar" style="display:block;width:${pct(done, total)}%"></span></span><span class="num">${done}/${total}</span></span>` : ""}
+      ${t.notes ? '<span title="has notes">✎</span>' : ""}
+      ${w.tasks ? `<span class="num" data-tip="measured over ${plural(w.tasks, "task")}${w.active_task ? " · task #" + w.active_task + " running" : ""}">${w.active_task ? '<span class="dot active" style="margin:0 4px 0 0;display:inline-block"></span>' : ""}${fmtTok(w.total)} · ${fmtCost(w.cost)}</span>` : ""}</div>
+  </article>`;
+}
+// move a todo (status and/or place); the column's new order is saved with it
+function moveTodo(id, status, order) {
+  const t = todoData.todos.find(x => x.id === id);
+  const body = {};
+  if (t && status && columnOf(t) !== status && !(status === "done" && t.status === "dropped")) body.status = status;
+  if (order) body.order = order;
+  if (!Object.keys(body).length) return Promise.resolve();
+  if (t && body.status) t.status = body.status;                   // at once, before the server answers
+  if (order) order.forEach((tid, i) => { const x = todoData.todos.find(y => y.id === tid); if (x) x.rank = i; });
+  renderTodos();
+  return guard(postJSON("/api/todos/" + id, body).then(() => {
+    if (body.status) toast(`#${id} → ${STATUS_LABEL[body.status]}${body.status === "done" ? " (its running task ended)" : ""}`);
+    return loadTodos();
+  }));
+}
+function wireBoard() {
+  const board = $("#board");
+  $$(".tcard", board).forEach(el => {
+    const id = Number(el.dataset.id);
+    el.onclick = e => { if (!e.target.closest(".more")) openTodo(id); };
+    el.onkeydown = e => { if (e.key === "Enter" && e.target === el) openTodo(id); };
+    el.ondragstart = e => { dragId = id; el.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(id)); };
+    el.ondragend = () => { dragId = null; el.classList.remove("dragging"); $$(".drop-ph").forEach(x => x.remove()); $$(".cards.over").forEach(x => x.classList.remove("over")); };
+  });
+  $$(".cards", board).forEach(col => {
+    const place = e => {                                           // the gap the card would land in
+      const after = $$(".tcard:not(.dragging)", col).find(c => { const r = c.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+      let ph = $(".drop-ph", col);
+      if (!ph) { $$(".drop-ph").forEach(x => x.remove()); ph = document.createElement("div"); ph.className = "drop-ph"; }
+      col.insertBefore(ph, after || null);
+    };
+    col.ondragover = e => { if (dragId === null) return; e.preventDefault(); col.classList.add("over"); place(e); };
+    col.ondragleave = e => { if (!col.contains(e.relatedTarget)) { col.classList.remove("over"); $$(".drop-ph", col).forEach(x => x.remove()); } };
+    col.ondrop = e => {
+      e.preventDefault();
+      const id = dragId; if (id === null) return;
+      const ph = $(".drop-ph", col);
+      const ids = [];
+      Array.from(col.children).forEach(c => {
+        if (c === ph) ids.push(id);
+        else if (c.classList.contains("tcard") && Number(c.dataset.id) !== id) ids.push(Number(c.dataset.id));
+      });
+      if (!ph) ids.push(id);
+      moveTodo(id, col.dataset.col, ids);
+    };
+  });
+  $$("button[data-more]", board).forEach(b => b.onclick = e => { e.stopPropagation(); cardMenu(Number(b.dataset.more), b); });
+  $$("button[data-addto]", board).forEach(b => b.onclick = () => { addingTo = b.dataset.addto; editing = "add"; renderTodos(); $(`form[data-addform="${addingTo}"] input`).focus(); });
+  $$("form[data-addform]", board).forEach(form => {
+    const input = $("input", form), status = form.dataset.addform;
+    const close = () => { addingTo = null; editing = null; renderTodos(); };
+    input.onkeydown = e => { if (e.key === "Escape") close(); };
+    input.onblur = () => { if (!input.value.trim()) setTimeout(close, 150); };
+    form.onsubmit = e => {
+      e.preventDefault();
+      const text = input.value.trim(); if (!text) return close();
+      guard(postJSON("/api/todos", {text, status, project: project || null}).then(t => {
+        toast("Todo #" + t.id + " added to " + STATUS_LABEL[status]);
+        input.value = "";
+        return Promise.all([loadTodos(), loadProjects()]).then(() => { const i = $(`form[data-addform="${status}"] input`); if (i) i.focus(); });
+      }));
+    };
+  });
+}
+// ⋯ on a card: move it, copy /tally:do, delete (works without dragging, on touch screens too)
+function cardMenu(id, anchor) {
+  closeCardMenu();
+  const t = todoData.todos.find(x => x.id === id); if (!t) return;
+  const m = document.createElement("div");
+  m.className = "cardmenu"; m.setAttribute("role", "menu");
+  m.innerHTML = `<button type="button" data-act="open" role="menuitem">Open</button><div class="grp">Move to</div>${
+    ["todo", "doing", "blocked", "done", "dropped"].filter(s => s !== t.status).map(s => `<button type="button" data-move="${s}" role="menuitem">${STATUS_LABEL[s]}</button>`).join("")}
+    <div class="grp">More</div>${FINISHED.includes(t.status) ? "" : `<button type="button" data-act="copy" role="menuitem">Copy /tally:do ${id}</button>`}<button type="button" class="danger" data-act="delete" role="menuitem">Delete…</button>`;
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.top = Math.min(innerHeight - m.offsetHeight - 8, r.bottom + 4) + "px";
+  m.style.left = Math.max(8, Math.min(innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth)) + "px";
+  $("button", m).focus();
+  m.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    closeCardMenu();
+    if (b.dataset.move) {
+      return guard(postJSON("/api/todos/" + id, {status: b.dataset.move}).then(() => { toast(`#${id} → ${STATUS_LABEL[b.dataset.move]}`); return loadTodos(); }));
+    }
+    if (b.dataset.act === "open") openTodo(id);
+    if (b.dataset.act === "copy") { const text = "/tally:do " + id; copyText(text).then(() => toast("Copied " + text), () => toast(text)); }
+    if (b.dataset.act === "delete") openTodo(id, true);
+  };
+  m.onkeydown = e => { if (e.key === "Escape") { closeCardMenu(); anchor.focus(); } };
+}
+function closeCardMenu() { $$(".cardmenu").forEach(x => x.remove()); }
+document.addEventListener("click", e => { if (!e.target.closest(".cardmenu, [data-more]")) closeCardMenu(); });
+// the filter above the board: every word must appear in the title, notes, project or #id
+function filterCards() {
+  const words = $("#bsearch").value.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = 0, total = 0;
+  const counts = {};
+  $$("#board .tcard").forEach(el => {
+    const t = todoData.todos.find(x => x.id === Number(el.dataset.id));
+    const text = ("#" + t.id + " " + t.title + " " + (t.notes || "") + " " + (t.project || "") + " " + t.steps.map(c => c.title).join(" ")).toLowerCase();
+    const ok = words.every(w => text.includes(w));
+    el.classList.toggle("hide", !ok);
+    total++; if (ok) { shown++; counts[columnOf(t)] = (counts[columnOf(t)] || 0) + 1; }
+  });
+  $$("#board [data-count]").forEach(el => { el.textContent = words.length ? (counts[el.dataset.count] || 0) : $$(".tcard", el.closest(".col")).length; });
+  $("#bmatch").textContent = words.length ? (shown ? shown + " of " + total + " cards" : "no card matches") : "";
+}
+$("#bsearch").oninput = filterCards;
+$("#bsearch").onkeydown = e => { if (e.key === "Escape") { e.target.value = ""; filterCards(); } };
+// one todo, opened: edit it, its steps, what it cost, /tally:do, delete
+async function openTodo(id, askDelete) {
+  closeCardMenu();
+  editing = id;
+  let t;
+  try { t = await getJSON("/api/todos/" + id); } catch (e) { editing = null; toast(e.message, true); return; }
+  const box = $("#tmodalbox"), w = t.work || {};
+  const [done, total] = t.progress;
+  box.innerHTML = `<form id="tform" autocomplete="off">
+    <div class="mhead"><span class="num">#${t.id}</span><span>${t.project ? esc(t.project) : "no project"}</span><span>${t.source ? "from " + esc(t.source) : ""}</span><span class="grow"></span><button type="button" class="ghost sm" data-close aria-label="Close">✕ Close</button></div>
+    <input class="mtitle" name="title" value="${esc(t.title)}" required aria-label="title">
+    <div class="seg" role="group" aria-label="status">${["todo", "doing", "blocked", "done", "dropped"].map(s => `<button type="button" data-st="${s}" class="${s === t.status ? "on" : ""}">${STATUS_LABEL[s]}</button>`).join("")}</div>
+    <div class="grid3">
+      <label>Priority<select name="priority">${[[0, "none"], [1, "! low"], [2, "!! medium"], [3, "!!! high"]].map(([v, l]) => `<option value="${v}" ${v === (t.priority || 0) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Due<input type="text" name="due" value="${t.due_at ? isoDay(t.due_at) : ""}" placeholder="fri, +3d, 2026-10-20"></label>
       <label>Project<input type="text" name="project" value="${esc(t.project || "")}" placeholder="none"></label>
-      <label>Notes<textarea name="notes" rows="3">${esc(t.notes || "")}</textarea></label>
-      ${t.steps.length ? `<span data-steps class="hide"></span>` : ""}
-      <div class="btns"><button class="primary sm">Save</button><button type="button" class="sm" data-cancel>Cancel</button><span class="grow" style="flex:1"></span><button type="button" class="sm danger" data-del>Delete</button></div>
-    </form></div>`;
-  return `<div class="tcard ${t.status}"><div class="ttl">${PRIO[t.priority] ? `<span class="prio">${PRIO[t.priority]}</span> ` : ""}${esc(t.title)} <span class="muted num" style="font-weight:500">#${t.id}</span></div>
-    <div class="row">${!project && t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}${dueLabel(t, now)}
-      ${total ? `<span class="prog" title="${done} of ${total} steps done"><span class="track"><span class="bar" style="display:block;width:${pct(done, total)}%"></span></span><span class="num">${done}/${total}</span></span>` : ""}</div>
-    ${w.tasks ? `<div class="row num" data-tip="measured over ${plural(w.tasks, "task")}${w.active_task ? " · task #" + w.active_task + " running" : ""}">${w.active_task ? '<span class="dot active" style="margin:0"></span>' : ""}${fmtTok(w.total)} tokens · ${fmtCost(w.cost)} · ${fmtDur(w.active_s)} active</div>` : ""}
-    <div class="row"><select class="sm" data-id="${t.id}" aria-label="status of todo ${t.id}">${STATUSES.map(s => `<option ${s === t.status ? "selected" : ""}>${s}</option>`).join("")}</select>
-      <span class="grow"></span>
-      <button class="ghost sm" data-docmd="${t.id}" title="copy the command that hands this todo to your agent">Copy /tally:do</button>
-      <button class="ghost sm" data-edit="${t.id}">Edit</button></div>
-    ${(t.notes || t.steps.length) ? `<details><summary>${t.steps.length ? plural(t.steps.length, "step") + (t.notes ? " · notes" : "") : "notes"}</summary>${t.notes ? `<div class="muted" style="white-space:pre-wrap;margin:4px 0">${esc(t.notes)}</div>` : ""}
-      <ul class="steps">${t.steps.map(c => `<li class="${c.status === "done" ? "done" : ""}"><input type="checkbox" data-step="${c.id}" ${c.status === "done" ? "checked" : ""} aria-label="step ${c.id} done"><span>${esc(c.title)}</span></li>`).join("")}</ul></details>` : ""}
-  </div>`;
+    </div>
+    <label>Notes<textarea name="notes" rows="4" placeholder="Details, links, acceptance criteria…">${esc(t.notes || "")}</textarea></label>
+    <div class="section-title" style="padding:14px 0 2px">Steps${total ? ` · ${done}/${total} done` : ""}</div>
+    <ul class="steps">${(t.children || []).map(c => `<li class="${c.status === "done" ? "done" : ""}"><input type="checkbox" data-step="${c.id}" ${c.status === "done" ? "checked" : ""} aria-label="step done"><span>${esc(c.title)}</span></li>`).join("")}</ul>
+    <input type="text" id="newstep" placeholder="Add a step, then Enter" aria-label="new step" style="width:100%;font-size:13px">
+    ${w.tasks ? `<div class="work num">Measured over ${plural(w.tasks, "task")}: ${fmtTok(w.total)} tokens · ${fmtCost(w.cost)} · ${fmtDur(w.active_s)} active${w.active_task ? ` · <a href="#tasks/${w.active_task}">task #${w.active_task}</a> is running` : ""}</div>`
+      : FINISHED.includes(t.status) ? ""
+      : `<div class="work">Not measured yet. <code>/tally:take ${t.id}</code> in your agent measures the work on it, <code>/tally:do ${t.id}</code> also hands it to the agent.</div>`}
+    <div class="mfoot" id="tfoot"><button class="primary sm">Save</button><button type="button" class="sm" data-close>Cancel</button><span class="grow"></span>
+      ${FINISHED.includes(t.status) ? "" : `<button type="button" class="sm" data-copy-do>Copy /tally:do ${t.id}</button>`}<button type="button" class="sm danger" data-del>Delete</button></div>
+  </form>`;
+  $("#tmodal").classList.remove("hide");
+  const form = $("#tform");
+  let status = t.status;
+  const close = () => { $("#tmodal").classList.add("hide"); editing = null; loadTodos().catch(() => {}); };
+  $$("[data-close]", form).forEach(b => b.onclick = close);
+  $("#tmodal").onclick = e => { if (e.target.id === "tmodal") close(); };
+  form.onkeydown = e => { if (e.key === "Escape") close(); };
+  $$("[data-st]", form).forEach(b => b.onclick = () => { status = b.dataset.st; $$("[data-st]", form).forEach(x => x.classList.toggle("on", x === b)); });
+  $$("input[data-step]", form).forEach(el => el.onchange = () => guard(postJSON("/api/todos/" + el.dataset.step, {status: el.checked ? "done" : "todo"})
+    .then(() => el.closest("li").classList.toggle("done", el.checked))));
+  $("#newstep").onkeydown = e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const text = e.target.value.trim(); if (!text) return;
+    guard(postJSON("/api/todos", {text, parent: t.id}).then(() => openTodo(t.id)).then(() => $("#newstep").focus()));
+  };
+  const copyDo = $("[data-copy-do]", form);
+  if (copyDo) copyDo.onclick = () => { const text = "/tally:do " + t.id; copyText(text).then(() => toast("Copied " + text), () => toast(text)); };
+  const askDel = () => {
+    const foot = $("#tfoot");
+    foot.innerHTML = `<span class="confirm">Delete todo #${t.id}${(t.children || []).length ? " and its steps" : ""}?</span><span class="grow"></span><button type="button" class="sm danger primary" data-yes>Delete</button><button type="button" class="sm" data-no>Cancel</button>`;
+    $("[data-no]", foot).onclick = () => openTodo(t.id);
+    $("[data-yes]", foot).onclick = () => guard(postJSON("/api/todos/" + t.id, {delete: true}).then(() => { toast("Todo #" + t.id + " deleted"); close(); return loadProjects(); }));
+    $("[data-yes]", foot).focus();
+  };
+  $("[data-del]", form).onclick = askDel;
+  form.onsubmit = e => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const body = {title: f.get("title"), priority: Number(f.get("priority")), due: f.get("due"), project: f.get("project") || null, notes: f.get("notes") || null};
+    if (status !== t.status) body.status = status;
+    guard(postJSON("/api/todos/" + t.id, body).then(() => { toast("Todo #" + t.id + " saved"); close(); return loadProjects(); }));
+  };
+  if (askDelete) askDel(); else $(".mtitle", form).focus();
 }
 $("#addform").onsubmit = e => {
   e.preventDefault();
@@ -1333,6 +1510,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "r") $("#refresh").click();
   if (e.key === "/" && view === "tasks") { e.preventDefault(); $("#tsearch").focus(); }
   if (e.key === "/" && view === "projects" && !parseHash().pname) { e.preventDefault(); $("#psearch").focus(); }
+  if (e.key === "/" && view === "todos") { e.preventDefault(); $("#bsearch").focus(); }
 });
 window.addEventListener("hashchange", () => {
   const h = parseHash();
@@ -1358,7 +1536,7 @@ let ticks = 0;
 setInterval(() => {
   if (document.hidden || stopped) return;
   if (++ticks % 12 === 0) getJSON("/api/health").then(showUpdate).catch(() => {});   // also keeps the server from its idle stop
-  if (view === "todos") { if (editing === null) loadTodos().catch(() => {}); return; }
+  if (view === "todos") { if (editing === null && dragId === null && !$(".cardmenu")) loadTodos().catch(() => {}); return; }
   if (view === "projects" || view === "settings") return;
   if (view === "sessions") { if (Date.now() - sessLoaded > 30000) loadSessions().catch(() => {}); return; }
   const cur = tasks.find(t => t.id === selected);

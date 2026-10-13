@@ -206,11 +206,15 @@ class Handler(BaseHTTPRequestHandler):
                     self._task_action(conn, int(m.group(1)), body)
                     return
                 if url.path == "/api/todos":
+                    parent = todos.get(conn, int(body["parent"])) if body.get("parent") else None
+                    if body.get("parent") and parent is None:
+                        raise ValueError("todo #%s not found" % body["parent"])
                     spec = todos.parse_quick(str(body.get("text") or body.get("title") or ""),
-                                             body.get("project") or None)
+                                             body.get("project") or (parent["project"] if parent else None))
+                    status = body.get("status") if body.get("status") in ("todo", "doing", "blocked") else "todo"
                     t = todos.add(conn, spec["title"], project=spec["project"], priority=spec["priority"],
                                   due_at=spec["due_at"], notes=spec["notes"] or body.get("notes"),
-                                  source="dashboard")
+                                  parent_id=parent["id"] if parent else None, source="dashboard", status=status)
                     self._json(dict(t), 201)
                     return
                 m = re.match(r"^/api/todos/(\d+)$", url.path)
@@ -227,7 +231,14 @@ class Handler(BaseHTTPRequestHandler):
                         for task in conn.execute("SELECT * FROM tasks WHERE todo_id = ? AND status = 'active'",
                                                  (tid,)).fetchall():
                             tasks.end(conn, task["id"], note="todo done (dashboard)")
-                    self._json(dict(todos.update(conn, tid, **fields)))
+                    t = todos.update(conn, tid, **fields) if fields else todos.get(conn, tid)
+                    if t is None:
+                        self._json({"error": "todo #%d not found" % tid}, 404)
+                        return
+                    if isinstance(body.get("order"), list):        # dropped on the board: the column's new order
+                        with db.transaction(conn):
+                            todos.reorder(conn, [int(x) for x in body["order"]])
+                    self._json(dict(t))
                     return
                 if url.path == "/api/settings":
                     self._json({"key": body.get("key"), "value": settings.set_value(str(body.get("key")),
