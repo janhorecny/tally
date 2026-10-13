@@ -80,6 +80,11 @@ button.danger.primary { background: var(--critical); color: #fff; }
 button.ghost { border-color: transparent; background: transparent; color: var(--text-secondary); padding: 4px 8px; }
 button.ghost:hover { background: var(--hover); color: var(--text-primary); }
 button.sm, select.sm { font-size: 12px; padding: 3px 8px; }
+button.icon { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+button.icon:hover { color: var(--text-primary); }
+button.icon svg { width: 16px; height: 16px; }
+button.icon.spin svg { animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 select { padding: 5px 8px; cursor: pointer; }
 input[type=text], input[type=number], input[type=search], textarea { padding: 6px 10px; }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
@@ -109,6 +114,13 @@ header .controls { display: flex; align-items: center; gap: 8px; }
   header { padding: 10px 16px; }
   nav.tabs { order: 3; width: 100%; }
   header .status { display: none; }
+}
+/* phones: the filter row spans the full width, the select takes what the icons leave */
+@media (max-width: 640px) {
+  header .controls { width: 100%; }
+  header .controls select { flex: 1; min-width: 0; }
+  .toolbar select { flex: 1; min-width: 0; }
+  .toolbar #sindex { width: 100%; }
 }
 
 /* ---------------------------------------------------------------- layout */
@@ -279,6 +291,16 @@ tbody tr:hover td { background: var(--hover); }
 .stbl th:first-child, .stbl td:first-child { padding-left: 16px; }
 .stbl th:last-child, .stbl td:last-child { padding-right: 16px; }
 .stbl tbody tr { cursor: pointer; }
+/* narrow screens keep what identifies a row and what it cost; the rest is in the detail */
+.stbl td.prj, .ptbl td.pname { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1100px) { .c-models, .c-share { display: none; } .stbl td.prj { max-width: 120px; } }
+@media (max-width: 900px) { .c-span, .c-calls, .c-todos, .c-last, .c-agent { display: none; } }
+@media (max-width: 640px) { .c-active, .c-prompts, .c-tasks, .c-sess, .c-when { display: none; }
+  .stbl td.prj { max-width: 84px; }
+  .ptbl td.pname { max-width: 110px; }
+  .ptbl select { max-width: 92px; }
+  .c-ptok { display: none; }
+  .stbl th, .stbl td { padding-left: 5px; padding-right: 5px; } }
 .stbl tr.sel td { background: var(--select); }
 .settings { max-width: 980px; }
 .setgroup + .setgroup { border-top: 1px solid var(--border); }
@@ -315,8 +337,8 @@ tbody tr:hover td { background: var(--hover); }
     <div class="controls">
       <span class="status" id="status" role="status"><span class="dot"></span><span id="updated">connecting…</span></span>
       <select id="project" aria-label="Project filter"><option value="">All projects</option></select>
-      <select id="theme" aria-label="Theme"><option value="">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select>
-      <button id="refresh" title="Reload the data (R)">Refresh</button>
+      <button id="theme" class="icon" type="button"></button>
+      <button id="refresh" class="icon" type="button" title="Reload the data (R)" aria-label="Reload the data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
     </div>
   </header>
 
@@ -441,14 +463,25 @@ async function postJSON(url, body) {
 const guard = p => p.catch(e => toast(e.message || String(e), true));
 
 // ---------------------------------------------------------------- theme
-const themeSel = $("#theme");
-themeSel.value = localStorage.getItem("tc-theme") || "";
+// one icon button: auto (follow the system) → light → dark
+const THEMES = {
+  "": ["Auto, follows the system", '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>'],
+  light: ["Light", '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'],
+  dark: ["Dark", '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>'],
+};
+let theme = localStorage.getItem("tc-theme") || "";
+if (!(theme in THEMES)) theme = "";
 function applyTheme() {
-  const v = themeSel.value;
-  if (v) document.documentElement.setAttribute("data-theme", v); else document.documentElement.removeAttribute("data-theme");
-  localStorage.setItem("tc-theme", v);
+  if (theme) document.documentElement.setAttribute("data-theme", theme); else document.documentElement.removeAttribute("data-theme");
+  localStorage.setItem("tc-theme", theme);
+  const [label, icon] = THEMES[theme], next = THEMES[{"": "light", light: "dark", dark: ""}[theme]][0].split(",")[0];
+  const b = $("#theme");
+  b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg>`;
+  b.title = "Theme: " + label + " · click for " + next;
+  b.setAttribute("aria-label", "Theme: " + label + ". Switch to " + next);
 }
-themeSel.onchange = applyTheme; applyTheme();
+$("#theme").onclick = () => { theme = {"": "light", light: "dark", dark: ""}[theme]; applyTheme(); };
+applyTheme();
 
 // ---------------------------------------------------------------- tooltip
 const tip = $("#tip");
@@ -851,11 +884,11 @@ async function loadProjectsView() {
   const names = d.projects.map(p => p.project);
   if (!names.includes(projSel)) projSel = names.includes(project) ? project : names[0];
   const max = Math.max(...d.projects.map(p => p.last_30d.total), 1);
-  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th>project</th><th>tracking</th><th>sessions</th><th>tokens</th><th></th><th>cost</th><th>tasks</th><th>open todos</th><th>last active</th></tr></thead><tbody>${
-    d.projects.map(p => `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
-      <td><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
-      <td class="num">${p.sessions}</td><td class="num">${fmtTok(p.last_30d.total)}</td><td><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
-      <td class="num">${p.tasks}</td><td class="num">${p.open_todos}</td><td class="num muted">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
+  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th>project</th><th class="c-track">tracking</th><th class="c-sess">sessions</th><th class="c-ptok">tokens</th><th class="c-share"></th><th>cost</th><th class="c-tasks">tasks</th><th class="c-todos">open todos</th><th class="c-last">last active</th></tr></thead><tbody>${
+    d.projects.map(p => `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td class="pname" title="${esc(p.project)}"><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
+      <td class="c-track"><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
+      <td class="num c-sess">${p.sessions}</td><td class="num c-ptok">${fmtTok(p.last_30d.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
+      <td class="num c-tasks">${p.tasks}</td><td class="num c-todos">${p.open_todos}</td><td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
     <div class="note" style="padding:12px 0 0">Sessions, tokens and cost: every session of the last 30 days, from the agents' transcripts, whatever the tracking mode. Tracking decides what Tally keeps for good: <b>track</b> every session, <b>tasks</b> only the tasks you start, <b>off</b> nothing (and the project disappears from these numbers).</div>`;
   $$("select[data-mode]", $("#projtable")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
     guard(postJSON("/api/projects/" + encodeURIComponent(el.dataset.mode), {mode: el.value}).then(() => { toast(el.dataset.mode + ": " + el.value); return loadProjectsView(); })); });
@@ -941,19 +974,19 @@ function renderSessions(d) {
     return;
   }
   const max = Math.max(...d.sessions.map(s => s.totals.total), 1);
-  $("#stable").innerHTML = `<table class="stbl"><thead><tr><th>last activity</th><th>agent</th><th>project</th><th>session</th><th>span</th><th>active</th><th>prompts</th><th>calls</th><th>tokens</th><th></th><th>cost</th><th>models</th></tr></thead><tbody>${
+  $("#stable").innerHTML = `<table class="stbl"><thead><tr><th class="c-when">last activity</th><th class="c-agent">agent</th><th>project</th><th>session</th><th class="c-span">span</th><th class="c-active">active</th><th class="c-prompts">prompts</th><th class="c-calls">calls</th><th>tokens</th><th class="c-share"></th><th>cost</th><th class="c-models">models</th></tr></thead><tbody>${
     d.sessions.map(s => {
       const st = s.totals, cost = st.cost_with_unlogged ?? st.cost;
       const label = s.title || s.session_id;
       const tasksHtml = s.tasks.map(x => `<a class="chip accent" href="#tasks/${x.id}" title="${esc(x.name)}">#${x.id}</a>`).join(" ");
       const mtip = s.models.map(m => `${esc(m.model)} · ${fmtTok(m.total)} · ${fmtCost(m.cost)}`).join("<br>");
       return `<tr data-sid="${esc(s.session_id)}" class="${s.session_id === sessSel ? "sel" : ""}" tabindex="0">
-        <td class="num" title="${esc(fmtWhen(s.last_ts))}">${fmtAgo(s.last_ts)}</td><td>${esc(AGENTS[s.agent] || s.agent)}</td><td>${esc(s.project || "–")}</td>
+        <td class="num c-when" title="${esc(fmtWhen(s.last_ts))}">${fmtAgo(s.last_ts)}</td><td class="c-agent">${esc(AGENTS[s.agent] || s.agent)}</td><td class="prj" title="${esc(s.project || "")}">${esc(s.project || "–")}</td>
         <td class="ttl"><span title="${esc(s.session_id + (s.cwd ? " · " + s.cwd : ""))}">${tasksHtml} ${esc(label)}</span></td>
-        <td class="num">${fmtDur(s.wall_s)}</td><td class="num">${fmtDur(s.active_s)}</td><td class="num">${fmtFull(s.prompts)}</td><td class="num">${fmtFull(st.calls)}</td>
-        <td class="num">${fmtTok(st.total)}</td><td><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(st.total, max)}%"></div></div></div></td>
+        <td class="num c-span">${fmtDur(s.wall_s)}</td><td class="num c-active">${fmtDur(s.active_s)}</td><td class="num c-prompts">${fmtFull(s.prompts)}</td><td class="num c-calls">${fmtFull(st.calls)}</td>
+        <td class="num">${fmtTok(st.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(st.total, max)}%"></div></div></div></td>
         <td class="num"${s.unlogged ? ` data-tip="<b>${fmtCost(cost)}</b>incl. ≈ ${fmtCost(s.unlogged.cost)} of Claude Code's own unlogged calls"` : ""}>${fmtCost(cost, st.cost_partial)}</td>
-        <td class="muted" data-tip="${esc(mtip)}">${esc(s.models.slice(0, 2).map(m => shortModel(m.model)).join(", "))}${s.models.length > 2 ? " +" + (s.models.length - 2) : ""}</td></tr>`;
+        <td class="muted c-models" data-tip="${esc(mtip)}">${esc(s.models.slice(0, 2).map(m => shortModel(m.model)).join(", "))}${s.models.length > 2 ? " +" + (s.models.length - 2) : ""}</td></tr>`;
     }).join("")}</tbody></table>${d.count > d.sessions.length ? `<div class="note" style="padding:10px 16px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : ""}`;
   $$("tr[data-sid]", $("#stable")).forEach(tr => {
     tr.onclick = e => { if (!e.target.closest("a")) selectSession(tr.dataset.sid, true); };
@@ -1007,7 +1040,12 @@ async function refreshAll() {
   try { await loadTasks(); await loadDetail(); }
   catch (e) { if (!$("#status").classList.contains("off")) toast(e.message, true); }
 }
-$("#refresh").onclick = () => { guard(loadProjects()); if (view === "sessions") guard(loadSessions(true)); else setView(view); };
+$("#refresh").onclick = () => {
+  const b = $("#refresh");
+  b.classList.add("spin");
+  setTimeout(() => b.classList.remove("spin"), 700);
+  guard(loadProjects()); if (view === "sessions") guard(loadSessions(true)); else setView(view);
+};
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "r") $("#refresh").click();

@@ -280,8 +280,9 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 - **Live:** an active task refreshes every 5 seconds. The header shows when the data was last loaded, or that the dashboard server is not reachable.
 - **Project filter:** the selector in the header limits Tasks, Todos and Sessions to one project.
-- **Keyboard:** `R` reloads the data, `/` jumps to the task filter, `Enter` opens the focused row.
-- **Themes:** light and dark follow the system, or the selector in the header.
+- **Keyboard:** `R` reloads the data (as does the ↻ button), `/` jumps to the task filter, `Enter` opens the focused row.
+- **Small screens:** tables keep the columns that identify a row and its cost; the rest is in the detail.
+- **Themes:** the button with the monitor, sun or moon icon switches between following the system, light and dark.
 - **Updates:** a dashboard left running by an older Tally version is replaced automatically by `/tally:dashboard` or `tally dashboard`.
 
 The dashboard keeps running in the background after you close the page. To stop it: `pkill -f "tally dashboard"`.

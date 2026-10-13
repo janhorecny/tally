@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3 (2026-10-13)
+
+Design pass over every view in light and dark at desktop, 760 px and 390 px width, on real data.
+
+- **Header:** the theme is one icon button (monitor: follows the system, sun: light, moon: dark) and Refresh is an icon button that spins while it reloads. On phones the project filter and the buttons span the full width.
+- **Tables on small screens:** Sessions and Projects hide secondary columns (models, share bars, span, calls, agent, last activity, tasks, todos) step by step, and long project names are shortened, so the session title, tokens and cost stay readable and nothing scrolls sideways. The tracking mode stays selectable on phones.
+- **Sessions toolbar:** on phones the period and agent filters span the full width.
+
 ## 0.6.2 (2026-10-13)
 
 - **Dashboard, session and task detail:** the cost tile includes Claude Code's own unlogged calls, like the sessions list (it showed $24.00 where the list showed $24.70), with the estimate named in the hint and the note below. A session without subagents says *main session only* instead of *0 agents*.
