@@ -82,6 +82,11 @@ def hm(seconds) -> str:
     return "%d:%02d" % (m // 60, m % 60)
 
 
+def _num(x) -> str:
+    """A count with thousands separators: 76,781."""
+    return "{:,}".format(int(x or 0))
+
+
 def hours(seconds) -> str:
     return "" if seconds is None else "%.2f" % (seconds / 3600.0)
 
@@ -175,7 +180,7 @@ def _tasks(conn, f, project=None, **_):
     cost = sum(rep["totals"]["cost"] or 0 for _, rep in rows)
     body.append(["", "**Total**", "", "", hm(wall), hm(active), fmt.tokens(tok), fmt.money({"cost": cost})])
     title = "# Tally tasks" + (" · " + project if project else "")
-    return "\n".join([title, "", "%d tasks · exported %s" % (len(rows), _when(time.time())), "",
+    return "\n".join([title, "", "%s tasks · exported %s" % (_num(len(rows)), _when(time.time())), "",
                       _md_table(["#", "Task", "Project", "Started", "Wall (h:mm)", "Active (h:mm)", "Tokens", "Cost"],
                                 body), ""]), project
 
@@ -225,7 +230,7 @@ def report_md(rep) -> str:
               ("Tokens", "%s · in %s · out %s · cache write %s · cache read %s" % (
                   fmt.tokens(tot["total"]), fmt.tokens(tot["input"]), fmt.tokens(tot["output"]),
                   fmt.tokens(tot["cache_write"]), fmt.tokens(tot["cache_read"]))),
-              ("Cost", "%s at API list price · %d API calls" % (fmt.money(tot), tot["calls"]))]
+              ("Cost", "%s at API list price · %s API calls" % (fmt.money(tot), _num(tot["calls"])))]
     un = rep.get("unlogged") or {}
     if un.get("status") in ("estimated", "partial") and un.get("cost"):
         facts.append(("Unlogged", "≈ +%s tokens · +%s (Claude Code's own calls, estimated)" % (
@@ -293,8 +298,8 @@ def _project(conn, f, ref=None, **_):
                     [[d["day"], d["total"], d["output"], d["cost"]] for d in st["daily"]]), ref
     m, tk, td = st["last_30d"], st["tasks"], st["todos"]
     facts = [("Tracking", st["mode"] if st.get("registered") else "not set up"),
-             ("Last 30 days", "%s tokens · %s · %d API calls · %d sessions" % (
-                 fmt.tokens(m["total"]), fmt.money(m), m.get("calls", 0), st["sessions"])),
+             ("Last 30 days", "%s tokens · %s · %s API calls · %s sessions" % (
+                 fmt.tokens(m["total"]), fmt.money(m), _num(m.get("calls", 0)), _num(st["sessions"]))),
              ("Last 7 days", "%s tokens · %s" % (fmt.tokens(st["last_7d"]["total"]), fmt.money(st["last_7d"]))),
              ("Kept by Tally", "%s tokens · %s" % (fmt.tokens(st["tracked"]["total"]), fmt.money(st["tracked"]))),
              ("Tasks", "%d (%d active)" % (tk["count"], tk["active"])),
@@ -341,8 +346,8 @@ def _sessions(conn, f, project=None, days=30, agent=None, **_):
              fmt.money(dict(s["totals"], cost=s["totals"].get("cost_with_unlogged", s["totals"]["cost"])))]
             for s in ov["sessions"]]
     head = "# Tally sessions · %s%s" % (span, (" · " + project) if project else "")
-    return "\n".join([head, "", "%d sessions · %s tokens · %s · %d prompts · active %s. Exported %s." % (
-        t["sessions"], fmt.tokens(t["total"]), fmt.money(t), t["prompts"], fmt.duration(t["active_s"]),
+    return "\n".join([head, "", "%s sessions · %s tokens · %s · %s prompts · active %s. Exported %s." % (
+        _num(t["sessions"]), fmt.tokens(t["total"]), fmt.money(t), _num(t["prompts"]), fmt.duration(t["active_s"]),
         _when(time.time())), "",
         _md_table(["Last activity", "Agent", "Project", "Session", "Active (h:mm)", "Prompts", "Tokens", "Cost"],
                   body), ""]), label
@@ -419,16 +424,16 @@ def _summary(conn, f, days=30, **_):
     tk = data["tasks"]
     out = ["# Tally summary · %s" % span, "", "Exported %s. Cost is an estimate at API list price." % _when(time.time()), "",
            "| | |", "|---|---|",
-           "| Sessions | %d |" % t["sessions"],
+           "| Sessions | %s |" % _num(t["sessions"]),
            "| Tokens | %s (%s output) |" % (fmt.tokens(t["total"]), fmt.tokens(t["output"])),
            "| Cost | %s |" % fmt.money(t),
-           "| Prompts | %d · %d API calls |" % (t["prompts"], t["calls"]),
+           "| Prompts | %s · %s API calls |" % (_num(t["prompts"]), _num(t["calls"])),
            "| Active time | %s (%s) |" % (fmt.duration(t["active_s"]), hm(t["active_s"])),
-           "| Tasks | %d · %s tokens · %s · active %s |" % (tk["count"], fmt.tokens(tk["total"]),
+           "| Tasks | %s · %s tokens · %s · active %s |" % (_num(tk["count"]), fmt.tokens(tk["total"]),
                                                         fmt.money({"cost": tk["cost"]}), hm(tk["active_s"])),
            "", "## By agent", "",
            _md_table(["Agent", "Sessions", "Tokens", "Cost"], [
-               [fmt.AGENT_NAMES.get(a["agent"], a["agent"]), a["sessions"], fmt.tokens(a["total"]), fmt.money(a)]
+               [fmt.AGENT_NAMES.get(a["agent"], a["agent"]), _num(a["sessions"]), fmt.tokens(a["total"]), fmt.money(a)]
                for a in ov["by_agent"]]),
            "", "## By project", "",
            _md_table(["Project", "Sessions", "Tokens", "Cost"], [

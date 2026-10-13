@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 (2026-10-13)
+
+- **Exports:** counts in Markdown exports have thousands separators (`2,433 prompts · 76,786 API calls`).
+
 ## 0.7.0 (2026-10-13)
 
 ### Export and copy
