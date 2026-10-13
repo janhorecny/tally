@@ -479,7 +479,7 @@ def cmd_doctor(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="tally", description="Per-task token and time tracking for Claude Code.")
+    p = argparse.ArgumentParser(prog="tally", description="Per-task token and time tracking for Claude Code, Codex and pi.")
     p.add_argument("--version", action="version", version="tally " + __version__)
     sub = p.add_subparsers(dest="cmd")
 

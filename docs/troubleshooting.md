@@ -2,21 +2,25 @@
 
 Start with `tally doctor`. It shows:
 
-- the data directory and database;
+- the version, the data directory and the database;
 - the number of tasks;
 - the last hook that fired, with its session;
-- whether transcripts are found;
-- whether the plugin is installed;
+- the sessions recorded per agent;
+- whether Claude Code's transcripts are found;
+- for each agent, whether it is installed, found but not installed, or not found;
 - whether any errors were logged.
 
 ```
-tally 0.1.0 · python 3.9.6
+tally 0.4.1 · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
 last hook     Stop at 2026-10-12 19:31:02 (session c2a7dba3)
+sessions      claude 40 · codex 3 · pi 2
 transcripts   /Users/me/.claude/projects (ok)
-plugin        tally@tally
+Claude Code   installed
+Codex         found, not installed (./install.sh --agents codex)
+pi            installed
 errors        none
 ```
 
@@ -81,6 +85,12 @@ The `tally:todos` skill is loaded on demand. Ask explicitly ("import the plan in
 - **Not auto-discovered:** if you keep extensions somewhere else, add the file to `"extensions"` in `~/.pi/agent/settings.json`.
 - **Print mode:** in `pi -p`, `/tally do` cannot hand work to the model, because the process ends first. Use `tally:do <id>` as the prompt instead.
 
+## `/tally:sessions` is slow, or shows old numbers
+
+- **The first run** over a period reads every transcript of it into the sessions index; 30 days of heavy use took about 20 s. Later runs read only new data and take well under a second.
+- **Sessions differ from tasks:** a task counts only its own window, so it is usually smaller than the session it ran in.
+- **Rebuilding:** the index is a cache. Delete `~/.claude/tally/sessions.db` and it is rebuilt on the next run.
+
 ## Errors
 
 Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/errors.log` with a traceback. Please include that file when reporting a problem.
@@ -92,6 +102,14 @@ Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/er
 - Background output is logged to `~/.claude/tally/dashboard.log`.
 - To stop a background dashboard: `pkill -f "tally dashboard"`.
 
+## Updating
+
+```bash
+cd tally && git pull && ./install.sh
+```
+
+Then run `/reload-plugins` in Claude Code (or restart it), `/reload` in pi, and restart Codex. New `/tally:*` commands appear only after this.
+
 ## Upgrading from `task-counter`
 
 `./install.sh` removes the old `task@task-counter` plugin and its marketplace, deletes the `task-counter` CLI symlink, and moves `~/.claude/task-counter/tasks.db` to `~/.claude/tally/tally.db`. Your history is kept.
@@ -99,6 +117,7 @@ Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/er
 ## Uninstall
 
 ```bash
-./uninstall.sh            # removes the plugin, marketplace and CLI symlink; keeps ~/.claude/tally
-./uninstall.sh --purge    # also deletes the database
+./uninstall.sh                  # from every agent; removes the CLI symlink; keeps ~/.claude/tally
+./uninstall.sh --agents codex   # from one agent only
+./uninstall.sh --purge          # also deletes the data directory
 ```

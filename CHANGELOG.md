@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.1 (2026-10-13)
+
+### Documentation
+
+- **Command reference** (`docs/commands.md`): every `/tally:*` command with its syntax, arguments, behaviour, examples and CLI equivalent.
+- **CLI reference** (`docs/cli.md`): every `tally` command and option, including `todo` subcommands, `install`, `uninstall` and `doctor`.
+- The usage guide now links to both references instead of repeating them. Troubleshooting has current `tally doctor` output, updating steps and a sessions FAQ. How it works and Configuration cover Codex, pi and the sessions index, and the dashboard's write protection.
+- The README banner names Claude Code, Codex and pi.
+
+### Fixes
+
+- `/tally:help` and the command hints were out of date: `show [id]`, `todos … done`, `mark … [note]` and `project [name] [mode]`. Agent-neutral wording where a command works in every agent.
+
 ## 0.4.0 (2026-10-12)
 
 ### Sessions overview

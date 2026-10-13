@@ -1,6 +1,6 @@
 ---
 description: Full report of a task (tally)
-argument-hint: "<id>"
+argument-hint: "[id]"
 disable-model-invocation: true
 ---
 !`python3 "${CLAUDE_PLUGIN_ROOT}/bin/tally" slash --session "${CLAUDE_SESSION_ID}" show -- "$ARGUMENTS" 2>&1 || true`

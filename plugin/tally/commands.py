@@ -17,36 +17,39 @@ HELP = """Tally: tokens and time per task, including subagents and workflows, pl
 
 Tasks
   /tally:start [name]         start a task here (the next prompt is stored as its initial prompt)
-  /tally:new <prompt>         start a task AND send <prompt> to Claude as its first instruction
+  /tally:new <prompt>         start a task AND send <prompt> to the agent as its first instruction
   /tally:status [id]          live totals for the current task (or task #id)
   /tally:stats [id]           detailed stats: per-prompt breakdown, tools, averages
   /tally:end [id] [note]      end the task and print the final report
   /tally:list [n|all]         recent tasks
-  /tally:show <id>            full report of any task
+  /tally:show [id]            full report of any task (default: the current or latest one)
   /tally:resume <id>          continue counting task #id in this session (also reopens an ended task)
   /tally:rename [id] <name>   rename a task
 
 Todos
   /tally:todo <text>          add a todo: @project, ! !! !!! priority, due:fri|+3d|20.10., " -- notes"
-  /tally:todos [project|all]  open todos (default: this project)
+  /tally:todos [project|all|done]
+                              open todos of this project (or another, all, done ones)
   /tally:take <id>            pick up a todo: status doing + measuring starts (you write the prompt)
-  /tally:do <id>              pick up a todo and let Claude start working on it right away
+  /tally:do <id>              pick up a todo and let the agent start working on it right away
   /tally:done [id] [note]     mark the todo done (default: the one you are working on) and end its task
-  /tally:mark <id> <status>   todo | doing | blocked | done | dropped
+  /tally:mark <id> <status> [note]
+                              todo | doing | blocked | done | dropped
 
 Projects
-  /tally:project [mode]       this project's overall stats; mode: track | tasks | off
+  /tally:project [name] [mode]
+                              a project's overall stats; mode: track | tasks | off
   /tally:projects             all projects with their tracking mode and totals
   /tally:sessions [days|all] [agent] [here]
                               all sessions across agents: tokens, cost, models, time (default 7 days)
 
 Other
-  /tally:settings [key val]   show or change settings (log.depth, log.prompts, todos.reminder, …)
+  /tally:settings [key [val]] show or change settings (log.depth, log.prompts, todos.reminder, …)
   /tally:dashboard            open the local web dashboard
   /tally:help                 this help
 
 Commands run inside the hook and never reach the model, so they cost no tokens
-(except /tally:new and /tally:do, which hand work to Claude).
+(except /tally:new and /tally:do, which hand work to the agent).
 CLI: tally --help   Data: ~/.claude/tally/tally.db"""
 
 KNOWN = {"start", "new", "end", "stop", "status", "stats", "list", "ls", "show", "report", "resume",

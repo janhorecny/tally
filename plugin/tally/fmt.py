@@ -262,7 +262,7 @@ def render_todos(conn, rows: list, project: Optional[str], show_project: bool = 
     for r in rows:
         emit(r, 0)
     out.append("")
-    out.append("  /tally:take <id> start measuring · /tally:do <id> let Claude work on it · /tally:done")
+    out.append("  /tally:take <id> start measuring · /tally:do <id> let the agent work on it · /tally:done")
     return "\n".join(out)
 
 

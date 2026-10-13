@@ -1,42 +1,10 @@
 # Usage guide
 
-Tally works in **Claude Code**, **Codex** and **pi**. The commands are the same everywhere; only the way you type them differs:
+This guide walks through Tally by scenario. Every command, with its arguments and examples, is in the [command reference](commands.md); the terminal commands are in the [CLI reference](cli.md).
 
-| | Claude Code | Codex | pi |
-|---|---|---|---|
-| start a task | `/tally:start Fix login` | `tally:start Fix login` | `/tally start Fix login` (or `tally:start …`) |
-| status | `/tally:status` | `tally:status` | `/tally status` |
-| any command | `/tally:<cmd> args` | `tally:<cmd> args` (typed as a prompt) | `/tally <cmd> args` |
+Tally works in **Claude Code**, **Codex** and **pi**. The examples use the Claude Code form, `/tally:<cmd>`. In Codex, type `tally:<cmd>` as a prompt; in pi, use `/tally <cmd>`. See [Agents](#agents) for the differences.
 
-The examples below use the Claude Code form. In every agent the commands are answered locally and cost no tokens, except `new` and `do`, which hand work to the model. See [Agents](#agents) for the differences.
-
-## Commands
-
-| command | what it does |
-|---|---|
-| `/tally:start [name]` | Start a task in this session. If you leave out the name, your next prompt becomes the name. The next prompt is stored as the initial prompt either way. |
-| `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude as its first instruction. |
-| `/tally:status [id]` | Live totals for the current task, or for task `#id`. |
-| `/tally:end [id] [note]` | End the task and print the final report. A first argument that is a number is taken as the task ID; the rest is the note. |
-| `/tally:list [n\|all]` | Recent tasks (15 by default). |
-| `/tally:show [id]` | Full report of any task (default: the current one, otherwise the latest). |
-| `/tally:resume <id>` | Count task `#id` in this session too. Also reopens an ended task. |
-| `/tally:rename [id] <name>` | Rename the current task or task `#id`. |
-| `/tally:stats [id]` | Detailed statistics: per-prompt breakdown, averages, cache hit rate, tools. |
-| `/tally:todo <text>` | Add a todo: `@project`, `!`/`!!`/`!!!` priority, `due:fri\|+3d\|20.10.`, ` -- notes`. |
-| `/tally:todos [project\|all\|done]` | Open todos of this project (or of another project, all of them, or the done ones). |
-| `/tally:take <id>` | Pick up a todo: its status becomes *doing* and a task starts measuring it. You write the prompt. |
-| `/tally:do <id>` | Pick up a todo and let Claude start on it right away (the todo goes to Claude as context). |
-| `/tally:done [id] [note]` | Mark a todo done and end its task. Default: the todo you are working on. |
-| `/tally:mark <id> <status>` | `todo`, `doing`, `blocked`, `done` or `dropped`. |
-| `/tally:project [track\|tasks\|off]` | This project's overall statistics, or set how it is tracked. |
-| `/tally:projects` | All projects with their tracking mode and totals. |
-| `/tally:sessions [days\|all] [agent] [here]` | Every session of every agent: time, prompts, tokens, cost, models (default: 7 days). |
-| `/tally:settings [key value]` | Show or change settings: logging depth and type, reminders, auto start. |
-| `/tally:dashboard` | Start the local dashboard if needed, and open it in the browser. |
-| `/tally:help` | Show the help text. |
-
-Except for `/tally:new`, these commands are answered by the hook, so **they never reach the model and cost no tokens**. Claude Code shows the answer under the line `UserPromptSubmit operation blocked by hook:`. That line is expected.
+Commands are answered locally and cost no tokens, except `new` and `do`, which hand work to the model.
 
 ## Scenarios
 
@@ -106,14 +74,9 @@ A quick todo list per project. Each todo can be picked up as a measured task, so
 /tally:done                        ← todo done, its task ends, report shown
 ```
 
-### Quick syntax (`/tally:todo`, dashboard, `tally todo add`)
+### Quick syntax
 
-| syntax | example | meaning |
-|---|---|---|
-| `@name` | `@website` | Project. Default: the git repository you are in. |
-| `!`, `!!`, `!!!` | `!!` | Priority: low, medium or high. |
-| `due:<when>` | `due:fri`, `due:pi`, `due:zajtra`, `due:+3d`, `due:+4h`, `due:20.10.`, `due:2026-10-20` | Due date, at the end of that day. English and Slovak day names work. |
-| ` -- ` | `Fix it -- only on Safari` | Everything after it becomes the notes. |
+`@project`, `!`/`!!`/`!!!` priority, `due:<when>` and ` -- notes` work in `/tally:todo`, the dashboard and `tally todo add`. Due dates accept English and Slovak day names, `+3d`, `20.10.` and more; see [`/tally:todo`](commands.md#tallytodo) for the full list.
 
 ### Statuses
 
@@ -124,7 +87,7 @@ A quick todo list per project. Each todo can be picked up as a measured task, so
 
 ### Reminders
 
-When Claude Code starts in a project that has open todos, Tally shows them (0 tokens). Items being worked on come first, then overdue ones, then the rest by priority. The status line can show `📋 3 todos · 1 overdue` as well. Switch the reminder off with `/tally:settings todos.reminder off`.
+When an agent starts in a project that has open todos, Tally shows them (0 tokens). Items being worked on come first, then overdue ones, then the rest by priority. The status line can show `📋 3 todos · 1 overdue` as well. Switch the reminder off with `/tally:settings todos.reminder off`.
 
 ### Plans: superpowers and others
 
@@ -138,7 +101,7 @@ tally todo import docs/plans/2026-10-12-export.md
 
 ## Projects
 
-The first time Claude Code opens in a git repository Tally does not know yet, it asks (0 tokens):
+The first time an agent opens in a git repository Tally does not know yet, it asks (0 tokens):
 
 ```
 👋 Tally: first time in project website. Track it?
@@ -171,7 +134,7 @@ Tasks measure what you choose to measure. The sessions overview answers a differ
 /tally:sessions                 # last 7 days, every agent
 /tally:sessions 30 codex        # last 30 days, Codex only
 /tally:sessions all here        # all history of this project
-tally sessions [--days 30 | --all] [--agent claude|codex|pi] [-p project] [--limit 40] [--json]
+tally sessions --days 30        # the same in the terminal
 tally session <id or id prefix> # the full report of one session
 ```
 
@@ -320,34 +283,11 @@ The dashboard keeps running in the background after you close the page. To stop 
 "statusLine": {"type": "command", "command": "tally statusline", "refreshInterval": 10}
 ```
 
-Options: `--width 40` sets the maximum length of the task name.
+`--width 40` sets the maximum length of the task name.
 
-## CLI
+## Recipes
 
-```bash
-tally list [-n 50 | --all] [--json]
-tally status [id] [--json] [--brief]     # default: the active task of $CLAUDE_CODE_SESSION_ID or the only active one
-tally show <id> [--json] [--prompts]
-tally end [id] [--note "…"]
-tally start <name> --session <id>        # outside Claude Code you must name the session
-tally resume <id> --session <id>
-tally rename <id> <name>
-tally stats [id] [--json]
-tally todo add|list|next|show|take|done|mark|edit|rm|import …   # see `tally todo -h`
-tally project [name] [--set track|tasks|off] [--days N] [--json]
-tally projects [--json]
-tally settings [key [value]]
-tally delete <id> [-y]
-tally export --format csv|json [-o file]
-tally sessions [--days N | --all] [--agent claude|codex|pi] [-p project] [--limit N] [--no-refresh] [--json]
-tally session <session-id | id prefix | path/to/transcript.jsonl> [--json]   # any agent
-tally dashboard [--open] [--background] [--port 8766]
-tally config [key [value]]
-tally statusline
-tally doctor
-```
-
-### Recipes
+The CLI's commands and options are in the [CLI reference](cli.md).
 
 ```bash
 # all tasks to a spreadsheet

@@ -6,11 +6,11 @@ Tally works with no configuration. Everything optional lives in one JSON file an
 
 Change settings in any of three ways. All of them validate the value:
 
-- `/tally:settings <key> <value>` inside Claude Code;
+- `/tally:settings <key> <value>` inside an agent;
 - `tally settings <key> <value>`;
 - the dashboard's *Settings* tab.
 
-`tally config` shows or sets raw keys, including `pricing`.
+`dashboard_host` and `pricing` have no validation; set them with `tally config`, which shows or sets raw keys.
 
 ```bash
 tally settings                          # every setting, its value and allowed values
@@ -62,14 +62,14 @@ Models with no known price show the cost with a `+` suffix (for example `$1.20+`
 
 | variable | default | meaning |
 |---|---|---|
-| `TALLY_HOME` | `~/.claude/tally` | Data directory: `tally.db`, `config.json`, `errors.log` and `dashboard.log`. |
+| `TALLY_HOME` | `~/.claude/tally` | Data directory: `tally.db`, `sessions.db`, `config.json`, `errors.log` and `dashboard.log`. |
 | `TALLY_PROJECTS_DIR` | `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects` | Where Claude Code transcripts are read from. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Respected the same way Claude Code respects it. |
-| `CODEX_HOME` | `~/.codex` | Where Codex keeps `hooks.json` and its rollouts. Used by the installer and the Codex reader. |
-| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | pi's config directory. The installer puts the extension and the skill there. |
+| `CODEX_HOME` | `~/.codex` | Where Codex keeps `hooks.json` and its rollouts (`sessions/`). Used by the installer, the Codex reader and the sessions overview. |
+| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | pi's config directory. The installer puts the extension and the skill there; the sessions overview reads `sessions/`. |
 | `TALLY_BIN`, `TALLY_PYTHON` | (path baked in at install), `python3` | Overrides for the pi extension: which `tally` launcher and which Python to run. |
 
-Hooks inherit Claude Code's environment. Any of these variables must therefore be set before Claude Code starts, for example in your shell profile or in the `env` block of `~/.claude/settings.json`.
+Hooks inherit the agent's environment. Any of these variables must therefore be set before the agent starts, for example in your shell profile or, for Claude Code, in the `env` block of `~/.claude/settings.json`.
 
 ## Choosing agents
 

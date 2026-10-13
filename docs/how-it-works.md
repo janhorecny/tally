@@ -1,5 +1,7 @@
 # How it works
 
+The Claude Code integration end to end. Codex and pi follow the same pattern; see [Agents](#agents).
+
 ```
             ┌──────────────────────── Claude Code ────────────────────────┐
             │  you ── prompt ──▶ UserPromptSubmit hook ──▶ model          │
@@ -20,7 +22,7 @@
           ~/.claude/tally/tally.db  ──▶  /tally:status · CLI · dashboard · status line
 ```
 
-Tally is a Claude Code **plugin**. It consists of slash commands, hooks, and a Python package that uses only the standard library. The plugin never calls a model. It never contacts the network, except for the dashboard, which listens on localhost. It reads only the transcripts Claude Code already writes.
+Tally is a Claude Code **plugin**, a set of **Codex hooks** and a **pi extension**, all backed by one Python package that uses only the standard library. It never calls a model. It never contacts the network, except for the dashboard, which listens on localhost. It reads only the transcripts the agents already write.
 
 ## Agents
 
@@ -58,6 +60,8 @@ The task database holds what tasks (and projects in `track` mode) count. History
 
 ## Components
 
+Paths starting with `tally/` are in `plugin/tally/`.
+
 | path | role |
 |---|---|
 | `plugin/.claude-plugin/plugin.json` | Claude Code plugin manifest (name `tally`, so commands are `/tally:*`). |
@@ -69,16 +73,23 @@ The task database holds what tasks (and projects in `track` mode) count. History
 | `plugin/bin/tally` | Launcher. `hook` goes straight to `tally.hooks`, without argparse. Everything else goes to `tally.cli`. |
 | `tally/hooks.py` | Hook entry point. Never raises: errors go to `errors.log`. |
 | `tally/commands.py` | `/tally:*` parsing and handlers, shared by the hook and the CLI. |
+| `tally/cli.py` | The `tally` command line. |
 | `tally/tasks.py` | Task lifecycle: start, end, attach/resume, reopen, the `/clear` carry-over. |
 | `tally/ingest.py` | Incremental transcript reader that writes `usage`, `agents`, `workflows` and `turns`. |
 | `tally/report.py` | Builds the report: totals, the agent tree, groupings, time. Also handles snapshots. |
 | `tally/reconcile.py` | Unlogged-usage estimate from Claude Code's `cost-state` records. |
+| `tally/sessions.py` | The sessions index (`sessions.db`): discovery, incremental reads, the overview. |
+| `tally/todos.py`, `tally/projects.py` | Todos (quick syntax, plan import) and projects (detection, modes, statistics). |
+| `tally/settings.py`, `tally/paths.py` | Validated settings, `config.json`, data and transcript locations. |
+| `plugin/skills/todos/SKILL.md` | The `tally:todos` skill; the installer copies it for Codex and pi as `tally-todos`. |
 | `tally/pricing.py` | Price table and per-call cost. |
 | `tally/fmt.py` | Text rendering for the terminal. |
-| `tally/server.py`, `dashboard.html` | Local dashboard: a read-only JSON API and a single HTML page. |
+| `tally/server.py`, `dashboard.html` | Local dashboard: a JSON API and a single HTML page. |
 | `tally/db.py` | SQLite schema, migrations, transactions. |
 
 ## Hooks
+
+Claude Code's events are below. Codex gets the same six events through `~/.codex/hooks.json`; the pi extension calls `tally hook --agent pi` from its own events.
 
 | event | what Tally does | typical time |
 |---|---|---|
@@ -225,6 +236,7 @@ The heaviest session on the development machine had 527 transcript files, 298 MB
 - **Local only:** all data stays in `~/.claude/tally`, and nothing is sent anywhere.
 - **Prompts are stored** in the database (`prompts` table), so treat the file like your transcripts.
 - **Dashboard:**
-  - It binds to `127.0.0.1` and is read-only.
+  - It binds to `127.0.0.1`.
   - It rejects requests whose `Host` header is not localhost, which blocks DNS-rebinding pages from reading your prompts.
-- **Hooks never break Claude Code:** every error is caught and logged, and the hook exits 0.
+  - Writes (todos, settings, project modes) also need a custom `X-Tally` header and, when the browser sends one, its own `Origin`. Other web pages therefore cannot change anything.
+- **Hooks never break the agent:** every error is caught and logged, and the hook exits 0.

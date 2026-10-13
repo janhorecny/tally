@@ -79,7 +79,7 @@ def terminal(c, x, y, w, h):
                % (x + w / 2, y + 23, MONO, c["muted"]))
     tx = x + 26
     ty = y + 74
-    out.append('<text x="%d" y="%d" font-family="%s" font-size="15"><tspan fill="%s">&gt; </tspan>'
+    out.append('<text x="%d" y="%d" font-family="%s" font-size="15" xml:space="preserve"><tspan fill="%s">&gt; </tspan>'
                '<tspan fill="%s" font-weight="600">/tally:end</tspan><tspan fill="%s"> shipped</tspan></text>'
                % (tx, ty, MONO, c["muted"], c["accent"], c["ink2"]))
     out.append('<text x="%d" y="%d" font-family="%s" font-size="15" font-weight="700" fill="%s">'
@@ -102,7 +102,7 @@ def terminal(c, x, y, w, h):
 
 def banner(theme: str) -> str:
     c = THEMES[theme]
-    title = "Tally: per-task token and time tracking for Claude Code"
+    title = "Tally: per-task token and time tracking for Claude Code, Codex and pi"
     return """<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-label="{title}">
   <title>{title}</title>
   <defs>
@@ -124,7 +124,7 @@ def banner(theme: str) -> str:
   {logo}
   <text x="196" y="172" font-family="{SANS}" font-size="92" font-weight="800" letter-spacing="-2" fill="{ink}">Tally</text>
   <text x="74" y="230" font-family="{SANS}" font-size="27" fill="{ink2}">Per-task token &amp; time tracking</text>
-  <text x="74" y="266" font-family="{SANS}" font-size="27" fill="{ink2}">for <tspan fill="{ink}" font-weight="600">Claude Code</tspan></text>
+  <text x="74" y="266" font-family="{SANS}" font-size="27" fill="{ink2}">for <tspan fill="{ink}" font-weight="600">Claude Code</tspan>, <tspan fill="{ink}" font-weight="600">Codex</tspan> and <tspan fill="{ink}" font-weight="600">pi</tspan></text>
   {chip1}
   {chip2}
   {chip3}

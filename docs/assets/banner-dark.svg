@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Tally: per-task token and time tracking for Claude Code">
-  <title>Tally: per-task token and time tracking for Claude Code</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Tally: per-task token and time tracking for Claude Code, Codex and pi">
+  <title>Tally: per-task token and time tracking for Claude Code, Codex and pi</title>
   <defs>
     <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
       <circle cx="2" cy="2" r="1.6" fill="#262624"/>
@@ -24,7 +24,7 @@
   <line x1="74" y1="162" x2="152" y2="106" stroke="#d95926" stroke-width="9" stroke-linecap="round"/>
   <text x="196" y="172" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="92" font-weight="800" letter-spacing="-2" fill="#f0efec">Tally</text>
   <text x="74" y="230" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="27" fill="#c3c2b7">Per-task token &amp; time tracking</text>
-  <text x="74" y="266" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="27" fill="#c3c2b7">for <tspan fill="#f0efec" font-weight="600">Claude Code</tspan></text>
+  <text x="74" y="266" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="27" fill="#c3c2b7">for <tspan fill="#f0efec" font-weight="600">Claude Code</tspan>, <tspan fill="#f0efec" font-weight="600">Codex</tspan> and <tspan fill="#f0efec" font-weight="600">pi</tspan></text>
   <rect x="74" y="302" width="186" height="34" rx="17" fill="#1a1a19" stroke="#2c2c2a"/><text x="90" y="324" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="15" fill="#c3c2b7">zero-token commands</text>
   <rect x="270" y="302" width="198" height="34" rx="17" fill="#1a1a19" stroke="#2c2c2a"/><text x="286" y="324" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="15" fill="#c3c2b7">subagents &amp; workflows</text>
   <rect x="478" y="302" width="124" height="34" rx="17" fill="#1a1a19" stroke="#2c2c2a"/><text x="494" y="324" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="15" fill="#c3c2b7">local SQLite</text>
@@ -35,7 +35,7 @@
   <circle cx="744" cy="76" r="6" fill="#c98500"/>
   <circle cx="764" cy="76" r="6" fill="#199e70"/>
   <text x="954" y="81" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#898781" text-anchor="middle">claude</text>
-  <text x="726" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15"><tspan fill="#898781">&gt; </tspan><tspan fill="#d95926" font-weight="600">/tally:end</tspan><tspan fill="#c3c2b7"> shipped</tspan></text>
+  <text x="726" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" xml:space="preserve"><tspan fill="#898781">&gt; </tspan><tspan fill="#d95926" font-weight="600">/tally:end</tspan><tspan fill="#c3c2b7"> shipped</tspan></text>
   <text x="726" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" font-weight="700" fill="#f0efec">■ Task #3 · Fix login redirect loop</text>
   <text x="726" y="192" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#c3c2b7">4.21M tokens · $3.12 · 44m wall · 31m active</text>
   <text x="726" y="232" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#c3c2b7">main session</text>

@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg">
-    <img alt="Tally: per-task token and time tracking for Claude Code" src="docs/assets/banner-light.svg" width="100%">
+    <img alt="Tally: per-task token and time tracking for Claude Code, Codex and pi" src="docs/assets/banner-light.svg" width="100%">
   </picture>
 </p>
 
@@ -10,7 +10,7 @@
 
 **Per-task token and time tracking for Claude Code, Codex and pi.** It runs locally with zero dependencies, stores everything in SQLite, and its commands cost no tokens.
 
-You start a task inside Claude Code and keep working. While it is open, Tally counts:
+You start a task inside Claude Code, Codex or pi and keep working. While it is open, Tally counts:
 
 - the main conversation;
 - every subagent, including background agents and nested forks;
@@ -77,7 +77,7 @@ It also links the CLI to `~/.local/bin/tally`. Run it again to update. `./uninst
 
 ## Commands
 
-Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in **pi** use `/tally start …`. Details are in [Agents](docs/usage.md#agents).
+Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in **pi** use `/tally start …`. Every command with its arguments and examples: [command reference](docs/commands.md).
 
 | tasks | |
 |---|---|
@@ -85,7 +85,7 @@ Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in
 | `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude. |
 | `/tally:status [id]` · `/tally:stats [id]` | Live totals · detailed statistics (per prompt, tools, averages). |
 | `/tally:end [id] [note]` | End the task and show the final report. |
-| `/tally:list` · `/tally:show <id>` · `/tally:resume <id>` · `/tally:rename` | History, any report, continue elsewhere, rename. |
+| `/tally:list` · `/tally:show [id]` · `/tally:resume <id>` · `/tally:rename [id] <name>` | History, any report, continue elsewhere, rename. |
 
 | todos | |
 |---|---|
@@ -96,18 +96,20 @@ Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in
 
 | projects and more | |
 |---|---|
-| `/tally:project [track\|tasks\|off]` · `/tally:projects` | Overall statistics of this project, or set its mode · all projects. |
+| `/tally:project [name] [track\|tasks\|off]` · `/tally:projects` | Overall statistics of this project, or set its mode · all projects. |
 | `/tally:sessions [days\|all] [agent] [here]` | Every session of every agent with tokens, cost, models and time (default: 7 days). |
 | `/tally:settings [key value]` | `log.depth`, `log.prompts`, `todos.reminder`, `auto_start` … |
 | `/tally:dashboard` · `/tally:help` | Local dashboard (http://127.0.0.1:8765) · help. |
 
-The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | export | dashboard | statusline | doctor`. See [usage](docs/usage.md#cli).
+The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | export | dashboard | statusline | doctor`. See the [CLI reference](docs/cli.md).
 
 ## Documentation
 
 | | |
 |---|---|
-| [Usage guide](docs/usage.md) | Scenarios, todos, projects, detailed stats, settings, reading the report, dashboard, status line, CLI recipes. |
+| [Usage guide](docs/usage.md) | Scenarios, todos, projects, sessions, detailed stats, settings, agents, reading the report, dashboard, status line, recipes. |
+| [Command reference](docs/commands.md) | Every `/tally:*` command: syntax, arguments, examples. |
+| [CLI reference](docs/cli.md) | Every `tally` command and option. |
 | [How it works](docs/how-it-works.md) | Architecture, hooks, transcript ingest, attribution, time, cost, reconciliation, performance, security. |
 | [Configuration](docs/configuration.md) | `config.json`, auto-start, pricing overrides, environment variables. |
 | [Data model](docs/data-model.md) | SQLite schema and example queries. |
