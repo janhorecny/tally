@@ -301,21 +301,46 @@ def is_running(host: str, port: int) -> bool:
     return health(host, port) is not None
 
 
+def _dashboard_pids(port: int) -> list:
+    """Processes started as `tally dashboard ... --port <port>` (versions before
+    0.6 do not report their pid in /api/health)."""
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    default_port = int(paths.load_config().get("dashboard_port", 8765))
+    pids = []
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        args = cmd.split()
+        if "dashboard" not in args or not any(a.endswith("/tally") or a == "tally" for a in args):
+            continue
+        # without --port it runs on the configured port
+        on = args[args.index("--port") + 1] if "--port" in args[:-1] else str(default_port)
+        if on == str(port) and pid.isdigit() and int(pid) != os.getpid():
+            pids.append(int(pid))
+    return pids
+
+
 def stop_outdated(host: str, port: int) -> bool:
     """Stop a dashboard left running by an older Tally (its API would not match
     the page). Returns True if one was stopped."""
     h = health(host, port)
-    if h is None or h.get("version") == __version__ or not h.get("pid"):
+    if h is None or h.get("version") == __version__:
         return False
-    try:
-        os.kill(int(h["pid"]), signal.SIGTERM)
-    except (OSError, ValueError):
-        return False
-    for _ in range(30):
+    pids = [int(h["pid"])] if str(h.get("pid", "")).isdigit() else _dashboard_pids(port)
+    stopped = False
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            stopped = True
+        except OSError:
+            pass
+    for _ in range(50 if stopped else 0):
         time.sleep(0.1)
         if _port_free(host, port):
             break
-    return True
+    return stopped
 
 
 def _port_free(host: str, port: int) -> bool:

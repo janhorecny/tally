@@ -3,6 +3,7 @@
 Run:  python3 -m unittest discover -s tests -v
 """
 
+import atexit
 import io
 import json
 import os
@@ -12,12 +13,21 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / "plugin"
 sys.path.insert(0, str(PLUGIN))
+
+# Safety net: even a test that forgets Env() must never read or write the real
+# ~/.claude, ~/.codex or ~/.pi. Env() points every test at its own folder.
+_SAFE = Path(tempfile.mkdtemp(prefix="tc-tests-"))
+atexit.register(shutil.rmtree, _SAFE, True)
+for _var, _sub in (("TALLY_HOME", "home"), ("TALLY_PROJECTS_DIR", "projects"), ("CLAUDE_CONFIG_DIR", "claude"),
+                   ("CODEX_HOME", "codex"), ("PI_CODING_AGENT_DIR", "pi")):
+    os.environ[_var] = str(_SAFE / _sub)
 
 SID = "11111111-2222-3333-4444-555555555555"
 SID2 = "99999999-8888-7777-6666-555555555555"
@@ -865,26 +875,40 @@ class TodosAndStats(unittest.TestCase):
 class DashboardProcess(unittest.TestCase):
     """A dashboard left running by another Tally version is replaced, the current one is kept."""
 
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    # run as ".../bin/tally dashboard --port N", like a dashboard the installer started
     FAKE = (
         "import json, os, sys\n"
         "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+        "port, version, with_pid = int(sys.argv[3]), sys.argv[4], sys.argv[5] == 'pid'\n"
         "class H(BaseHTTPRequestHandler):\n"
         "    def log_message(self, *a): pass\n"
         "    def do_GET(self):\n"
-        "        b = json.dumps({'app': 'tally', 'version': sys.argv[2], 'pid': os.getpid()}).encode()\n"
+        "        d = {'app': 'tally', 'version': version}\n"
+        "        if with_pid: d['pid'] = os.getpid()\n"
+        "        b = json.dumps(d).encode()\n"
         "        self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers()\n"
         "        self.wfile.write(b)\n"
-        "srv = HTTPServer(('127.0.0.1', int(sys.argv[1])), H)\n"
+        "srv = HTTPServer(('127.0.0.1', port), H)\n"
         "print('ready', flush=True)\n"
         "srv.serve_forever()\n")
 
-    def fake_dashboard(self, version):
+    def fake_dashboard(self, version, with_pid=True):
         import socket
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
-        proc = subprocess.Popen([sys.executable, "-c", self.FAKE, str(port), version], stdout=subprocess.PIPE,
-                                text=True)
+        script = Path(tempfile.mkdtemp(prefix="tc-fake-")) / "bin" / "tally"
+        script.parent.mkdir()
+        script.write_text(self.FAKE)
+        self.addCleanup(shutil.rmtree, script.parent.parent, True)
+        proc = subprocess.Popen([sys.executable, str(script), "dashboard", "--port", str(port), version,
+                                 "pid" if with_pid else "nopid"], stdout=subprocess.PIPE, text=True)
         self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait(), proc.stdout.close()))
         self.assertEqual(proc.stdout.readline().strip(), "ready")           # listening: no timing guesswork
         return proc, port
@@ -899,6 +923,19 @@ class DashboardProcess(unittest.TestCase):
         current, port = self.fake_dashboard(__version__)
         self.assertFalse(server.stop_outdated("127.0.0.1", port))
         self.assertIsNone(current.poll())                                         # still running
+
+    def test_outdated_dashboard_without_pid_is_found_by_its_command_line(self):
+        from tally import server
+        old, port = self.fake_dashboard("0.5.0", with_pid=False)                 # before 0.6: no pid in health
+        self.assertNotIn("pid", server.health("127.0.0.1", port))
+        self.assertEqual(server._dashboard_pids(port), [old.pid])
+        from tally import settings
+        settings.set_value("dashboard_port", port)                                   # `tally dashboard` without --port
+        with unittest.mock.patch.object(server.subprocess, "run", return_value=subprocess.CompletedProcess(
+                [], 0, stdout="  4242 /usr/bin/python3 /x/bin/tally dashboard --open\n 4243 vim tally.py\n")):
+            self.assertEqual(server._dashboard_pids(port), [4242])
+        self.assertTrue(server.stop_outdated("127.0.0.1", port))
+        self.assertIsNotNone(old.wait(timeout=5))
 
 
 class Projects(unittest.TestCase):
