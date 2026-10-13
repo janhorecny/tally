@@ -28,6 +28,7 @@ QUESTIONS = (
     ("log.prompts", "Store prompt text?", ("full", "preview", "off")),
     ("log.depth", "Logging detail?", ("summary", "prompts", "calls")),
     ("projects.default_mode", "New projects:", ("ask", "track", "tasks")),
+    ("sessions.scope", "Sessions overview reads:", ("enabled", "all")),
     ("auto_start", "Start a task automatically with each session?", None),
     ("todos.reminder", "Show open todos at session start?", None),
 )

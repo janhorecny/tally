@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 (2026-10-13)
+
+### Only the sessions you choose
+
+- **Opt-in sessions overview:** the overview (`/tally:sessions`, `tally sessions`, the dashboard's *Sessions* and *Projects*, exports) reads only projects set to `track` or `tasks`, sessions a task counted, and sessions added one by one. A fresh install starts empty instead of reading every transcript on the machine; helper agents (claude-mem observers, temporary directories) stay out until you add them.
+- **Not tracked, but offered:** the other transcripts are only described (session, project, title, from the start and end of the file) and counted. `/tally:sessions` ends with `+ N sessions in M projects not tracked`; the summary and session exports say so too.
+- **`sessions.scope`:** `enabled` (default) or `all` (every session except `off` projects, as before). `tally setup` asks about it.
+- **An index from 0.7** keeps what it read: switching a project to `track` shows its sessions at once, without reading them again.
+
+### Dashboard
+
+- **Projects in two groups:** *Tracked* with sessions, tokens and cost; *Not tracked* with how many sessions each has. Choosing `track` or `tasks` reads the project's sessions in the background, with all the history the agents still keep, and the table follows the progress.
+- **Project detail of an untracked project:** *Track every session*, *Only tasks* or *Off*, and its sessions with an **Add** button each.
+- **Sessions → Not tracked:** every untracked session of the period with an **Add** button; an added session is read at once and gets the chip *added*. **Remove** in its detail takes it out again. `POST /api/sessions/<id>` with `{"action": "add" | "remove"}`.
+- **Welcome:** before anything is tracked, the Tasks tab says how many sessions your agents ran and where to choose.
+
 ## 0.7.4 (2026-10-13)
 
 - **Stopping the dashboard:** `/tally:dashboard stop`, `tally dashboard --stop`, and a *Stop the dashboard* button in *Settings → Dashboard* (`POST /api/shutdown`, same-origin like every write).

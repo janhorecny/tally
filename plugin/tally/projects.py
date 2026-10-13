@@ -117,13 +117,15 @@ def all_names(conn) -> list:
 
 # ------------------------------------------------------------------ stats
 
-def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30, usage_conn=None) -> dict:
+def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30, usage_conn=None,
+          only_sessions: Optional[set] = None) -> dict:
     """Overall usage of a project.
 
     track mode: every API call of every session in the project.
     otherwise:  the project's tasks only.
     usage_conn: read the usage of every session from this database instead
     (the sessions index), whatever the mode; tasks and todos still come from conn.
+    only_sessions: count these sessions only (the ones the overview reads).
     Also: daily series, by model, tasks, todos, and the share that went
     through tasks.
     """
@@ -166,7 +168,7 @@ def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30, us
                                          "AND ts >= ?", (sid, a, b, since)).fetchall())
     seen = set()
     for r in rows:
-        if r["msg_key"] in seen:
+        if r["msg_key"] in seen or (only_sessions is not None and r["session_id"] not in only_sessions):
             continue
         seen.add(r["msg_key"])
         c = pricer.row_cost(r)
@@ -221,14 +223,18 @@ def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30, us
 # ------------------------------------------------------------------ dashboard and exports
 
 def listing(conn, with_usage: bool = False) -> list:
-    """Projects Tally knows; with_usage: also every project seen in the sessions
-    index in the last 30 days, with that usage (whole sessions, any mode)."""
-    usage = {}
+    """Projects Tally knows; with_usage: also every project with sessions in the
+    last 30 days: the usage of the sessions the overview reads (`sessions_read`:
+    every session of the project is read), and the sessions it does not read
+    yet (`not_tracked`: only counted, from the transcripts' names and sizes)."""
+    usage, rest, wanted = {}, {}, None
     if with_usage:
         from . import sessions
         sessions.refresh_async(30)                 # keep the index current; returns at once
         usage = sessions.project_usage(30)
-    names = set(all_names(conn)) | set(usage)
+        rest = sessions.not_tracked_projects(30)
+        wanted = sessions.Scope(conn)
+    names = set(all_names(conn)) | set(usage) | set(rest)
     out = []
     for p in names:
         n_open = conn.execute("SELECT COUNT(*) FROM todos WHERE project = ? AND parent_id IS NULL AND status IN "
@@ -238,11 +244,14 @@ def listing(conn, with_usage: bool = False) -> list:
              "registered": get(conn, p) is not None}
         if with_usage:
             u = usage.get(p) or {"sessions": 0, "total": 0, "output": 0, "calls": 0, "cost": 0.0, "last_activity": None}
+            n = rest.get(p) or {"sessions": 0, "size": 0, "last_activity": 0}
             d.update({"last_30d": {k: u[k] for k in ("total", "output", "calls", "cost")}, "sessions": u["sessions"],
-                      "last_activity": u["last_activity"] or None})
+                      "last_activity": max(u["last_activity"] or 0, n["last_activity"]) or None,
+                      "sessions_read": wanted.project(p), "not_tracked": n})
         out.append(d)
     if with_usage:
-        out.sort(key=lambda d: (-d["last_30d"]["total"], d["project"].lower()))
+        out.sort(key=lambda d: (not d["sessions_read"], -d["last_30d"]["total"], -(d["last_activity"] or 0),
+                                d["project"].lower()))
     else:
         out.sort(key=lambda d: d["project"].lower())
     return out
@@ -250,12 +259,17 @@ def listing(conn, with_usage: bool = False) -> list:
 
 def detail(conn, name: str) -> dict:
     """What Tally counted for the project (tasks, todos, tracked totals) plus the
-    last 30 days of every session from the sessions index."""
+    last 30 days of the sessions the overview reads, and the sessions it does
+    not read yet (not_tracked)."""
     from . import sessions
     st = stats(conn, name, series_days=30)
+    wanted = sessions.Scope(conn)
     ix = sessions.connect()
     try:
-        recent = stats(conn, name, days=30, series_days=30, usage_conn=ix)
+        read = {r[0] for r in ix.execute("SELECT session_id FROM indexed WHERE project = ?", (name,))
+                if wanted(name, r[0])}
+        recent = stats(conn, name, days=30, series_days=30, usage_conn=ix, only_sessions=read)
+        rest = sessions.not_tracked(None, project=name, conn=ix, wanted=wanted)
     finally:
         ix.close()
     st["tracked"] = st["totals"]
@@ -266,4 +280,7 @@ def detail(conn, name: str) -> dict:
     st["last_30d"] = dict(recent["last_30d"], **{k: u[k] for k in ("total", "output", "calls", "cost")})
     st["sessions"] = u["sessions"]
     st["registered"] = get(conn, name) is not None
+    st["sessions_read"] = wanted.project(name)
+    st["not_tracked"] = {"sessions": len(rest), "size": sum(s["size"] or 0 for s in rest),
+                         "last_activity": rest[0]["last_ts"] if rest else None, "list": rest[:200]}
     return st

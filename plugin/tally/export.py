@@ -270,25 +270,30 @@ def _projects(conn, f, **_):
         return _json(rows), None
     if f == "csv":
         return _csv(["project", "mode", "set_up", "sessions_30d", "tokens_30d", "output_30d", "api_calls_30d",
-                     "cost_30d_usd", "tasks", "open_todos", "last_activity"],
+                     "cost_30d_usd", "tasks", "open_todos", "last_activity", "sessions_read",
+                     "not_tracked_sessions_30d"],
                     [[p["project"], p["mode"], "yes" if p["registered"] else "no", p["sessions"],
                       p["last_30d"]["total"], p["last_30d"]["output"], p["last_30d"]["calls"],
-                      round(p["last_30d"]["cost"], 4), p["tasks"], p["open_todos"], _when(p["last_activity"])]
+                      round(p["last_30d"]["cost"], 4), p["tasks"], p["open_todos"], _when(p["last_activity"]),
+                      "yes" if p["sessions_read"] else "no", p["not_tracked"]["sessions"]]
                      for p in rows]), None
     body = [[p["project"], p["mode"] if p["registered"] else "not set up", p["sessions"],
-             fmt.tokens(p["last_30d"]["total"]), fmt.money(p["last_30d"]), p["tasks"], p["open_todos"],
-             _when(p["last_activity"])] for p in rows]
+             fmt.tokens(p["last_30d"]["total"]), fmt.money(p["last_30d"]), p["not_tracked"]["sessions"] or "",
+             p["tasks"], p["open_todos"], _when(p["last_activity"])] for p in rows]
     return "\n".join(["# Tally projects · last 30 days", "",
-                      "Usage of every session in the last 30 days, from the agents' transcripts. Exported %s."
+                      "Usage of the sessions Tally reads in the last 30 days, from the agents' transcripts: "
+                      "projects set to track or tasks, and sessions added one by one. Not tracked: sessions "
+                      "of projects that are not set up, counted but not read. Exported %s."
                       % _when(time.time()), "",
-                      _md_table(["Project", "Tracking", "Sessions", "Tokens", "Cost", "Tasks", "Open todos",
-                                 "Last active"], body), ""]), None
+                      _md_table(["Project", "Tracking", "Sessions", "Tokens", "Cost", "Not tracked", "Tasks",
+                                 "Open todos", "Last active"], body), ""]), None
 
 
 def _project(conn, f, ref=None, **_):
     if not ref:
         raise ExportError("which project? give its name")
-    if ref not in projects.all_names(conn) and ref not in sessions.project_usage(30):
+    if ref not in projects.all_names(conn) and ref not in sessions.project_usage(30) \
+            and ref not in sessions.not_tracked_projects(30):
         raise ExportError("project %s not found" % ref)
     st = projects.detail(conn, ref)
     if f == "json":
@@ -304,6 +309,9 @@ def _project(conn, f, ref=None, **_):
              ("Kept by Tally", "%s tokens · %s" % (fmt.tokens(st["tracked"]["total"]), fmt.money(st["tracked"]))),
              ("Tasks", "%d (%d active)" % (tk["count"], tk["active"])),
              ("Todos", "%d open · %d done" % (td["todo"] + td["doing"] + td["blocked"], td["done"]))]
+    if st["not_tracked"]["sessions"]:
+        facts.insert(2, ("Not tracked", "%s sessions, not read (set the project to track or tasks)"
+                         % _num(st["not_tracked"]["sessions"])))
     if st.get("path"):
         facts.insert(0, ("Path", st["path"]))
     out = ["# %s" % _cell(st["project"]), "", "| | |", "|---|---|"] + ["| %s | %s |" % (k, _cell(v)) for k, v in facts]
@@ -346,8 +354,10 @@ def _sessions(conn, f, project=None, days=30, agent=None, **_):
              fmt.money(dict(s["totals"], cost=s["totals"].get("cost_with_unlogged", s["totals"]["cost"])))]
             for s in ov["sessions"]]
     head = "# Tally sessions · %s%s" % (span, (" · " + project) if project else "")
-    return "\n".join([head, "", "%s sessions · %s tokens · %s · %s prompts · active %s. Exported %s." % (
+    rest = ov["not_tracked"]["sessions"]
+    return "\n".join([head, "", "%s sessions · %s tokens · %s · %s prompts · active %s.%s Exported %s." % (
         _num(t["sessions"]), fmt.tokens(t["total"]), fmt.money(t), _num(t["prompts"]), fmt.duration(t["active_s"]),
+        (" Not listed: %s sessions of projects that are not tracked." % _num(rest)) if rest else "",
         _when(time.time())), "",
         _md_table(["Last activity", "Agent", "Project", "Session", "Active (h:mm)", "Prompts", "Tokens", "Cost"],
                   body), ""]), label
@@ -404,7 +414,7 @@ def _summary(conn, f, days=30, **_):
     t = ov["totals"]
     data = {
         "period_days": days, "exported_at": time.time(),
-        "totals": t,
+        "totals": t, "not_tracked": ov["not_tracked"],
         "by_agent": ov["by_agent"],
         "by_project": [dict(project=k, **v) for k, v in sorted(by_project.items(), key=lambda kv: -kv[1]["total"])],
         "by_model": [dict(model=k, **v) for k, v in sorted(models.items(), key=lambda kv: -kv[1]["total"])],
@@ -422,6 +432,7 @@ def _summary(conn, f, days=30, **_):
         return _csv(["group", "name", "sessions", "tokens", "cost_usd"], rows), None
     span = ("last %g days" % days) if days else "all time"
     tk = data["tasks"]
+    rest = ov["not_tracked"]
     out = ["# Tally summary · %s" % span, "", "Exported %s. Cost is an estimate at API list price." % _when(time.time()), "",
            "| | |", "|---|---|",
            "| Sessions | %s |" % _num(t["sessions"]),
@@ -431,6 +442,8 @@ def _summary(conn, f, days=30, **_):
            "| Active time | %s (%s) |" % (fmt.duration(t["active_s"]), hm(t["active_s"])),
            "| Tasks | %s · %s tokens · %s · active %s |" % (_num(tk["count"]), fmt.tokens(tk["total"]),
                                                         fmt.money({"cost": tk["cost"]}), hm(tk["active_s"])),
+           *(["| Not tracked | %s sessions in %s projects, not counted above |" % (
+               _num(rest["sessions"]), _num(rest["projects"]))] if rest["sessions"] else []),
            "", "## By agent", "",
            _md_table(["Agent", "Sessions", "Tokens", "Cost"], [
                [fmt.AGENT_NAMES.get(a["agent"], a["agent"]), _num(a["sessions"]), fmt.tokens(a["total"]), fmt.money(a)]

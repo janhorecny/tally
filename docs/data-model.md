@@ -158,13 +158,17 @@ For spreadsheets, `tally export --format csv` is simpler. It gives one row per t
 
 ## The sessions index (`sessions.db`)
 
-`~/.claude/tally/sessions.db` has the same tables, filled from whole transcripts for the sessions overview, plus one more:
+`~/.claude/tally/sessions.db` has the same tables, filled from whole transcripts for the sessions overview, plus two more:
 
 ### `indexed`
 
 One row per session of any agent: `session_id`, `agent`, `path`, `cwd`, `project`, `title`, the transcript's `size` and `mtime` when it was last read, `summary_json` (totals, models, prompts, automatic turns, wall and active time, unlogged estimate) and `indexed_at`. `prompt_offset` and `prompt_turn` track how far the main transcript was scanned for prompts. In this database `prompts.task_id` is NULL: the rows are the session's own prompts.
 
-It is a cache. Delete it whenever you like; `tally sessions` rebuilds it.
+### `seen`
+
+One row per transcript Tally has looked at, read or not: `path`, `agent`, `session_id`, `cwd`, `project`, `title`, `size` and `mtime`. Only the start and end of the file are read for it. The dashboard lists the sessions that are not tracked from here.
+
+It is a cache. Delete it whenever you like; `tally sessions` rebuilds it. Which sessions are tracked is not in the cache: the project modes and `added_sessions` (sessions added one by one in the dashboard) are in `tally.db`.
 
 ```sql
 -- sessions.db: cost per agent and day, last 14 days
@@ -177,12 +181,14 @@ GROUP BY agent, day ORDER BY day DESC;
 
 ## Schema migrations
 
-`PRAGMA user_version` holds the schema version (currently 5). `db.connect()` migrates inside one `BEGIN IMMEDIATE` transaction, so two hooks starting at once cannot both migrate.
+`PRAGMA user_version` holds the schema version (currently 7). `db.connect()` migrates inside one `BEGIN IMMEDIATE` transaction, so two hooks starting at once cannot both migrate.
 
 - **v1 → v3:** `task_sessions` changes from one row per (task, session) to one row per interval.
 - **v2 → v3:** `summary_json` and `updated_at` are added.
 - **v3 → v4:** adds `todos`, `tool_calls`, `prompt_id` columns, and `tasks.project`/`todo_id`, with the project filled in from the cwd.
 - **v4 → v5:** adds `projects` and `sessions.project`.
+- **v5 → v6:** adds `sessions.agent`, `usage.cost` and `files.state` (Codex and pi).
+- **v6 → v7:** adds `added_sessions`.
 
 The migration creates tables first, then adds missing columns, then indexes. So any older version upgrades in one step.
 

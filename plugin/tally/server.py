@@ -112,6 +112,11 @@ class Handler(BaseHTTPRequestHandler):
                 # progress first: a refresh ending during overview() still reports
                 # running, so the page polls once more and gets the final numbers
                 ix = sessions.refresh_async(days, min_interval=0 if arg("refresh") == "1" else 20)
+                if arg("list") == "not_tracked":         # described only: what can be added
+                    rest = sessions.not_tracked(days, agent=agent, project=arg("project") or None)
+                    self._json({"sessions": rest[: int(arg("limit") or 500)], "count": len(rest), "days": days,
+                                "indexing": ix})
+                    return
                 ov = sessions.overview(days, agent=agent, project=arg("project") or None,
                                        limit=int(arg("limit") or 500))
                 ov["indexing"] = ix
@@ -144,8 +149,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(rep)
                     return
                 if url.path == "/api/projects":
-                    from . import projects
-                    self._json({"projects": projects.listing(conn, with_usage=arg("full") == "1")})
+                    from . import projects, sessions
+                    self._json({"projects": projects.listing(conn, with_usage=arg("full") == "1"),
+                                "indexing": sessions.progress()})
                     return
                 m = re.match(r"^/api/projects/([^/]+)$", url.path)
                 if m:
@@ -227,10 +233,29 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.match(r"^/api/projects/([^/]+)$", url.path)
                 if m:
                     from urllib.parse import unquote
-                    from . import projects
+                    from . import projects, sessions
                     with db.transaction(conn):
                         row = projects.set_mode(conn, unquote(m.group(1)), str(body.get("mode")))
-                    self._json(dict(row))
+                    if row["mode"] in ("track", "tasks"):
+                        # read its sessions now, with all the history the agents still keep
+                        sessions.refresh_async(None, force=True)
+                    self._json(dict(row, indexing=sessions.progress()))
+                    return
+                m = re.match(r"^/api/sessions/([^/]+)$", url.path)
+                if m:
+                    from urllib.parse import unquote
+                    from . import sessions
+                    sid, action = unquote(m.group(1)), body.get("action")
+                    if action == "add":
+                        found = sessions.add(sid)
+                        if found is None:
+                            self._json({"error": "session %s not found" % sid}, 404)
+                            return
+                        self._json({"session_id": found["session_id"], "added": True})
+                    elif action == "remove":
+                        self._json({"session_id": sid, "removed": sessions.remove(sid)})
+                    else:
+                        raise ValueError("action must be add or remove")
                     return
             finally:
                 conn.close()

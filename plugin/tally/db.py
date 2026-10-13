@@ -7,7 +7,7 @@ from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -194,6 +194,12 @@ CREATE TABLE IF NOT EXISTS projects (
     mode        TEXT NOT NULL DEFAULT 'ask',
     first_seen  REAL,
     decided_at  REAL
+);
+
+-- Sessions added to the sessions overview one by one, whatever their project's mode.
+CREATE TABLE IF NOT EXISTS added_sessions (
+    session_id  TEXT PRIMARY KEY,
+    added_at    REAL
 );
 
 CREATE TABLE IF NOT EXISTS kv (

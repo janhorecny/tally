@@ -418,8 +418,15 @@ def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
         out.append("  " + "   ".join("%s %d · %s · %s" % (AGENT_NAMES.get(a["agent"], a["agent"]), a["sessions"],
                                                          tokens(a["total"]), money(a)) for a in ov["by_agent"]))
     rows = ov["sessions"][:limit] if limit else ov["sessions"]
+    rest = ov.get("not_tracked") or {}
+    not_tracked = ("  + %d session%s in %d project%s not tracked, so not listed: /tally:project track in a "
+                   "project, or the dashboard's Projects and Sessions" % (
+                       rest["sessions"], "" if rest["sessions"] == 1 else "s",
+                       rest["projects"], "" if rest["projects"] == 1 else "s")) if rest.get("sessions") else None
     if not rows:
         out.append("  no sessions with API calls in this period")
+        if not_tracked:
+            out.append(not_tracked)
         return "\n".join(out)
     out.append("")
     out.append("  %-8s %-16s %-6s %-18s %8s %8s %5s %8s %9s  %-24s %s" % (
@@ -440,5 +447,7 @@ def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
     if limit and len(ov["sessions"]) > limit:
         out.append("  … %d more (--limit 0 for all)" % (len(ov["sessions"]) - limit))
     out.append("")
+    if not_tracked:
+        out.append(not_tracked)
     out.append(hints("tally session <id or id prefix> for the full report of one session"))
     return "\n".join(out)

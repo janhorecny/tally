@@ -1291,12 +1291,15 @@ class Installer(unittest.TestCase):
 
 
 class SessionsOverview(unittest.TestCase):
-    """Whole sessions of every agent, indexed into sessions.db."""
+    """Whole sessions of every agent, indexed into sessions.db (sessions.scope all:
+    every session is read; SessionsScope covers the default)."""
 
     def setUp(self):
         self.env = Env()
         self.codex = Path(os.environ["CODEX_HOME"])
         self.pi = Path(os.environ["PI_CODING_AGENT_DIR"])
+        from tally import settings
+        settings.set_value("sessions.scope", "all")
 
     def tearDown(self):
         self.env.cleanup()
@@ -1476,6 +1479,150 @@ class SessionsOverview(unittest.TestCase):
         self.assertEqual(fmt.money({"cost": 9050.11}), "$9,050")
         self.assertEqual(fmt.money({"cost": 12.345}), "$12.35")
 
+class SessionsScope(unittest.TestCase):
+    """sessions.scope enabled (the default): only projects set to track or tasks,
+    sessions a task counted and sessions added one by one are read; the rest is
+    only described and offered in the dashboard."""
+
+    def setUp(self):
+        self.env = Env()
+        self.codex = Path(os.environ["CODEX_HOME"])
+        self.pi = Path(os.environ["PI_CODING_AGENT_DIR"])
+        SessionsOverview.make_sessions(self)       # Claude SID (a task, project proj), Codex T1 (proj), pi P1 (other)
+
+    def tearDown(self):
+        from tally import sessions
+        deadline = time.time() + 20
+        while sessions.progress()["running"] and time.time() < deadline:
+            time.sleep(0.05)
+        self.env.cleanup()
+
+    def read(self):
+        from tally import sessions
+        ix = sessions.connect()
+        try:
+            return {r[0] for r in ix.execute("SELECT session_id FROM indexed")}
+        finally:
+            ix.close()
+
+    def set_mode(self, name, mode):
+        from tally import db, projects
+        conn = db.connect()
+        with db.transaction(conn):
+            projects.set_mode(conn, name, mode)
+        conn.close()
+
+    def test_only_enabled_projects_are_read(self):
+        from tally import fmt, projects, db, sessions
+        self.assertEqual(sessions.refresh(None)["changed"], 1)             # the session with a task
+        self.assertEqual(self.read(), {SID})
+        ov = sessions.overview(None)
+        self.assertEqual([s["session_id"] for s in ov["sessions"]], [SID])
+        self.assertEqual(ov["not_tracked"], {"sessions": 2, "projects": 2})
+        rest = {s["session_id"]: s for s in sessions.not_tracked(None)}
+        self.assertEqual(set(rest), {"T1", "P1"})
+        self.assertEqual((rest["P1"]["project"], rest["P1"]["title"], rest["P1"]["agent"]), ("other", "write docs", "pi"))
+        self.assertIn("+ 2 sessions in 2 projects not tracked", fmt.render_sessions(ov))
+        conn = db.connect()
+        by = {p["project"]: p for p in projects.listing(conn, with_usage=True)}
+        conn.close()
+        self.assertFalse(by["other"]["sessions_read"])
+        self.assertEqual((by["other"]["sessions"], by["other"]["not_tracked"]["sessions"]), (0, 1))
+        self.assertEqual((by["proj"]["sessions"], by["proj"]["not_tracked"]["sessions"]), (1, 1))
+        # tracking the project reads its sessions, also files that did not change since they were described
+        self.set_mode("proj", "tasks")
+        self.assertEqual(sessions.refresh(None)["changed"], 2)
+        self.assertEqual(self.read(), {SID, "T1"})
+        self.assertEqual(sessions.overview(None)["not_tracked"], {"sessions": 1, "projects": 1})
+        sessions.refresh(None)
+        self.assertNotIn("P1", self.read())                                 # still not wanted: not read
+        # off: nothing is listed, not even as not tracked, and a task does not bring it back
+        self.set_mode("proj", "off")
+        self.assertEqual(sessions.overview(None)["count"], 0)
+        self.assertEqual([s["session_id"] for s in sessions.not_tracked(None)], ["P1"])
+
+    def test_sessions_added_one_by_one(self):
+        from tally import db, projects, sessions
+        sessions.refresh(None)
+        self.assertIsNone(sessions.add("nope"))
+        self.assertEqual(sessions.add("P1")["session_id"], "P1")          # read at once
+        self.assertIn("P1", self.read())
+        rows = {s["session_id"]: s for s in sessions.overview(None)["sessions"]}
+        self.assertEqual(set(rows), {SID, "P1"})
+        self.assertTrue(rows["P1"]["added"])
+        self.assertTrue(sessions.detail("P1")["session"]["added"])
+        conn = db.connect()
+        det = projects.detail(conn, "other")
+        conn.close()
+        self.assertEqual((det["last_30d"]["total"], det["sessions_read"], det["not_tracked"]["sessions"]), (120, False, 0))
+        self.assertTrue(sessions.remove("P1"))
+        self.assertEqual({s["session_id"] for s in sessions.overview(None)["sessions"]}, {SID})
+        conn = db.connect()
+        det = projects.detail(conn, "other")                                # still in the index, not counted
+        conn.close()
+        self.assertEqual((det["last_30d"]["total"], det["not_tracked"]["sessions"]), (0, 1))
+        self.assertEqual(det["not_tracked"]["list"][0]["session_id"], "P1")
+
+    def test_an_index_from_before_keeps_what_it_read(self):
+        from tally import db, settings, sessions
+        settings.set_value("sessions.scope", "all")
+        sessions.refresh(None)                                             # 0.7: everything read
+        ix = sessions.connect()
+        with db.transaction(ix):
+            ix.execute("DROP TABLE seen")
+            ix.execute("DELETE FROM kv WHERE key = 'seen_version'")
+        ix.close()
+        settings.set_value("sessions.scope", "enabled")
+        self.assertEqual({s["session_id"] for s in sessions.not_tracked(None)}, {"T1", "P1"})   # seen, from the index
+        self.assertEqual(sessions.overview(None)["count"], 1)
+        self.set_mode("other", "track")
+        self.assertEqual({s["session_id"] for s in sessions.overview(None)["sessions"]}, {SID, "P1"})
+
+    def test_dashboard_adds_projects_and_sessions(self):
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from tally import server, sessions
+        sessions.refresh(None)
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % httpd.server_address[1]
+        get = lambda path: json.loads(urllib.request.urlopen(base + path, timeout=10).read())  # noqa: E731
+
+        def post(path, body):
+            req = urllib.request.Request(base + path, data=json.dumps(body).encode(), method="POST",
+                                         headers={"Content-Type": "application/json", "X-Tally": "1"})
+            return json.loads(urllib.request.urlopen(req, timeout=10).read())
+
+        def settle():
+            deadline = time.time() + 20
+            while sessions.progress()["running"] and time.time() < deadline:
+                time.sleep(0.05)
+        try:
+            rest = get("/api/sessions?days=&list=not_tracked")
+            self.assertEqual({s["session_id"] for s in rest["sessions"]}, {"T1", "P1"})
+            settle()
+            self.assertEqual(get("/api/sessions?days=")["not_tracked"]["sessions"], 2)
+            self.assertTrue(post("/api/sessions/T1", {"action": "add"})["added"])
+            self.assertEqual({s["session_id"] for s in get("/api/sessions?days=")["sessions"]}, {SID, "T1"})
+            self.assertTrue(post("/api/sessions/T1", {"action": "remove"})["removed"])
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                post("/api/sessions/nope", {"action": "add"})
+            self.assertEqual(cm.exception.code, 404)
+            cm.exception.close()
+            settle()
+            self.assertEqual(post("/api/projects/other", {"mode": "track"})["mode"], "track")   # reads it in the background
+            settle()
+            self.assertEqual({s["session_id"] for s in get("/api/sessions?days=")["sessions"]}, {SID, "P1"})
+            by = {p["project"]: p for p in get("/api/projects?full=1")["projects"]}
+            self.assertTrue(by["other"]["sessions_read"])
+            self.assertEqual(by["other"]["last_30d"]["total"], 120)
+        finally:
+            settle()
+            httpd.shutdown()
+            httpd.server_close()
+
+
 class Exports(unittest.TestCase):
     """tally export and /api/export: every scope and format, the time-sheet columns, copy."""
 
@@ -1483,6 +1630,8 @@ class Exports(unittest.TestCase):
         self.env = Env()
         self.codex = Path(os.environ["CODEX_HOME"])
         self.pi = Path(os.environ["PI_CODING_AGENT_DIR"])
+        from tally import settings
+        settings.set_value("sessions.scope", "all")
         SessionsOverview.make_sessions(self)
         e = self.env
         e.hook("UserPromptSubmit", prompt="/tally:end shipped | v2")          # a pipe in the note
@@ -1821,10 +1970,11 @@ class Onboarding(unittest.TestCase):
     def test_answers_are_saved_and_offered_next_time(self):
         from tally import onboarding, settings
         # 't' fits track and tasks, so the question comes again
-        self.assertTrue(self.run_setup("off", "ca", "t", "track", "y", "", ""))
+        self.assertTrue(self.run_setup("off", "ca", "t", "track", "a", "y", "", ""))
         self.assertEqual(settings.get("log.prompts"), "off")
         self.assertEqual(settings.get("log.depth"), "calls")
         self.assertEqual(settings.get("projects.default_mode"), "track")
+        self.assertEqual(settings.get("sessions.scope"), "all")
         self.assertEqual(settings.get("auto_start"), "session")
         self.assertIs(settings.get("todos.reminder"), True)
         self.assertIn("    choose one of: ask, track, tasks", self.said)
@@ -1834,10 +1984,11 @@ class Onboarding(unittest.TestCase):
         self.assertIn('python3 "%s" statusline' % (PLUGIN / "bin" / "tally"), onboarding.statusline_command())
         self.assertTrue(any("status line added" in line for line in self.said[-1].split("\n")))
         # again: the current values are offered, Enter keeps them
-        self.assertTrue(self.run_setup("", "", "", "", ""))
+        self.assertTrue(self.run_setup("", "", "", "", "", ""))
         self.assertIn("[off]", self.prompts[0])
         self.assertIn("[track]", self.prompts[2])
-        self.assertIn("Y/n", self.prompts[3])
+        self.assertIn("[all]", self.prompts[3])
+        self.assertIn("Y/n", self.prompts[4])
         self.assertEqual(settings.get("log.depth"), "calls")
         self.assertIn("  Claude Code's status line already shows Tally.", self.said)
         self.assertIn("Saved, nothing changed", self.said[-1])
@@ -1852,7 +2003,7 @@ class Onboarding(unittest.TestCase):
 
     def test_three_wrong_answers_keep_the_value(self):
         from tally import settings
-        self.assertTrue(self.run_setup("x", "y", "z", "", "", "maybe", "", "", "n"))
+        self.assertTrue(self.run_setup("x", "y", "z", "", "", "", "maybe", "", "", "n"))
         self.assertEqual(settings.get("log.prompts"), "full")
         self.assertIn("    keeping full", self.said)
         self.assertIn("    answer y or n", self.said)
@@ -1862,13 +2013,13 @@ class Onboarding(unittest.TestCase):
         self.claude.mkdir(parents=True)
         mine = {"statusLine": {"type": "command", "command": "npx ccstatusline"}, "model": "opus"}
         self.settings_json.write_text(json.dumps(mine))
-        self.run_setup("", "", "", "", "")
-        self.assertEqual(len(self.prompts), 5)                                # no status line question
+        self.run_setup("", "", "", "", "", "")
+        self.assertEqual(len(self.prompts), 6)                                # no status line question
         self.assertEqual(json.loads(self.settings_json.read_text()), mine)
         self.assertTrue(any("ccstatusline: a Custom Command widget" in line for line in self.said))
         self.settings_json.write_text("{not json")
-        self.run_setup("", "", "", "", "")
-        self.assertEqual(len(self.prompts), 5)
+        self.run_setup("", "", "", "", "", "")
+        self.assertEqual(len(self.prompts), 6)
         self.assertEqual(self.settings_json.read_text(), "{not json")
         self.assertTrue(any("is not valid JSON" in line for line in self.said))
 
@@ -1878,7 +2029,7 @@ class Onboarding(unittest.TestCase):
         self.claude.mkdir(parents=True)
         mine = {"model": "opus", "env": {"A": "1"}}
         self.settings_json.write_text(json.dumps(mine))
-        self.run_setup("", "", "", "", "", "y")
+        self.run_setup("", "", "", "", "", "", "y")
         data = json.loads(self.settings_json.read_text())
         self.assertEqual({k: v for k, v in data.items() if k != "statusLine"}, mine)
         self.assertEqual(json.loads((self.claude / "settings.json.bak-tally").read_text()), mine)
@@ -1893,8 +2044,8 @@ class Onboarding(unittest.TestCase):
         self.assertIn("lolcat", self.settings_json.read_text())
 
     def test_no_status_line_question_without_claude_code(self):
-        self.run_setup("", "", "", "", "", agents=("codex", "pi"))
-        self.assertEqual(len(self.prompts), 5)
+        self.run_setup("", "", "", "", "", "", agents=("codex", "pi"))
+        self.assertEqual(len(self.prompts), 6)
         self.assertFalse(self.settings_json.exists())
 
     def test_non_interactive_asks_nothing(self):
@@ -1915,7 +2066,7 @@ class Onboarding(unittest.TestCase):
         (fakebin / "claude").write_text("#!/bin/sh\nexit 0\n")
         (fakebin / "claude").chmod(0o755)
         out = run_in_pty([sys.executable, str(PLUGIN / "bin" / "tally"), "setup"],
-                         answers=["preview", "", "tasks", "", "n", "y"],
+                         answers=["preview", "", "tasks", "", "", "n", "y"],
                          env={"NO_COLOR": "1", "PATH": "%s:%s" % (fakebin, os.environ.get("PATH", ""))})
         self.assertIn("Add Tally to Claude Code's status line? Y/n", out)
         self.assertIn("▍Tally · Setup · Enter keeps the value in [brackets]", out)
@@ -1958,7 +2109,7 @@ class InstallerOnboarding(unittest.TestCase):
     def test_setup_once_and_a_welcome_per_new_agent(self):
         from unittest import mock
         from tally import installer, settings
-        with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=["off", "", "", "", ""]):
+        with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=["off", "", "", "", "", ""]):
             stdin.isatty.return_value = True
             self.assertEqual(installer.install(["codex", "pi"]), 0)
         self.assertEqual(settings.get("log.prompts"), "off")

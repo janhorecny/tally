@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.7.4 · doctor · python 3.9.6
+▍Tally 0.8.0 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -90,7 +90,8 @@ The `tally:todos` skill is loaded on demand. Ask explicitly ("import the plan in
 
 ## `/tally:sessions` is slow, or shows old numbers
 
-- **The first run** over a period reads every transcript of it into the sessions index; 30 days of heavy use took about 20 s. Later runs read only new data and take well under a second.
+- **The first run** over a period reads the tracked transcripts of it into the sessions index; 30 days of heavy use took about 20 s. Later runs read only new data and take well under a second.
+- **A session or project is missing:** only tracked sessions are listed (`sessions.scope enabled`). Set the project to `track` or `tasks`, add the session in the dashboard (*Sessions → Not tracked*), or `tally settings sessions.scope all`.
 - **Sessions differ from tasks:** a task counts only its own window, so it is usually smaller than the session it ran in.
 - **Rebuilding:** the index is a cache. Delete `~/.claude/tally/sessions.db` and it is rebuilt on the next run.
 

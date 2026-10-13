@@ -4,8 +4,14 @@ The main database holds what tasks (and projects in track mode) count:
 history before a task start is skipped there on purpose. Whole sessions are
 indexed into a separate database, sessions.db, read incrementally from the
 agents' own transcripts, so the overview also covers sessions without a task
-and sessions from before Tally was installed. Projects set to "off" are left
-out.
+and sessions from before Tally was installed.
+
+Which sessions are read (setting sessions.scope):
+  enabled  projects set to track or tasks, sessions a task counted, and
+           sessions added one by one (added_sessions in the main database)
+  all      every session, except projects set to off
+Other transcripts are only described (session, project, title: the head and
+tail of the file) into the table seen, so the dashboard can offer them.
 
   Claude Code  ~/.claude/projects/<project>/<session>.jsonl (+ subagents)
   Codex        $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl (root threads;
@@ -51,7 +57,20 @@ def index_path() -> Path:
     return paths.home() / "sessions.db"
 
 
+# Every transcript described so far, read or not: what the dashboard offers to add.
+SEEN_SCHEMA = """CREATE TABLE IF NOT EXISTS seen (
+    path        TEXT PRIMARY KEY,
+    agent       TEXT,
+    session_id  TEXT,
+    cwd         TEXT,
+    project     TEXT,
+    title       TEXT,
+    size        INTEGER,
+    mtime       REAL
+)"""
+
 INDEX_VERSION = "1"        # bump when the index format changes: it is rebuilt from the transcripts
+SEEN_VERSION = "1"
 _DERIVED = ("usage", "files", "agents", "workflows", "turns", "prompts", "tool_calls", "sessions", "session_costs")
 
 
@@ -61,11 +80,59 @@ def connect():
         with db.transaction(conn):
             if db.kv_get(conn, "index_version") != INDEX_VERSION:     # another process may have won
                 conn.execute("DROP TABLE IF EXISTS indexed")
+                conn.execute("DROP TABLE IF EXISTS seen")
+                conn.execute("DELETE FROM kv WHERE key = 'seen_version'")
                 for table in _DERIVED:
                     conn.execute("DELETE FROM %s" % table)
                 conn.execute(INDEX_SCHEMA)
                 db.kv_set(conn, "index_version", INDEX_VERSION)
+    if db.kv_get(conn, "seen_version") != SEEN_VERSION:
+        with db.transaction(conn):
+            if db.kv_get(conn, "seen_version") != SEEN_VERSION:
+                conn.execute(SEEN_SCHEMA)
+                # an index from before 0.8 read everything: what it holds has been seen
+                conn.execute("INSERT OR IGNORE INTO seen(path, agent, session_id, cwd, project, title, size, mtime) "
+                             "SELECT path, agent, session_id, cwd, project, title, size, mtime FROM indexed "
+                             "WHERE path IS NOT NULL")
+                db.kv_set(conn, "seen_version", SEEN_VERSION)
     return conn
+
+
+class Scope:
+    """Which sessions the overview reads and lists (setting sessions.scope)."""
+
+    def __init__(self, main):
+        self.all = settings.get("sessions.scope") == "all"
+        self.modes = {r[0]: r[1] for r in main.execute("SELECT name, mode FROM projects")}
+        self.added = {r[0] for r in main.execute("SELECT session_id FROM added_sessions")}
+        self.with_task = {r[0] for r in main.execute("SELECT DISTINCT session_id FROM task_sessions")}
+
+    def mode(self, project: Optional[str]) -> str:
+        return self.modes.get(project, "ask") if project else "ask"
+
+    def project(self, project: Optional[str]) -> bool:
+        """Every session of the project is read."""
+        mode = self.mode(project)
+        return mode != "off" if self.all else mode in ("track", "tasks")
+
+    def __call__(self, project: Optional[str], session_id: str) -> bool:
+        if session_id in self.added:
+            return True
+        if self.mode(project) == "off":
+            return False
+        return self.project(project) or session_id in self.with_task
+
+    def offered(self, project: Optional[str], session_id: str) -> bool:
+        """Not read, but listed as not tracked (projects set to off are left out)."""
+        return not self(project, session_id) and self.mode(project) != "off"
+
+
+def scope() -> Scope:
+    main = db.connect()
+    try:
+        return Scope(main)
+    finally:
+        main.close()
 
 
 # ---------------------------------------------------------------- discovery
@@ -215,6 +282,7 @@ def _sniff(f: Path) -> str:
 _lock = threading.Lock()
 _progress = {"running": False, "done": 0, "total": 0, "started": None, "finished": None, "error": None,
              "days": 0}                               # period of the last refresh (None = all)
+_queued: List[Optional[float]] = []                   # periods asked for (force) while a refresh was running
 
 
 def progress() -> dict:
@@ -244,20 +312,32 @@ def refresh(days: Optional[float] = 30, agents=None, on_progress=None) -> dict:
         _lock.release()
 
 
-def refresh_async(days: Optional[float] = 30, min_interval: float = 20) -> dict:
+def refresh_async(days: Optional[float] = 30, min_interval: float = 20, force: bool = False) -> dict:
     """Start indexing in a background thread (dashboard) unless one is
-    running or finished less than min_interval seconds ago; returns progress."""
+    running or finished less than min_interval seconds ago; returns progress.
+    force: always read, after the running refresh if there is one (a project
+    or session was just added)."""
     fin = _progress["finished"]
     done = _progress["days"]
     wider = done is not None and (days is None or days > done)       # asks for more than was read
-    if not _progress["running"] and (fin is None or wider or time.time() - fin >= min_interval):
+    if _progress["running"]:
+        if force:
+            _queued.append(days)
+        return progress()
+    if force or fin is None or wider or time.time() - fin >= min_interval:
         _progress["running"] = True
 
         def run():
+            todo = [days]
             try:
-                refresh(days)
-            except Exception:
-                pass
+                while todo:
+                    try:
+                        refresh(todo.pop())
+                    except Exception:
+                        pass
+                    if _queued:                             # the widest period asked for meanwhile
+                        todo = [None if None in _queued else max(_queued)]
+                        del _queued[:]
             finally:
                 _progress["running"] = _lock.locked()
         threading.Thread(target=run, name="tally-sessions", daemon=True).start()
@@ -270,10 +350,11 @@ def _refresh(main, conn, days, agents, on_progress) -> dict:
     found = list(candidates(since, agents))
     _progress["total"] = len(found)
     known = {r["path"]: r for r in conn.execute("SELECT path, size, mtime FROM indexed")}
+    seen = {r["path"]: r for r in conn.execute("SELECT path, session_id, project, size, mtime FROM seen")}
     # files read as part of another session (Codex subagent threads)
     inner = {r[0] for r in conn.execute(
         "SELECT f.path FROM files f JOIN indexed i ON i.session_id = f.session_id WHERE f.path != i.path")}
-    modes = {r["name"]: r["mode"] for r in main.execute("SELECT name, mode FROM projects")}
+    wanted = Scope(main)
     pricer = Pricer(paths.load_config().get("pricing"))
     changed = 0
     for i, (agent, f, st) in enumerate(found):
@@ -285,16 +366,31 @@ def _refresh(main, conn, days, agents, on_progress) -> dict:
         if key in inner or (old and old["size"] == st.st_size and old["mtime"] == st.st_mtime
                             and now - st.st_mtime > STABLE_S):
             continue
+        prev = seen.get(key)
+        if (prev and prev["size"] == st.st_size and prev["mtime"] == st.st_mtime
+                and not wanted(prev["project"], prev["session_id"])):
+            continue                                    # described before and still not wanted: not read
         s = describe(agent, f, st)
         if s is None:
             continue
         project = projects.detect(s["cwd"]) if s["cwd"] else None
-        if modes.get(project) == "off":
+        _remember(conn, s, project)
+        if not wanted(project, s["session_id"]):
             continue
         _index_one(conn, s, project, pricer)
         changed += 1
     _progress["done"] = len(found)
     return dict(progress(), sessions=len(found), changed=changed)
+
+
+def _remember(conn, s: dict, project: Optional[str]) -> None:
+    with db.transaction(conn):
+        conn.execute("INSERT INTO seen(path, agent, session_id, cwd, project, title, size, mtime) "
+                     "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET agent = excluded.agent, "
+                     "session_id = excluded.session_id, cwd = excluded.cwd, project = excluded.project, "
+                     "title = COALESCE(excluded.title, seen.title), size = excluded.size, mtime = excluded.mtime",
+                     (str(s["path"]), s["agent"], s["session_id"], s["cwd"], project, s["title"], s["size"],
+                      s["mtime"]))
 
 
 def _index_one(conn, s: dict, project: Optional[str], pricer: Pricer) -> None:
@@ -457,7 +553,8 @@ def summarize(conn, sid: str, agent: str, pricer: Optional[Pricer] = None) -> Op
 def overview(days: Optional[float] = 30, agent: Optional[str] = None, project: Optional[str] = None,
              limit: Optional[int] = None, conn=None) -> dict:
     """Indexed sessions with activity in the last `days` days, newest first,
-    with totals per agent and overall."""
+    with totals per agent and overall. Only sessions in the scope (setting
+    sessions.scope); `not_tracked` counts the others of the period."""
     own = conn is None
     conn = conn or connect()
     try:
@@ -467,19 +564,21 @@ def overview(days: Optional[float] = 30, agent: Optional[str] = None, project: O
             for r in main.execute("SELECT DISTINCT s.session_id, t.id, t.name FROM task_sessions s "
                                   "JOIN tasks t ON t.id = s.task_id ORDER BY t.id"):
                 tasks_by_sid.setdefault(r["session_id"], []).append({"id": r["id"], "name": r["name"]})
-            off = {r[0] for r in main.execute("SELECT name FROM projects WHERE mode = 'off'")}
+            wanted = Scope(main)
         finally:
             main.close()
         since = time.time() - days * 86400 if days else 0
         out: List[dict] = []
         for r in conn.execute("SELECT * FROM indexed WHERE summary_json IS NOT NULL"):
-            if (agent and r["agent"] != agent) or (project and r["project"] != project) or r["project"] in off:
+            if (agent and r["agent"] != agent) or (project and r["project"] != project) \
+                    or not wanted(r["project"], r["session_id"]):
                 continue
             s = json.loads(r["summary_json"])
             if s["last_ts"] < since:
                 continue
             out.append({"session_id": r["session_id"], "agent": r["agent"], "project": r["project"],
-                        "cwd": r["cwd"], "title": r["title"], "tasks": tasks_by_sid.get(r["session_id"], []), **s})
+                        "cwd": r["cwd"], "title": r["title"], "tasks": tasks_by_sid.get(r["session_id"], []),
+                        "added": r["session_id"] in wanted.added, **s})
         out.sort(key=lambda d: -d["last_ts"])
         first = _first_prompts(conn, [s["session_id"] for s in out if not s["title"]])
         for s in out:
@@ -498,12 +597,82 @@ def overview(days: Optional[float] = 30, agent: Optional[str] = None, project: O
                 d["active_s"] += s["active_s"] or 0
         for d in [overall, *by_agent.values()]:
             d["cost"] = round(d["cost"], 6)
+        rest = not_tracked(days, agent=agent, project=project, conn=conn, wanted=wanted)
         return {"sessions": out[:limit] if limit else out, "count": len(out), "totals": overall,
                 "by_agent": [{"agent": a, **d} for a, d in sorted(by_agent.items(), key=lambda kv: -kv[1]["total"])],
-                "days": days, "indexed_at": conn.execute("SELECT MAX(indexed_at) FROM indexed").fetchone()[0]}
+                "days": days, "indexed_at": conn.execute("SELECT MAX(indexed_at) FROM indexed").fetchone()[0],
+                "scope": "all" if wanted.all else "enabled",
+                "not_tracked": {"sessions": len(rest), "projects": len({x["project"] for x in rest})}}
     finally:
         if own:
             conn.close()
+
+
+def not_tracked(days: Optional[float] = 30, agent: Optional[str] = None, project: Optional[str] = None,
+                conn=None, wanted: Optional[Scope] = None) -> List[dict]:
+    """Sessions changed in the last `days` days that the overview does not read
+    (their project is not set up), newest first: what the dashboard offers to add.
+    Only described, not read: session, agent, project, title, size, last change."""
+    own = conn is None
+    conn = conn or connect()
+    try:
+        wanted = wanted or scope()
+        since = time.time() - days * 86400 if days else 0
+        out, ids = [], set()
+        for r in conn.execute("SELECT * FROM seen WHERE mtime >= ? ORDER BY mtime DESC", (since,)):
+            if (agent and r["agent"] != agent) or (project and r["project"] != project) or not r["session_id"] \
+                    or r["session_id"] in ids or not wanted.offered(r["project"], r["session_id"]):
+                continue
+            ids.add(r["session_id"])
+            out.append({"session_id": r["session_id"], "agent": r["agent"], "project": r["project"], "cwd": r["cwd"],
+                        "title": r["title"], "size": r["size"], "last_ts": r["mtime"], "path": r["path"]})
+        return out
+    finally:
+        if own:
+            conn.close()
+
+
+def not_tracked_projects(days: Optional[float] = 30, conn=None) -> dict:
+    """Per project: sessions not read in the last `days` days, their size and last change."""
+    out: dict = {}
+    for s in not_tracked(days, conn=conn):
+        if not s["project"]:
+            continue
+        d = out.setdefault(s["project"], {"sessions": 0, "size": 0, "last_activity": 0})
+        d["sessions"] += 1
+        d["size"] += s["size"] or 0
+        d["last_activity"] = max(d["last_activity"], s["last_ts"] or 0)
+    return out
+
+
+def add(session_id: str) -> Optional[dict]:
+    """Add one session to the overview, whatever its project's mode, and read it now."""
+    conn = connect()
+    try:
+        row = conn.execute("SELECT path FROM seen WHERE session_id = ?", (session_id,)).fetchone()
+    finally:
+        conn.close()
+    path = row[0] if row and Path(row[0]).is_file() else None
+    if path is None and locate(session_id) is None:
+        return None
+    main = db.connect()
+    try:
+        with db.transaction(main):
+            main.execute("INSERT OR IGNORE INTO added_sessions(session_id, added_at) VALUES(?,?)",
+                         (session_id, time.time()))
+    finally:
+        main.close()
+    return index_session(session_id, path)
+
+
+def remove(session_id: str) -> bool:
+    """Take a session added one by one out of the overview (its project's mode decides again)."""
+    main = db.connect()
+    try:
+        with db.transaction(main):
+            return main.execute("DELETE FROM added_sessions WHERE session_id = ?", (session_id,)).rowcount > 0
+    finally:
+        main.close()
 
 
 def _first_prompts(conn, sids: List[str]) -> dict:
@@ -525,7 +694,7 @@ def _cut_title(text: str) -> str:
 
 def project_usage(days: float = 30, conn=None) -> dict:
     """Per project: sessions active in the last `days` days, their tokens, cost and
-    last activity, from the index (whole sessions, whatever the tracking mode)."""
+    last activity, from the index (whole sessions the overview reads, see Scope)."""
     out: dict = {}
     for s in overview(days, conn=conn)["sessions"]:
         if not s["project"]:
@@ -565,6 +734,8 @@ def detail(session_id: str, conn=None) -> Optional[dict]:
                  "end_note": None, "project": r["project"]}
         rep = report.build(conn, whole, windows=[(session_id, a - 1, b + 1)])
         rep["session"] = {k: r[k] for k in ("session_id", "agent", "project", "cwd", "title", "path")}
+        wanted = scope()
+        rep["session"].update(added=session_id in wanted.added, in_overview=wanted(r["project"], session_id))
         if not r["title"]:
             rep["session"]["title"] = _first_prompts(conn, [session_id]).get(session_id)
         return rep
@@ -607,10 +778,11 @@ def index_session(session_id: str, path: Optional[str] = None) -> Optional[dict]
     s = describe(_sniff(p), p, p.stat())
     if s is None:
         return None
+    project = projects.detect(s["cwd"]) if s["cwd"] else None
     conn = connect()
     try:
-        _index_one(conn, s, projects.detect(s["cwd"]) if s["cwd"] else None,
-                   Pricer(paths.load_config().get("pricing")))
+        _remember(conn, s, project)
+        _index_one(conn, s, project, Pricer(paths.load_config().get("pricing")))
     finally:
         conn.close()
     return s

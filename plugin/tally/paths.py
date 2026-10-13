@@ -28,6 +28,12 @@ DEFAULT_CONFIG = {
         # how a project Tally has not seen yet is tracked: ask | track | tasks
         "default_mode": "ask",
     },
+    "sessions": {
+        # which sessions the overview reads from the agents' transcripts:
+        # enabled: projects set to track or tasks, sessions with a task, sessions added one by one
+        # all:     every session, except projects set to off
+        "scope": "enabled",
+    },
     "todos": {
         # show open todos of the project when a Claude Code session starts
         "reminder": True,

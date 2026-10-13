@@ -376,7 +376,7 @@ tally projects [--json]
 
 ### `tally sessions`
 
-Every session of every agent, with or without a task. In-agent: [`/tally:sessions`](commands.md#tallysessions).
+The tracked sessions of every agent, with or without a task (setting `sessions.scope`; the last line says how many are not tracked). In-agent: [`/tally:sessions`](commands.md#tallysessions).
 
 ```
 tally sessions [--days N | --all] [--agent claude|codex|pi] [-p PROJECT] [--limit N] [--no-refresh] [--json]
@@ -439,6 +439,7 @@ tally setup
 | Store prompt text? | `log.prompts` |
 | Logging detail? | `log.depth` |
 | New projects | `projects.default_mode` |
+| Sessions overview reads | `sessions.scope` |
 | Start a task automatically … | `auto_start` (`session` or `off`) |
 | Show open todos … | `todos.reminder` |
 | Add Tally to Claude Code's status line? | `statusLine` in `~/.claude/settings.json` |

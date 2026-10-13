@@ -127,7 +127,9 @@ To skip the question, set a default for new projects with `tally setup` or `/tal
 - tasks and how much of the usage they account for;
 - todos.
 
-`/tally:projects` lists all projects. The dashboard's *Projects* tab also shows the projects of the last 30 days that Tally has not set up yet, with their usage from the agents' transcripts, so you can pick a mode for each. Until a project is set up, the status line shows a hint.
+`/tally:projects` lists all projects. The dashboard's *Projects* tab also shows the projects of the last 30 days that Tally has not set up yet, with how many sessions each has, so you can pick a mode for each. Until a project is set up, the status line shows a hint.
+
+The mode also decides what the [sessions overview](#sessions) reads: the sessions of projects set to `track` or `tasks`. A project that is not set up is only counted (sessions, size of its transcripts), not read. Choosing a mode in the dashboard reads its sessions right away, with all the history the agents still keep (Claude Code deletes transcripts after 30 days unless `cleanupPeriodDays` says otherwise).
 
 ## Sessions
 
@@ -151,15 +153,19 @@ tally session <id or id prefix> # the full report of one session
   c2d7f6a0 2026-10-11 17:02 pi     docs       12m 30s        -    3   180.4k     $0.21  zai/glm-5.2              write the API changelog
 ```
 
-- **What is listed:** every session with at least one API call, newest first. That covers Claude Code, Codex and pi, with or without a task, including sessions from before Tally was installed. Projects set to `off` are left out.
+- **What is listed:** every tracked session with at least one API call, newest first. That covers Claude Code, Codex and pi, with or without a task, including sessions from before Tally was installed.
+- **Which sessions are tracked** (setting `sessions.scope`):
+  - `enabled` (default): sessions of projects set to `track` or `tasks`, sessions a task counted, and sessions added one by one in the dashboard. The others are not read; the list ends with how many there are (`+ 958 sessions in 55 projects not tracked`).
+  - `all`: every session, except projects set to `off`.
+- **Adding one session:** the dashboard's *Sessions* tab has a *Not tracked* view with an **Add** button on each session; a project's detail lists its sessions the same way. An added session is read at once and listed with a chip *added*; **Remove** in its detail takes it out again. Projects set to `off` are not offered.
 - **Columns:**
   - **span:** first prompt to last API call.
   - **active:** time the agent was working on turns (Claude Code's turn records).
   - **prm:** prompts you typed. Automatic turns, such as a background agent reporting back, are not counted.
   - **cost:** includes Claude Code's own unlogged calls when its session cost record exists.
   - **title / tasks:** Claude Code's session title (the first prompt for Codex and pi) and the Tally tasks that counted the session.
-- **How it is read:** sessions are read from the agents' own transcripts into a separate index, `~/.claude/tally/sessions.db`. The task database is not touched. The first run reads every transcript of the period; on 1,100 sessions (4.1 GB) that took 19 s. After that only new bytes are read, typically in well under a second.
-- **Dashboard:** the *Sessions* tab has the same list with period and agent filters (the project filter in the header applies too). Click a session for its full report: per-prompt breakdown, agents, models.
+- **How it is read:** tracked sessions are read from the agents' own transcripts into a separate index, `~/.claude/tally/sessions.db`. The task database is not touched. Other transcripts are only described: the session, its project and title, from the start and end of the file. Reading 1,100 sessions (4.1 GB) took 19 s the first time; after that only new bytes are read, typically in well under a second.
+- **Dashboard:** the *Sessions* tab has the same list with period and agent filters (the project filter in the header applies too), and *Tracked* / *Not tracked*. Click a session for its full report: per-prompt breakdown, agents, models.
 - **Privacy:** session titles follow `log.prompts`. With `off`, no titles or prompt texts are stored in the index.
 
 ## Detailed statistics
@@ -272,10 +278,10 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 | tab | what you can do |
 |---|---|
-| *Tasks* | Before the first task: how to start one in each agent, and what your agents used in the last 30 days. Then: filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
+| *Tasks* | Before the first task: how to start one in each agent, and what your agents used in the last 30 days (or, before any project is tracked, how many sessions they ran). Then: filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
 | *Todos* | A board with Doing, Todo, Blocked and Done. Add todos with the quick syntax, change the status, tick plan steps, **edit** title, priority, due date, project and notes, or **delete** a todo. *Copy /tally:do* copies the command that hands a todo to your agent. |
-| *Projects* | Every project with sessions in the last 30 days, most used first: sessions, tokens and cost of all its sessions (from the [sessions index](#sessions), whatever the tracking mode). Projects Tally has not set up yet are marked *new*; choose their mode right in the table. The detail adds what Tally keeps for good, a daily chart, models and tasks. |
-| *Sessions* | Every session of every agent; see [Sessions](#sessions). |
+| *Projects* | Every project with sessions in the last 30 days, in two groups. *Tracked*, most used first: sessions, tokens and cost from the [sessions index](#sessions). *Not tracked*: how many sessions each has, not read; choose `track` or `tasks` right in the table, or in the project's detail, and its sessions are read at once. The detail adds what Tally keeps for good, a daily chart, models and tasks; for a project that is not tracked, its sessions with an **Add** button each. |
+| *Sessions* | The tracked sessions of every agent, and the ones not tracked with an **Add** button; see [Sessions](#sessions). |
 | *Settings* | The same settings as `/tally:settings`, grouped and described. |
 
 - **Live:** an active task refreshes every 5 seconds. The header shows when the data was last loaded, or that the dashboard server is not reachable.

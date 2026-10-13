@@ -291,12 +291,16 @@ tbody tr:hover td { background: var(--hover); }
 .ptbl thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
 .ptbl tbody tr { cursor: pointer; }
 .ptbl tbody tr.sel td { background: var(--select); }
+.ptbl tbody tr.grp { cursor: default; }
+.ptbl tbody tr.grp td { text-align: left; font-size: 12px; padding-top: 14px; color: var(--text-secondary); background: none; }
+.ntbl td:last-child { width: 1%; }
+.ntbl td.c-size, .ntbl th.c-size { text-align: right; }
 .chart { display: block; width: 100%; }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 #stable { max-height: 60vh; overflow: auto; }
 .stbl thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
 .stbl td.ttl { white-space: normal; max-width: 0; width: 28%; }
-.stbl td.ttl span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stbl td.ttl > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stbl th:nth-child(-n+4), .stbl td:nth-child(-n+4), .stbl th:last-child, .stbl td:last-child { text-align: left; }
 .stbl th:first-child, .stbl td:first-child { padding-left: 20px; }
 .stbl th:last-child, .stbl td:last-child { padding-right: 20px; }
@@ -304,7 +308,7 @@ tbody tr:hover td { background: var(--hover); }
 /* narrow screens keep what identifies a row and what it cost; the rest is in the detail */
 .stbl td.prj, .ptbl td.pname { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 1100px) { .c-models, .c-share { display: none; } .stbl td.prj { max-width: 120px; } }
-@media (max-width: 900px) { .c-span, .c-calls, .c-todos, .c-last, .c-agent { display: none; } }
+@media (max-width: 900px) { .c-span, .c-calls, .c-todos, .c-last, .c-agent, .c-size { display: none; } }
 @media (max-width: 640px) { .c-active, .c-prompts, .c-tasks, .c-sess, .c-when { display: none; }
   .stbl td.prj { max-width: 84px; }
   .ptbl td.pname { max-width: 110px; }
@@ -410,6 +414,7 @@ button svg.i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4p
     <div class="toolbar">
       <select id="sdays" aria-label="Period"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="">All time</option></select>
       <select id="sagent" aria-label="Agent"><option value="">All agents</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="pi">pi</option></select>
+      <div class="seg" role="group" aria-label="Which sessions" id="sview"><button type="button" data-sv="" class="on">Tracked</button><button type="button" data-sv="not_tracked">Not tracked</button></div>
       <span class="muted num" id="sindex" style="font-size:12px"></span>
       <span class="grow" style="flex:1"></span><span id="sexport"></span>
     </div>
@@ -709,8 +714,11 @@ async function renderWelcome() {
     <div class="ctas"><a class="primary" href="#sessions">Open Sessions</a><a href="#todos">Plan with todos</a><a href="#settings">Settings</a></div></div>`;
   try {
     const d = await getJSON("/api/sessions?" + new URLSearchParams({days: "30", project, limit: "1"}));
-    const t = d.totals;
-    if (!t.sessions) return;
+    const t = d.totals, nt = d.not_tracked || {};
+    if (!t.sessions) {
+      if (nt.sessions) $("#welcome-usage").innerHTML = `<div class="banner">Your agents ran <b>${plural(nt.sessions, "session")}</b>${project ? "" : " in <b>" + plural(nt.projects, "project") + "</b>"} in the last 30 days. Tally reads only the projects you choose: set them to track or tasks in <a href="#projects">Projects</a>, or add single sessions in <a href="#sessions">Sessions</a>.</div>`;
+      return;
+    }
     $("#welcome-usage").innerHTML = `<div class="section-title" style="padding-top:4px">Meanwhile, your agents in the last 30 days${where}</div><div class="tiles">
       ${tile("Sessions", fmtFull(t.sessions), d.by_agent.map(a => (AGENTS[a.agent] || a.agent) + " " + a.sessions).join(" · "))}
       ${tile("Tokens", fmtTok(t.total), fmtTok(t.output) + " output")}
@@ -761,7 +769,7 @@ function renderDetail(rep, target) {
   if (sess) h.push(`<div class="dhead"><div class="top"><h2>${esc(sess.title || "Session " + sess.session_id)}</h2>
       ${target ? `<div class="actions"><button class="sm" type="button" data-copy="${esc(exportUrl({scope: "session", ref: sess.session_id, format: "text"}))}" title="one line: title, agent, project, time, tokens, cost">${ICON_COPY}Copy</button>${
         menu([[null, [["Report (Markdown)", {scope: "session", ref: sess.session_id, format: "md"}], ["JSON", {scope: "session", ref: sess.session_id, format: "json"}]]],
-              ["Copy", [["Report as Markdown", {scope: "session", ref: sess.session_id, format: "md"}, "copy"]]]])}<button class="ghost sm" data-close aria-label="Close">✕ Close</button></div>` : ""}</div>
+              ["Copy", [["Report as Markdown", {scope: "session", ref: sess.session_id, format: "md"}, "copy"]]]])}${sess.added ? `<button class="sm" type="button" data-remove title="added one by one: take it out of the tracked sessions">Remove</button>` : ""}<button class="ghost sm" data-close aria-label="Close">✕ Close</button></div>` : ""}</div>
     <div class="line"><span class="badge">${esc(AGENTS[sess.agent] || sess.agent)}</span>
     <span class="num">${fmtWhen(t.started_at)} → ${fmtWhen(t.ended_at)}</span>
     ${sess.project ? `<span class="chip">${esc(sess.project)}</span>` : ""}</div>
@@ -878,6 +886,12 @@ function renderDetail(rep, target) {
   });
   const close = $("[data-close]", el);
   if (close) close.onclick = () => { el.classList.add("hide"); el._rep = null; sessSel = null; history.replaceState(null, "", "#sessions"); $$(".stbl tr.sel").forEach(tr => tr.classList.remove("sel")); };
+  const remove = $("[data-remove]", el);
+  if (remove) remove.onclick = () => guard(postJSON("/api/sessions/" + encodeURIComponent(sess.session_id), {action: "remove"}).then(() => {
+    toast("Session removed from the tracked ones");
+    close.onclick();
+    return loadSessions();
+  }));
   if (!sess) wireTaskActions(t);
 }
 
@@ -1004,8 +1018,17 @@ $("#addform").onsubmit = e => {
 
 // ---------------------------------------------------------------- projects
 const MODE_HELP = {track: "every session counted", tasks: "only tasks you start", off: "ignored", ask: "not set up yet"};
-let projSel = null, projStats = null;
+let projSel = null, projStats = null, projPoll = null;
+const fmtSize = b => b < 1e6 ? Math.max(1, Math.round(b / 1e3)) + " kB" : b < 1e9 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e9).toFixed(2) + " GB";
+// track | tasks | off for a project; track and tasks read its sessions in the background
+async function setMode(name, mode) {
+  const r = await postJSON("/api/projects/" + encodeURIComponent(name), {mode});
+  toast(name + ": " + mode + (mode === "off" ? "" : " · reading its sessions"));
+  if (view === "projects") await loadProjectsView();
+  return r;
+}
 async function loadProjectsView() {
+  clearTimeout(projPoll);
   const d = await getJSON("/api/projects?full=1");
   $("#projcount").textContent = d.projects.length ? plural(d.projects.length, "project") : "";
   if (!d.projects.length) {
@@ -1021,14 +1044,24 @@ async function loadProjectsView() {
     [null, [["Projects (CSV)", {scope: "projects", format: "csv"}], ["Markdown table", {scope: "projects", format: "md"}], ["JSON", {scope: "projects", format: "json"}]]],
     ["Copy", [["Markdown table", {scope: "projects", format: "md"}, "copy"]]]]);
   const max = Math.max(...d.projects.map(p => p.last_30d.total), 1);
-  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th class="pname">project</th><th class="c-track">tracking</th><th class="c-sess">sessions</th><th class="c-ptok">tokens</th><th class="c-share"></th><th>cost</th><th class="c-tasks">tasks</th><th class="c-todos">open todos</th><th class="c-last">last active</th></tr></thead><tbody>${
-    d.projects.map(p => `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td class="pname" title="${esc(p.project)}"><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
+  const ix = d.indexing || {};
+  const row = p => {
+    const rest = p.not_tracked.sessions, read = p.sessions_read || p.last_30d.total > 0;
+    return `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td class="pname" title="${esc(p.project)}"><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
       <td class="c-track"><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
-      <td class="num c-sess">${p.sessions}</td><td class="num c-ptok">${fmtTok(p.last_30d.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
-      <td class="num c-tasks">${p.tasks}</td><td class="num c-todos">${p.open_todos}</td><td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
-    <div class="note" style="padding:12px 10px 0">Sessions, tokens and cost: every session of the last 30 days, from the agents' transcripts, whatever the tracking mode. Tracking decides what Tally keeps for good: <b>track</b> every session, <b>tasks</b> only the tasks you start, <b>off</b> nothing (and the project disappears from these numbers).</div>`;
+      <td class="num c-sess">${p.sessions || (rest ? "" : 0)}${rest ? `<span class="muted" title="${plural(rest, "session")} not read: the project is not tracked">${p.sessions ? " +" : ""}${rest} not read</span>` : ""}</td>
+      <td class="num c-ptok">${read ? fmtTok(p.last_30d.total) : '<span class="muted">–</span>'}</td><td class="c-share">${read ? `<div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div>` : ""}</td><td class="num">${read ? fmtCost(p.last_30d.cost) : '<span class="muted">–</span>'}</td>
+      <td class="num c-tasks">${p.tasks}</td><td class="num c-todos">${p.open_todos}</td><td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`;
+  };
+  const tracked = d.projects.filter(p => p.sessions_read), rest = d.projects.filter(p => !p.sessions_read);
+  const group = (title, hint) => `<tr class="grp"><td colspan="9"><b>${title}</b><span class="muted"> · ${hint}</span></td></tr>`;
+  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th class="pname">project</th><th class="c-track">tracking</th><th class="c-sess">sessions</th><th class="c-ptok">tokens</th><th class="c-share"></th><th>cost</th><th class="c-tasks">tasks</th><th class="c-todos">open todos</th><th class="c-last">last active</th></tr></thead><tbody>${
+    tracked.length && rest.length ? group("Tracked", plural(tracked.length, "project") + ", every session read") : ""}${tracked.map(row).join("")}${
+    rest.length ? group("Not tracked", plural(rest.length, "project") + ": sessions counted, not read. Choose track or tasks to read them" + (tracked.length ? "" : ", or off to hide the project")) : ""}${rest.map(row).join("")}</tbody></table>
+    <div class="note" style="padding:12px 10px 0">${ix.running ? `<b>Reading transcripts ${ix.done}/${ix.total || "…"}</b> · ` : ""}Sessions, tokens and cost: the last 30 days, from the agents' transcripts. Tally reads the sessions of projects set to <b>track</b> (and keeps every session for good) or <b>tasks</b> (keeps only the tasks you start), and sessions you add one by one in <a href="#sessions">Sessions</a>. Not tracked projects are only counted; <b>off</b> hides a project.</div>`;
+  if (ix.running) projPoll = setTimeout(() => { if (view === "projects") loadProjectsView().catch(() => {}); }, 1500);
   $$("select[data-mode]", $("#projtable")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
-    guard(postJSON("/api/projects/" + encodeURIComponent(el.dataset.mode), {mode: el.value}).then(() => { toast(el.dataset.mode + ": " + el.value); return loadProjectsView(); })); });
+    guard(setMode(el.dataset.mode, el.value)); });
   $$("tr[data-p]", $("#projtable")).forEach(tr => {
     const go = () => selectProject(tr.dataset.p, false);
     tr.onclick = go; tr.onkeydown = e => { if (e.key === "Enter") go(); };
@@ -1067,16 +1100,20 @@ function renderProjectDetail() {
   const st = projStats, el = $("#projdetail");
   if (!st) return;
   el.classList.remove("hide");
-  const td = st.todos, tk = st.tasks;
+  const td = st.todos, tk = st.tasks, nt = st.not_tracked;
   const W = Math.max(280, (el.clientWidth || 900) - 40);
+  const idle = !st.sessions_read && !st.last_30d.total;            // nothing read: no numbers to show
   const pq = (scope, f, extra) => Object.assign({scope, format: f}, scope === "project" ? {ref: st.project} : {project: st.project}, extra || {});
   el.innerHTML = `<div class="dhead"><div class="top"><h2>${esc(st.project)}</h2><div class="actions">${menu([
       ["This project", [["Report (Markdown)", pq("project", "md")], ["Tokens per day (CSV)", pq("project", "csv")], ["JSON", pq("project", "json")]]],
       ["Its data", [["Tasks · time sheet (CSV)", pq("tasks", "csv")], ["Sessions · last 30 days (CSV)", pq("sessions", "csv", {days: 30})]]],
       ["Copy", [["Report as Markdown", pq("project", "md"), "copy"], ["Tasks, one line each", pq("tasks", "text"), "copy"]]]])}</div></div>
-      <div class="line"><span class="badge">${esc(st.mode)} · ${MODE_HELP[st.mode] || ""}</span>
+      <div class="line"><span class="badge">${esc(st.mode)} · ${st.sessions_read ? MODE_HELP[st.mode] || "" : "not tracked"}</span>
       <a href="#sessions" data-psess>Sessions of this project →</a><a href="#tasks" data-ptasks>Tasks →</a></div>${st.path ? `<div class="path" title="${esc(st.path)}">${esc(st.path)}</div>` : ""}</div>
-    <div class="tiles">
+    ${st.sessions_read ? "" : `<div class="section"><div class="banner" style="margin:12px 0 0"><b>Not tracked.</b> Tally has not read ${nt.sessions ? `the ${plural(nt.sessions, "session")} of this project (${fmtSize(nt.size)} of transcripts, last change ${fmtAgo(nt.last_activity)})` : "this project's sessions"}.
+      Track it to read them, with the history the agents still keep, or add single sessions below.
+      <div class="ctas" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="sm primary" data-setmode="track">Track every session</button><button type="button" class="sm" data-setmode="tasks">Only tasks</button><button type="button" class="sm" data-setmode="off">Off, hide it</button></div></div></div>`}
+    ${idle ? "" : `<div class="tiles">
       ${tile("Last 30 days", fmtTok(st.last_30d.total), fmtCost(st.last_30d.cost) + " · " + fmtFull(st.last_30d.calls) + " calls", "every session in the project, from the agents' transcripts")}
       ${tile("Last 7 days", fmtTok(st.last_7d.total), fmtCost(st.last_7d.cost))}
       ${tile("Sessions", fmtFull(st.sessions), st.last_activity ? "last " + fmtAgo(st.last_activity) : "in the last 30 days")}
@@ -1084,11 +1121,14 @@ function renderProjectDetail() {
       ${tile("Tasks", fmtFull(tk.count), tk.share != null && st.mode === "track" ? (tk.share * 100).toFixed(0) + "% of tokens via tasks" : (tk.active ? tk.active + " active" : ""))}
       ${tile("Todos", fmtFull(td.todo + td.doing + td.blocked) + " open", td.done + " done")}
     </div>
-    <div class="section"><div class="section-title">Tokens per day · last 30 days · all sessions</div><div id="pchart">${chart(st.daily, W)}</div></div>
+    <div class="section"><div class="section-title">Tokens per day · last 30 days · ${st.sessions_read ? "all sessions" : "sessions added one by one"}</div><div id="pchart">${chart(st.daily, W)}</div></div>`}
+    ${nt.list.length ? `<div class="section"><div class="section-title">Not read · ${plural(nt.sessions, "session")}</div><div class="tscroll">${notTrackedTable(nt.list, true)}</div></div>` : ""}
     ${st.by_model.length ? `<div class="section two"><div><div class="section-title">By model</div><table><thead><tr><th>model</th><th>tokens</th><th>output</th><th>cost</th></tr></thead><tbody>${st.by_model.map(m => `<tr><td title="${esc(m.model)}">${esc(shortModel(m.model))}</td><td class="num">${fmtTok(m.total)}</td><td class="num">${fmtTok(m.output)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join("")}</tbody></table></div>
       <div><div class="section-title">Tasks</div><table><thead><tr><th>task</th><th>tokens</th><th>cost</th><th>active</th></tr></thead><tbody>${tk.recent.map(t => `<tr><td style="white-space:normal"><a href="#tasks/${t.id}">${esc(t.name)}</a> <span class="muted">#${t.id}</span></td><td class="num">${fmtTok(t.total)}</td><td class="num">${fmtCost(t.cost)}</td><td class="num">${fmtDur(t.active_s)}</td></tr>`).join("") || '<tr><td class="muted">none yet</td></tr>'}</tbody></table></div></div>` : ""}`;
   $("[data-psess]", el).onclick = () => setProject(st.project);
   $("[data-ptasks]", el).onclick = () => setProject(st.project);
+  $$("[data-setmode]", el).forEach(b => b.onclick = () => guard(setMode(st.project, b.dataset.setmode)));
+  wireAdd(el, () => guard(loadProjectsView()));
 }
 let stopped = false;          // stopped from this page: no more polling
 let resizeTimer = null;
@@ -1097,22 +1137,59 @@ window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer
 // ---------------------------------------------------------------- sessions
 const AGENTS = {claude: "Claude Code", codex: "Codex", pi: "pi"};
 let sessSel = parseHash().sid || null;
-let sessPoll = null, sessLoaded = 0;
+let sessPoll = null, sessLoaded = 0, sessView = "";
 $("#sdays").value = localStorage.getItem("tc-sdays") ?? "30";
 $("#sagent").value = localStorage.getItem("tc-sagent") || "";
 $("#sdays").onchange = e => { localStorage.setItem("tc-sdays", e.target.value); guard(loadSessions()); };
 $("#sagent").onchange = e => { localStorage.setItem("tc-sagent", e.target.value); guard(loadSessions()); };
+function setSessView(v) {
+  sessView = v;
+  $$("#sview button").forEach(b => b.classList.toggle("on", b.dataset.sv === v));
+  guard(loadSessions());
+}
+$$("#sview button").forEach(b => b.onclick = () => setSessView(b.dataset.sv));
+// sessions Tally has not read (their project is not tracked): one Add button each
+function notTrackedTable(list, inProject) {
+  return `<table class="stbl ntbl${inProject ? " noproj" : ""}"><thead><tr><th class="c-when">last change</th><th class="c-agent">agent</th><th class="c-proj">project</th><th>session</th><th class="c-size">transcript</th><th></th></tr></thead><tbody>${
+    list.map(s => `<tr><td class="num c-when" title="${esc(fmtWhen(s.last_ts))}">${fmtAgo(s.last_ts)}</td><td class="c-agent">${esc(AGENTS[s.agent] || s.agent)}</td>
+      <td class="prj c-proj" title="${esc(s.project || "")}">${s.project ? `<a href="#projects/${encodeURIComponent(s.project)}">${esc(s.project)}</a>` : "–"}</td>
+      <td class="ttl"><span title="${esc(s.session_id + (s.cwd ? " · " + s.cwd : ""))}">${esc(s.title || s.session_id)}</span></td>
+      <td class="num muted c-size">${fmtSize(s.size || 0)}</td>
+      <td><button type="button" class="sm" data-add="${esc(s.session_id)}" title="read this session and list it with the tracked ones">Add</button></td></tr>`).join("")}</tbody></table>`;
+}
+function wireAdd(el, after) {
+  $$("button[data-add]", el).forEach(b => b.onclick = () => {
+    b.disabled = true; b.textContent = "Reading…";
+    guard(postJSON("/api/sessions/" + encodeURIComponent(b.dataset.add), {action: "add"}).then(() => {
+      toast("Session added: it is listed with the tracked ones");
+      return after();
+    })).finally(() => { b.disabled = false; });
+  });
+}
 async function loadSessions(force) {
   clearTimeout(sessPoll);
-  const q = new URLSearchParams({days: $("#sdays").value, agent: $("#sagent").value, project, refresh: force ? "1" : ""});
+  const q = new URLSearchParams({days: $("#sdays").value, agent: $("#sagent").value, project, refresh: force ? "1" : "",
+                                 list: sessView});
   const d = await getJSON("/api/sessions?" + q);
   sessLoaded = Date.now();
-  renderSessions(d);
+  if (sessView === "not_tracked") renderNotTracked(d); else renderSessions(d);
   const ix = d.indexing || {};
   $("#sindex").textContent = ix.running ? `reading transcripts ${ix.done}/${ix.total || "…"}`
     : d.indexed_at ? "index updated " + TIME.format(new Date(d.indexed_at * 1000)) : "";
   if (ix.running && view === "sessions") sessPoll = setTimeout(() => loadSessions().catch(() => {}), 1500);
-  if (sessSel && !$("#sdetail")._rep) selectSession(sessSel, false);
+  if (sessSel && !sessView && !$("#sdetail")._rep) selectSession(sessSel, false);
+}
+function renderNotTracked(d) {
+  $("#sexport").innerHTML = "";
+  $("#sdetail").classList.add("hide");
+  $("#sdetail")._rep = null;                          // back in Tracked, the selected session opens again
+  $("#stiles").innerHTML = `<div class="note" style="padding:16px 20px 14px;font-size:13px"><b>${plural(d.count, "session")}</b> Tally has not read${project ? " in <b>" + esc(project) + "</b>" : ""}: their projects are not tracked. <b>Add</b> reads one session and lists it with the tracked ones; to read every session of a project, set it to track or tasks in <a href="#projects${project ? "/" + encodeURIComponent(project) : ""}">Projects</a>.</div>`;
+  if (!d.sessions.length) {
+    $("#stable").innerHTML = `<div class="empty">${d.indexing && d.indexing.running ? "Reading transcripts…" : "Every session of this period is tracked."}</div>`;
+    return;
+  }
+  $("#stable").innerHTML = notTrackedTable(d.sessions, !!project) + (d.count > d.sessions.length ? `<div class="note" style="padding:10px 20px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : "");
+  wireAdd($("#stable"), () => loadSessions());
 }
 function renderSessions(d) {
   const t = d.totals;
@@ -1127,8 +1204,12 @@ function renderSessions(d) {
     ${tile("Prompts", fmtFull(t.prompts), fmtFull(t.calls) + " API calls")}
     ${tile("Active time", fmtDur(t.active_s), "wall " + fmtDur(t.wall_s), "time agents were working on turns; wall = first to last API call of each session")}
   </div>`;
+  const nt = d.not_tracked || {};
+  const more = nt.sessions ? `<div class="note" style="padding:10px 20px">+ ${plural(nt.sessions, "session")}${project ? "" : " in " + plural(nt.projects, "project")} not tracked, so not listed. <a href="#sessions" data-show-nt>Show them</a></div>` : "";
   if (!d.sessions.length) {
-    $("#stable").innerHTML = `<div class="empty">${d.indexing && d.indexing.running ? "Reading transcripts…" : "No sessions with API calls in this period" + (project ? " for <b>" + esc(project) + "</b>" : "") + "."}</div>`;
+    $("#stable").innerHTML = `<div class="empty">${d.indexing && d.indexing.running ? "Reading transcripts…" : "No tracked sessions with API calls in this period" + (project ? " for <b>" + esc(project) + "</b>" : "") + "."}</div>` + more;
+    const show = $("[data-show-nt]", $("#stable"));
+    if (show) show.onclick = e => { e.preventDefault(); setSessView("not_tracked"); };
     return;
   }
   const max = Math.max(...d.sessions.map(s => s.totals.total), 1);
@@ -1140,12 +1221,14 @@ function renderSessions(d) {
       const mtip = s.models.map(m => `${esc(m.model)} · ${fmtTok(m.total)} · ${fmtCost(m.cost)}`).join("<br>");
       return `<tr data-sid="${esc(s.session_id)}" class="${s.session_id === sessSel ? "sel" : ""}" tabindex="0">
         <td class="num c-when" title="${esc(fmtWhen(s.last_ts))}">${fmtAgo(s.last_ts)}</td><td class="c-agent">${esc(AGENTS[s.agent] || s.agent)}</td><td class="prj c-proj" title="${esc(s.project || "")}">${esc(s.project || "–")}</td>
-        <td class="ttl"><span title="${esc(s.session_id + (s.cwd ? " · " + s.cwd : ""))}">${tasksHtml} ${esc(label)}</span></td>
+        <td class="ttl"><span title="${esc(s.session_id + (s.cwd ? " · " + s.cwd : ""))}">${tasksHtml}${s.added ? ' <span class="chip" title="added one by one; its project is not tracked">added</span>' : ""} ${esc(label)}</span></td>
         <td class="num c-span">${fmtDur(s.wall_s)}</td><td class="num c-active">${fmtDur(s.active_s)}</td><td class="num c-prompts">${fmtFull(s.prompts)}</td><td class="num c-calls">${fmtFull(st.calls)}</td>
         <td class="num">${fmtTok(st.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(st.total, max)}%"></div></div></div></td>
         <td class="num"${s.unlogged ? ` data-tip="<b>${fmtCost(cost)}</b>incl. ≈ ${fmtCost(s.unlogged.cost)} of Claude Code's own unlogged calls"` : ""}>${fmtCost(cost, st.cost_partial)}</td>
         <td class="muted c-models" data-tip="${esc(mtip)}">${esc(s.models.slice(0, 2).map(m => shortModel(m.model)).join(", "))}${s.models.length > 2 ? " +" + (s.models.length - 2) : ""}</td></tr>`;
-    }).join("")}</tbody></table>${d.count > d.sessions.length ? `<div class="note" style="padding:10px 20px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : ""}`;
+    }).join("")}</tbody></table>${d.count > d.sessions.length ? `<div class="note" style="padding:10px 20px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : ""}${more}`;
+  const show = $("[data-show-nt]", $("#stable"));
+  if (show) show.onclick = e => { e.preventDefault(); setSessView("not_tracked"); };
   $$("tr[data-sid]", $("#stable")).forEach(tr => {
     tr.onclick = e => { if (!e.target.closest("a")) selectSession(tr.dataset.sid, true); };
     tr.onkeydown = e => { if (e.key === "Enter") selectSession(tr.dataset.sid, true); };
@@ -1171,6 +1254,7 @@ const SETTING_INFO = {
   "log.depth": ["Logging", "Logging detail"],
   "log.prompts": ["Logging", "Prompt text"],
   "projects.default_mode": ["Projects and tasks", "New projects"],
+  "sessions.scope": ["Projects and tasks", "Sessions overview reads"],
   "auto_start": ["Projects and tasks", "Start tasks automatically"],
   "todos.reminder": ["Todos", "Reminder at session start"],
   "todos.reminder_limit": ["Todos", "Todos in the reminder"],

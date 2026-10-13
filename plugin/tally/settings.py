@@ -16,6 +16,9 @@ SCHEMA = {
     "auto_start": (("off", "session"), "Start a task automatically with the first prompt of every session"),
     "projects.default_mode": (("ask", "track", "tasks"),
                               "New projects: ask how to track them, or track every session, or count only tasks"),
+    "sessions.scope": (("enabled", "all"),
+                       "Sessions overview: only projects set to track or tasks and sessions added one by one "
+                       "(enabled), or every session in the agents' transcripts (all)"),
     "dashboard_port": (int, "Port of the local dashboard"),
     "dashboard_idle_minutes": (int, "Stop a dashboard started in the background after this many minutes "
                                     "without an open page (0 = never)"),

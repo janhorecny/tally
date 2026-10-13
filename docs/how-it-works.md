@@ -53,6 +53,7 @@ The task database holds what tasks (and projects in `track` mode) count. History
   - Claude Code: `~/.claude/projects/*/<session>.jsonl`, with its subagents and workflow agents;
   - Codex: root threads in `~/.codex/sessions/…`; subagent threads are read with their root;
   - pi: `~/.pi/agent/sessions/*/*.jsonl`.
+- **Scope:** each new or changed transcript is described first (session, cwd, title, from the first 256 kB and the last 512 kB) into the table `seen`. It is read only if it is tracked (`sessions.scope`): its project is set to `track` or `tasks`, a task counted it, or it was added in the dashboard (`added_sessions` in `tally.db`). With `all`, everything except `off` projects is read. A described transcript that does not change and stays untracked is not opened again. Tracking a project later reads its transcripts on the next refresh; the dashboard starts one over all history right away.
 - **Incremental:** byte offsets per file, as in the task database. A transcript whose size and modification time are unchanged and which has been quiet for an hour is not opened at all.
 - **Prompts:** the prompts you typed are recorded per session (`prompts` with `task_id` NULL). Claude Code tool results, background-agent notifications and meta lines are not prompts, so their turns show up as automatic.
 - **Summary:** each session's totals, models, time and unlogged estimate are stored as JSON next to it, so listing hundreds of sessions takes about 10 ms.
@@ -79,7 +80,7 @@ Paths starting with `tally/` are in `plugin/tally/`.
 | `tally/ingest.py` | Incremental transcript reader that writes `usage`, `agents`, `workflows` and `turns`. |
 | `tally/report.py` | Builds the report: totals, the agent tree, groupings, time. Also handles snapshots. |
 | `tally/reconcile.py` | Unlogged-usage estimate from Claude Code's `cost-state` records. |
-| `tally/sessions.py` | The sessions index (`sessions.db`): discovery, incremental reads, the overview. |
+| `tally/sessions.py` | The sessions index (`sessions.db`): discovery, the scope (what is read), incremental reads, the overview, sessions added one by one. |
 | `tally/todos.py`, `tally/projects.py` | Todos (quick syntax, plan import) and projects (detection, modes, statistics). |
 | `tally/settings.py`, `tally/paths.py` | Validated settings, `config.json`, data and transcript locations. |
 | `plugin/skills/todos/SKILL.md` | The `tally:todos` skill; the installer copies it for Codex and pi as `tally-todos`. |

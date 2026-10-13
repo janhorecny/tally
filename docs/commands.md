@@ -444,7 +444,7 @@ CLI: [`tally projects`](cli.md#tally-projects)
 
 ### `/tally:sessions`
 
-Every session of every agent, with or without a task.
+The tracked sessions of every agent, with or without a task: projects set to `track` or `tasks`, sessions a task counted, and sessions added in the dashboard (setting `sessions.scope`). The last line says how many sessions are not tracked.
 
 ```
 /tally:sessions [days|all] [claude|codex|pi] [here]
@@ -491,6 +491,7 @@ Show or change settings.
 | `todos.reminder_limit` | a number (default 5) |
 | `auto_start` | `off` (default) or `session` |
 | `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
+| `sessions.scope` | `enabled` (default) or `all`: which sessions the sessions overview reads |
 | `dashboard_port` | a number (default 8765) |
 | `dashboard_idle_minutes` | a number (default 120; 0 = never) |
 
