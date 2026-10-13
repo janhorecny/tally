@@ -13,44 +13,41 @@ from . import fmt, report, tasks
 # "/tally:start x" (Claude Code), "tally:start x" (Codex: its TUI rejects unknown slash commands)
 PREFIX_RE = re.compile(r"^\s*/?tally:([a-z][a-z-]*)(?:[ \t]+(.*))?\s*$", re.S)
 
-HELP = """▍Tally %s · tokens and time per task, including subagents and workflows, plus a todo list.
-
-  Tasks
-    /tally:start [name]         start a task here (the next prompt is stored as its initial prompt)
-    /tally:new <prompt>         start a task AND send <prompt> to the agent as its first instruction
-    /tally:status [id]          live totals for the current task (or task #id)
-    /tally:stats [id]           detailed stats: per-prompt breakdown, tools, averages
-    /tally:end [id] [note]      end the task and print the final report
-    /tally:list [n|all]         recent tasks
-    /tally:show [id]            full report of any task (default: the current or latest one)
-    /tally:resume <id>          continue counting task #id in this session (also reopens an ended task)
-    /tally:rename [id] <name>   rename a task
-
-  Todos
-    /tally:todo <text>          add a todo: @project, ! !! !!! priority, due:fri|+3d|20.10., " -- notes"
-    /tally:todos [project|all|done]
-                                open todos of this project (or another, all, done ones)
-    /tally:take <id>            pick up a todo: status doing + measuring starts (you write the prompt)
-    /tally:do <id>              pick up a todo and let the agent start working on it right away
-    /tally:done [id] [note]     mark the todo done (default: the one you are working on) and end its task
-    /tally:mark <id> <status> [note]
-                                todo | doing | blocked | done | dropped
-
-  Projects
-    /tally:project [name] [mode]
-                                a project's overall stats; mode: track | tasks | off
-    /tally:projects             all projects with their tracking mode and totals
-    /tally:sessions [days|all] [agent] [here]
-                                all sessions across agents: tokens, cost, models, time (default 7 days)
-
-  Other
-    /tally:settings [key [val]] show or change settings (log.depth, log.prompts, todos.reminder, …)
-    /tally:dashboard [stop]     open the local web dashboard, or stop it
-    /tally:help                 this help
-
-  Commands are answered locally and cost no tokens, except /tally:new and /tally:do,
-  which hand work to the agent.
-  → tally setup in a terminal: onboarding questions · tally --help: the CLI · data: ~/.claude/tally/tally.db"""
+HELP = (
+    ("Tasks", (
+        ("/tally:start [name]", "start a task here (the next prompt is stored as its initial prompt)"),
+        ("/tally:new <prompt>", "start a task AND send <prompt> to the agent as its first instruction"),
+        ("/tally:status [id]", "live totals for the current task (or task #id)"),
+        ("/tally:stats [id]", "detailed stats: per-prompt breakdown, tools, averages"),
+        ("/tally:end [id] [note]", "end the task and print the final report"),
+        ("/tally:list [n|all]", "recent tasks"),
+        ("/tally:show [id]", "full report of any task (default: the current or latest one)"),
+        ("/tally:resume <id>", "continue counting task #id in this session (also reopens an ended task)"),
+        ("/tally:rename [id] <name>", "rename a task"),
+    )),
+    ("Todos", (
+        ("/tally:todo <text>", 'add a todo: @project, ! !! !!! priority, due:fri|+3d|20.10., " -- notes"'),
+        ("/tally:todos [project|all|done]", "open todos of this project (or another, all, done ones)"),
+        ("/tally:take <id>", "pick up a todo: status doing + measuring starts (you write the prompt)"),
+        ("/tally:do <id>", "pick up a todo and let the agent start working on it right away"),
+        ("/tally:done [id] [note]", "mark the todo done (default: the one you are working on) and end its task"),
+        ("/tally:mark <id> <status> [note]", "todo | doing | blocked | done | dropped"),
+    )),
+    ("Projects", (
+        ("/tally:project [name] [mode]", "a project's overall stats; mode: track | tasks | off"),
+        ("/tally:projects", "all projects with their tracking mode and totals"),
+        ("/tally:sessions [days|all] [agent] [here]",
+         "all sessions across agents: tokens, cost, models, time (default 7 days)"),
+    )),
+    ("Other", (
+        ("/tally:settings [key [val]]", "show or change settings (log.depth, log.prompts, todos.reminder, …)"),
+        ("/tally:dashboard [stop]", "open the local web dashboard, or stop it"),
+        ("/tally:help", "this help"),
+    )),
+)
+HELP_FREE = ("Commands are answered locally and cost no tokens, except /tally:new and /tally:do,",
+             "which hand work to the agent.")
+HELP_MORE = "→ tally setup in a terminal: onboarding questions · tally --help: the CLI · data: ~/.claude/tally/tally.db"
 
 KNOWN = {"start", "new", "end", "stop", "status", "stats", "list", "ls", "show", "report", "resume",
          "attach", "rename", "dashboard", "help", "todo", "todos", "take", "do", "done", "mark", "settings",
@@ -83,8 +80,23 @@ def _split_id(args: str):
 
 
 def help_text() -> str:
+    """Commands in aligned columns; in the Claude app (no fixed-width font)
+    one line per command: '/tally:start [name] – start a task here'."""
     from . import __version__
-    return HELP % __version__
+    out = ["%s %s · tokens and time per task, including subagents and workflows, plus a todo list." % (
+        fmt.BRAND, __version__)]
+    for section, rows in HELP:
+        out += ["", section if fmt.APP else "  " + section]
+        for cmd, what in rows:
+            if fmt.APP:
+                out.append("%s – %s" % (cmd, what))
+            elif len(cmd) <= 27:
+                out.append("    %-27s %s" % (cmd, what))
+            else:
+                out += ["    " + cmd, " " * 32 + what]
+    out += ["", " ".join(HELP_FREE) if fmt.APP else "  " + "\n  ".join(HELP_FREE),
+            HELP_MORE if fmt.APP else "  " + HELP_MORE]
+    return "\n".join(out)
 
 
 def _no_task_here(conn) -> str:

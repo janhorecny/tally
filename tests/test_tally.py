@@ -2011,23 +2011,27 @@ class Branding(unittest.TestCase):
         self.assertIn("tally:start [name]", reason)
         self.assertNotIn("/tally:", reason)
 
-    def test_claude_app_keeps_columns(self):
-        """The Claude app collapses runs of spaces: columns and indentation become em spaces."""
+    def test_claude_app_plain_lines(self):
+        """The Claude app collapses runs of spaces and has no fixed-width font: one line per row, no columns."""
         from unittest import mock
         from tally import fmt, hooks
-        payload = json.dumps({"session_id": SID, "cwd": "/Users/me/proj", "prompt": "/tally:help"})
         reasons = {}
-        for entry in ("cli", "claude-desktop"):
+        for entry in ("cli", "claude-desktop"):          # two sessions: one prompt in one session runs once
             out = io.StringIO()
+            payload = json.dumps({"session_id": SID + entry, "cwd": "/Users/me/proj", "prompt": "/tally:help"})
             with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
                 hooks.main("UserPromptSubmit", stdin=io.StringIO(payload), stdout=out)
             reasons[entry] = json.loads(out.getvalue())["reason"]
-        app = reasons["claude-desktop"]
-        self.assertIn("  /tally:start [name]  ", reasons["cli"])
-        self.assertNotRegex(app, r"\S  |\n ")
-        self.assertIn("\n" + fmt.EM * 2 + "/tally:start [name]" + fmt.EM * 2 + "start a task", app)
+        self.assertFalse(fmt.APP)                                   # reset after the hook
+        app, cli = reasons["claude-desktop"], reasons["cli"]
+        self.assertIn("\n    /tally:start [name]         start a task here", cli)
+        self.assertIn("\n/tally:start [name] – start a task here", app)
+        self.assertIn("\n/tally:todos [project|all|done] – open todos", app)
+        self.assertIn("except /tally:new and /tally:do, which hand work", app)
+        self.assertNotRegex(app, r"  |\n ")
         self.assertTrue(app.startswith(fmt.BRAND + " "), app)
-        self.assertEqual(app.replace(fmt.EM, "").replace(" ", ""), reasons["cli"].replace(" ", ""))
+        self.assertEqual(fmt.for_app("  time     3m wall\n  ○ #1 a  [1/2]\n  → /tally:x  go"),
+                         "time: 3m wall\n○ #1 a [1/2]\n→ /tally:x go")
 
     def test_terminal_colours(self):
         from unittest import mock

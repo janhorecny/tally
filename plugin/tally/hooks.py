@@ -42,11 +42,13 @@ def main(event: str, stdin=None, stdout=None, agent=None, payload_text=None) -> 
     except Exception:
         _log_error(event)
         return 0
+    from . import fmt
+    fmt.APP = not payload.get("agent") and os.environ.get("CLAUDE_CODE_ENTRYPOINT") in APP_ENTRYPOINTS
     try:
         out = handle(event, payload)
         if out is not None and payload.get("agent") == "codex":
             out = _codex_syntax(out)
-        elif out is not None and os.environ.get("CLAUDE_CODE_ENTRYPOINT") in APP_ENTRYPOINTS:
+        elif out is not None and fmt.APP:
             out = _app_syntax(out)
         if out is not None:
             stdout.write(json.dumps(out))
@@ -54,6 +56,8 @@ def main(event: str, stdin=None, stdout=None, agent=None, payload_text=None) -> 
             stdout.flush()
     except Exception:
         _log_error(event)
+    finally:
+        fmt.APP = False
     return 0
 
 

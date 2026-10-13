@@ -71,23 +71,32 @@ def paint(text: str) -> str:
     return "\n".join(out)
 
 
-EM = " "
+APP = False     # the Claude app shows the output (set by the hook): no fixed-width font, see for_app
+NBSP = "\u00a0"  # indentation the app keeps (it collapses ordinary spaces)
+_KV = re.compile(r"^  ([a-z0-9][\w.]*(?: [\w.]+){0,2}) {2,}(\S.*)$")
 _GAP = re.compile(r"(?<=\S) {2,}(?=\S)")
 
 
+def _n(n: int, word: str) -> str:
+    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+
+
 def for_app(text: str) -> str:
-    """The Claude app shows hook output in a proportional font and collapses
-    runs of spaces, so columns and indentation vanish. Em spaces survive:
-    one per two columns of indentation (at most three: a description under a
-    long command), two between columns."""
+    """The Claude app shows hook output as plain text in a proportional font
+    and collapses runs of spaces, so columns cannot line up. The renderers
+    write table rows as one line each when APP is set; this makes the rest
+    plain: no indentation, 'time     3m' becomes 'time: 3m', one space
+    between words."""
     out = []
     for line in text.split("\n"):
-        body = line.lstrip(" ")
-        out.append(EM * min(3, (len(line) - len(body)) // 2) + _GAP.sub(EM * 2, body) if body else "")
+        m = _KV.match(line)
+        if m:
+            line = "%s: %s" % m.groups()
+        out.append(_GAP.sub(" ", line.strip(" ")))
     return "\n".join(out)
 
 
-TAGLINE ="Per-task token & time tracking for Claude Code, Codex and pi"
+TAGLINE = "Per-task token & time tracking for Claude Code, Codex and pi"
 # figlet font "standard"
 WORDMARK = (
     " _____     _ _",
@@ -197,19 +206,23 @@ COLS = "%-46s %8s %8s %9s %9s %6s"
 
 
 def _row(label: str, d: dict, dur: Optional[float], prefix: str = "") -> str:
+    if APP:
+        return "%s%s · %s tokens · %s output · %s%s · %s" % (
+            prefix, _cut(label, 80), tokens(d["total"]), tokens(d["output"]), money(d),
+            " · " + duration(dur) if dur is not None else "", _n(d["calls"], "call"))
     return COLS % (prefix + _cut(label, 46 - len(prefix)), tokens(d["total"]), tokens(d["output"]), money(d),
                    duration(dur) if dur is not None else "", d["calls"])
 
 
 def render_tree(tree: List[dict], max_children: int = 8, max_depth: int = 4) -> List[str]:
-    lines = [COLS % ("breakdown", "tokens", "output", "cost", "time", "calls")]
+    lines = ["breakdown" if APP else COLS % ("breakdown", "tokens", "output", "cost", "time", "calls")]
 
     def walk(n: dict, prefix: str, is_last: bool, depth: int, top: bool):
         if top:
             branch, child_prefix = "", ""
         else:
             branch = "└─ " if is_last else "├─ "
-            child_prefix = prefix + ("   " if is_last else "│  ")
+            child_prefix = prefix + ((NBSP * 4 if is_last else "│" + NBSP * 3) if APP else ("   " if is_last else "│  "))
         values = n["own"] if n["kind"] == "main" else n["rollup"]
         lines.append(_row(node_label(n), values, n.get("duration_s"), prefix + branch))
         kids = n.get("children") or []
@@ -223,7 +236,9 @@ def render_tree(tree: List[dict], max_children: int = 8, max_depth: int = 4) -> 
         if hidden:
             tot = sum(c["rollup"]["total"] for c in hidden)
             cost = sum(c["rollup"]["cost"] for c in hidden)
-            lines.append(COLS % (child_prefix + "└─ … %d more" % len(hidden), tokens(tot), "", "$%.2f" % cost, "", ""))
+            more = child_prefix + "└─ … %d more" % len(hidden)
+            lines.append("%s · %s tokens · $%.2f" % (more, tokens(tot), cost) if APP
+                         else COLS % (more, tokens(tot), "", "$%.2f" % cost, "", ""))
 
     for n in tree:
         walk(n, "", True, 0, True)
@@ -284,6 +299,10 @@ def render_report(rep: dict, detail: bool = True, title: Optional[str] = None, m
             out.append("")
             out.append("  by agent type")
             for x in rep["by_type"]:
+                if APP:
+                    out.append("%s: %s · %s tokens · %s" % (x["agent_type"], _n(x["agents"], "agent"),
+                                                            tokens(x["total"]), money(x)))
+                    continue
                 out.append("    %-26s %4s agents %9s %9s" % (
                     _cut(x["agent_type"], 26), x["agents"], tokens(x["total"]), money(x)))
     else:
@@ -297,9 +316,13 @@ def render_report(rep: dict, detail: bool = True, title: Optional[str] = None, m
 def render_list(rows: List[dict]) -> str:
     if not rows:
         return "\n".join([head("No tasks yet"), hints("/tally:start <name> start one", "/tally:new <prompt>")])
-    out = [head("Tasks (%d)" % len(rows)), "",
-           "  %4s  %-8s %-16s %9s %9s %9s %8s  %s" % ("#", "status", "started", "wall", "active", "tokens", "cost",
-                                                     "name")]
+    out = [head("Tasks (%d)" % len(rows)), ""]
+    if APP:
+        return "\n".join(out + ["#%d %s · %s · %s · %s wall · %s active · %s tokens · %s" % (
+            r["id"], _cut(r["name"], 80), "active" if r["status"] == "active" else "ended", when(r["started_at"]),
+            duration(r["wall_s"]), duration(r["active_s"]), tokens(r["total"]), money(r)) for r in rows])
+    out.append("  %4s  %-8s %-16s %9s %9s %9s %8s  %s" % ("#", "status", "started", "wall", "active", "tokens", "cost",
+                                                        "name"))
     for r in rows:
         out.append("  %4d  %-8s %-16s %9s %9s %9s %8s  %s" % (
             r["id"], "active" if r["status"] == "active" else "ended", when(r["started_at"]),
@@ -325,7 +348,18 @@ def render_stats(rep: dict) -> str:
     if st.get("tool_calls") is not None:
         out.append("           %d tool calls · %d errors" % (st["tool_calls"], st["tool_errors"] or 0))
     prompts = rep.get("prompts")
-    if prompts:
+    if prompts and APP:
+        out.append("")
+        for p in prompts:
+            out.append("#%d %s %s · %s tokens · %s output · %s · took %s · %s%s" % (
+                p["index"], when(p["ts"], "%H:%M"), _cut(p["prompt"] if p["prompt"] is not None else "(not stored)", 80),
+                tokens(p["total"]), tokens(p["output"]), money(p), duration(p["duration_s"]), _n(p["calls"], "call"),
+                " · " + _n(p["agents"], "agent") if p["agents"] else ""))
+        auto = st.get("automatic")
+        if auto:
+            out.append("automatic turns (%d) · %s tokens · %s output · %s · %s" % (
+                auto["turns"], tokens(auto["total"]), tokens(auto["output"]), money(auto), _n(auto["calls"], "call")))
+    elif prompts:
         out.append("")
         out.append("  %3s  %-5s %-34s %8s %8s %8s %8s %5s %6s" % (
             "#", "time", "prompt", "tokens", "output", "cost", "took", "calls", "agents"))
@@ -349,7 +383,7 @@ def render_stats(rep: dict) -> str:
         width = max(t["calls"] for t in tools)
         for t in tools[:12]:
             bar = "█" * max(1, int(round(16 * t["calls"] / float(width))))
-            out.append("    %-34s %5d  %-16s%s" % (_cut(t["tool"], 34), t["calls"], bar,
+            out.append(("%s: %d× %s%s" if APP else "    %-34s %5d  %-16s%s") % (_cut(t["tool"], 34), t["calls"], bar,
                                                   ("  %d errors" % t["errors"]) if t["errors"] else ""))
         if len(tools) > 12:
             out.append("    … %d more tools" % (len(tools) - 12))
@@ -370,7 +404,8 @@ def render_todos(conn, rows: list, project: Optional[str], show_project: bool = 
     out = [head("Todos · %s (%d)" % (where, len(rows)), "📋")]
 
     def emit(r, depth):
-        line = "  " + "   " * depth + todos.line_for(r, now, show_project=show_project and depth == 0)
+        indent = (NBSP * 4 * (depth - 1) + "↳ " if depth else "") if APP else "  " + "   " * depth
+        line = indent + todos.line_for(r, now, show_project=show_project and depth == 0)
         done, total = todos.progress(conn, r["id"])
         if total:
             line += "  [%d/%d]" % (done, total)
@@ -416,8 +451,11 @@ def render_settings(keys=None, cli: bool = False, width: int = 100) -> str:
             group = g
         value = settings.show(settings.get(k, cfg))
         others = settings.choices(k)
-        out.append("    %-27s %-9s %s" % (label, value, " · ".join(others) if others else "a number"))
         desc = "%s · %s" % (k, settings.SCHEMA[k][1])
+        if APP:
+            out += ["%s: %s (%s)" % (label, value, " · ".join(others) if others else "a number"), desc]
+            continue
+        out.append("    %-27s %-9s %s" % (label, value, " · ".join(others) if others else "a number"))
         out += textwrap.wrap(desc, max(40, width - 6), initial_indent="      ", subsequent_indent="      ")
     cmd = "tally settings" if cli else "/tally:settings"
     out += ["", hints("%s <key> <value> changes one, e.g. %s log.prompts preview" % (cmd, cmd),
@@ -435,7 +473,18 @@ def render_projects(rows: list, cli: bool = False) -> str:
     tracked = [r for r in rows if r["sessions_read"]]
     rest = [r for r in rows if not r["sessions_read"]]
     out = [head("Projects · last 30 days")]
-    if tracked:
+    if APP:
+        if tracked:
+            out += ["", "Tracked"] + ["%s · %s · %s · %s tokens · %s · %s · %s · last active %s" % (
+                r["project"], r["mode"], _n(r["sessions"], "session"), tokens(r["last_30d"]["total"]),
+                money(r["last_30d"]), _n(r["tasks"], "task"), _n(r["open_todos"], "todo"), _ago(r["last_activity"]))
+                for r in tracked]
+        if rest:
+            out += ["", "Not tracked (sessions only counted, not read)"] + [
+                "%s%s · %s · last active %s · %s of transcripts" % (
+                    r["project"], "" if r["mode"] == "ask" else " · " + r["mode"], _n(r["not_tracked"]["sessions"], "session"),
+                    _ago(r["last_activity"]), _size(r["not_tracked"]["size"])) for r in rest]
+    if tracked and not APP:
         out += ["", "  %-26s %-6s %8s %9s %9s %5s %5s  %s" % ("tracked", "mode", "sessions", "tokens", "cost", "tasks",
                                                              "todos", "last active")]
         for r in tracked:
@@ -443,7 +492,7 @@ def render_projects(rows: list, cli: bool = False) -> str:
             out.append("  %-26s %-6s %8d %9s %9s %5d %5d  %s" % (
                 _cut(r["project"], 26), r["mode"], r["sessions"], tokens(u["total"]), money(u), r["tasks"],
                 r["open_todos"], _ago(r["last_activity"])))
-    if rest:
+    if rest and not APP:
         out += ["", "  %-26s %-6s %8s   %s" % ("not tracked", "mode", "sessions", "only counted, not read; last active")]
         for r in rest:
             n = r["not_tracked"]
@@ -499,8 +548,12 @@ def render_project(st: dict, cli: bool = False, series: int = 14) -> str:
     if tk["recent"]:
         out.append("")
         for x in tk["recent"][:5]:
-            out.append("    #%-4d %-40s %9s %8s %s" % (x["id"], _cut(x["name"], 40), tokens(x["total"]),
-                                                    money(x), "● active" if x["status"] == "active" else ""))
+            if APP:
+                out.append("#%d %s · %s tokens · %s%s" % (x["id"], _cut(x["name"], 80), tokens(x["total"]), money(x),
+                                                          " · ● active" if x["status"] == "active" else ""))
+            else:
+                out.append("    #%-4d %-40s %9s %8s %s" % (x["id"], _cut(x["name"], 40), tokens(x["total"]),
+                                                        money(x), "● active" if x["status"] == "active" else ""))
     out.append("")
     if read:
         sessions = "tally sessions -p %s" % name if cli else "/tally:sessions here"
@@ -521,7 +574,10 @@ def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
     span = ("last %g day%s" % (ov["days"], "" if ov["days"] == 1 else "s")) if ov["days"] else "all time"
     out = [head("Sessions, %s: %d · %s tokens · %s · %d prompts · active %s" % (
         span, t["sessions"], tokens(t["total"]), money(t), t["prompts"], duration(t["active_s"])))]
-    if len(ov["by_agent"]) > 1:
+    if len(ov["by_agent"]) > 1 and APP:
+        out += ["%s: %s · %s tokens · %s" % (AGENT_NAMES.get(a["agent"], a["agent"]), _n(a["sessions"], "session"),
+                                            tokens(a["total"]), money(a)) for a in ov["by_agent"]]
+    elif len(ov["by_agent"]) > 1:
         out.append("  " + "   ".join("%s %d · %s · %s" % (AGENT_NAMES.get(a["agent"], a["agent"]), a["sessions"],
                                                          tokens(a["total"]), money(a)) for a in ov["by_agent"]))
     rows = ov["sessions"][:limit] if limit else ov["sessions"]
@@ -536,8 +592,9 @@ def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
             out.append(not_tracked)
         return "\n".join(out)
     out.append("")
-    out.append("  %-8s %-16s %-6s %-18s %8s %8s %5s %8s %9s  %-24s %s" % (
-        "id", "last activity", "agent", "project", "span", "active", "prm", "tokens", "cost", "models", "title / tasks"))
+    if not APP:
+        out.append("  %-8s %-16s %-6s %-18s %8s %8s %5s %8s %9s  %-24s %s" % (
+            "id", "last activity", "agent", "project", "span", "active", "prm", "tokens", "cost", "models", "title / tasks"))
     for s in rows:
         st = s["totals"]
         cost = dict(st, cost=st.get("cost_with_unlogged", st["cost"]))
@@ -547,6 +604,12 @@ def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
         label = s["title"] or ""
         if s["tasks"]:
             label = ("#" + " #".join(str(x["id"]) for x in s["tasks"]) + " " + label).strip()
+        if APP:
+            out.append("%s %s · %s · %s · %s · %s · %s tokens · %s · %s active%s" % (
+                s["session_id"][:8], _cut(label, 80) or "(untitled)", s["project"] or "-", s["agent"],
+                when(s["last_ts"]), _n(s["prompts"], "prompt"), tokens(st["total"]), money(cost),
+                duration(s["active_s"]), " · " + models if models else ""))
+            continue
         out.append("  %-8s %-16s %-6s %-18s %8s %8s %5d %8s %9s  %-24s %s" % (
             s["session_id"][:8], when(s["last_ts"]), s["agent"], _cut(s["project"] or "-", 18), duration(s["wall_s"]),
             duration(s["active_s"]), s["prompts"], tokens(st["total"]), money(cost), _cut(models, 24),

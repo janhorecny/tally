@@ -1101,7 +1101,7 @@ function cardMenu(id, anchor) {
   m.innerHTML = `<button type="button" data-act="open" role="menuitem">Open</button><div class="grp">Move to</div>${
     ["todo", "doing", "blocked", "done", "dropped"].filter(s => s !== t.status).map(s => `<button type="button" data-move="${s}" role="menuitem">${STATUS_LABEL[s]}</button>`).join("")}
     <div class="grp">More</div>${FINISHED.includes(t.status) ? "" : `<button type="button" data-act="copy" role="menuitem">Copy /tally:do ${id}</button>`}<button type="button" class="danger" data-act="delete" role="menuitem">Delete…</button>`;
-  document.body.appendChild(m);
+  $(".viz-root").appendChild(m);                    // inside .viz-root: the theme colours are defined there
   const r = anchor.getBoundingClientRect();
   m.style.top = Math.min(innerHeight - m.offsetHeight - 8, r.bottom + 4) + "px";
   m.style.left = Math.max(8, Math.min(innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth)) + "px";

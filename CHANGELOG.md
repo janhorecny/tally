@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.5 (2026-10-13)
+
+- **Plain output in the Claude app:** the app shows command output in a proportional font and collapses runs of spaces, so aligned columns can't work there (0.11.4 only padded them with em spaces). In the app every table row is now one line (`#2 Fix login · active · 1.2M tokens · $0.40`), the help reads `/tally:start [name] – start a task here`, labels get a colon (`time: 3m wall`), and the agent tree keeps its nesting. The terminal output is unchanged.
+- **Dashboard: the ⋯ menu on a board card had no background** in the dark theme: it was attached outside the element that holds the theme colours, so it looked like a faint shadow and its items were hard to see and hit.
+
 ## 0.11.4 (2026-10-13)
 
 - **Readable in the Claude app:** the app's Code tab shows command output in a proportional font and collapses runs of spaces, so columns and indentation vanished. In the app (`CLAUDE_CODE_ENTRYPOINT=claude-desktop`) Tally now keeps them with em spaces; the terminal output is unchanged.
