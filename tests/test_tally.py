@@ -2147,6 +2147,23 @@ class Updates(unittest.TestCase):
         os.environ["TALLY_NO_UPDATE_CHECK"] = "1"
         self.assertFalse(updates.enabled())
 
+    def test_where_updates_come_from(self):
+        from tally import updates
+        clone = self.env.tmp / "clone"
+        (clone / ".git").mkdir(parents=True)
+        (clone / "plugin" / "bin").mkdir(parents=True)
+        (clone / "plugin" / "bin" / "tally").write_text("")
+        known = self.env.tmp / "claude" / "plugins" / "known_marketplaces.json"
+        known.parent.mkdir(parents=True, exist_ok=True)
+        with unittest.mock.patch("tally.installer.REPO", self.env.tmp / "cache" / "tally"):     # Claude Code's copy
+            known.write_text(json.dumps({"tally": {"source": {"source": "directory", "path": str(clone)},
+                                                   "installLocation": str(clone)}}))
+            self.assertEqual((updates.source_root(), updates.update_command()), (clone, "tally update"))
+            known.write_text(json.dumps({"tally": {"source": {"source": "github", "repo": "janhorecny/tally"},
+                                                   "installLocation": str(clone)}}))      # its own clone
+            self.assertIsNone(updates.source_root())
+            self.assertTrue(updates.update_command().startswith("claude plugin marketplace update tally"))
+
     def test_changelog_between_versions(self):
         from tally import updates
         root = self.env.tmp / "r"

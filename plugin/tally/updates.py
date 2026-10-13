@@ -188,7 +188,10 @@ def source_root() -> Optional[Path]:
     from .installer import REPO
     if _is_checkout(REPO):
         return REPO
-    loc = _marketplace().get("installLocation") or (_marketplace().get("source") or {}).get("path")
+    src = _marketplace().get("source") or {}
+    if src.get("source") != "directory":       # GitHub: Claude Code's own clone, updated by Claude Code
+        return None
+    loc = src.get("path") or _marketplace().get("installLocation")
     p = Path(loc).expanduser() if loc else None
     return p if _is_checkout(p) else None
 

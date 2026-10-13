@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 (2026-10-13)
+
+- **Installed from Claude Code's plugin manager:** `tally update` and the new-version notice no longer point at Claude Code's own clone of the marketplace; they say `claude plugin marketplace update tally && claude plugin update tally@tally`, and `tally update` runs exactly that.
+
 ## 0.9.0 (2026-10-13)
 
 The repository is public.
@@ -11,7 +15,7 @@ The repository is public.
 - **New versions are announced:** once a day a background process fetches the version of the plugin manifest on GitHub (nothing about you is sent). A newer one is mentioned in the session start message of every agent and below CLI commands, each at most once a day, and as a ⬆ chip in the dashboard header that copies `tally update`. `tally update --check` checks now; `tally doctor` shows the result and where Tally is installed.
 - **`updates.check`:** on by default; `tally setup` asks about it. `TALLY_NO_UPDATE_CHECK=1` turns it off too.
 - **Claude Code plugin manager:** `/plugin marketplace add janhorecny/tally` and `/plugin install tally@tally` install the Claude Code part without the installer.
-- **Uninstall** of a one-line install also deletes `~/.local/share/tally`.
+- **Uninstall** of a one-line install also deletes `~/.local/share/tally`, and `uninstall.sh` stops only the dashboard on the configured port (`tally dashboard --stop`), not every process named like one.
 
 ### Development
 
