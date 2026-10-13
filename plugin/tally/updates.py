@@ -240,7 +240,7 @@ def update(say=print) -> int:
                 r = _run(["claude", "plugin", "update", "tally@tally"])
                 say(fmt.head("Claude Code plugin updated" if r.returncode == 0 else "Claude Code could not update it",
                              "✓" if r.returncode == 0 else "✗"))
-                say(fmt.hints("restart Claude Code or /reload-plugins"))
+                say(fmt.hints(installer_restart()))
                 return r.returncode
             say(fmt.head("Update it with: %s" % cmd))
             return 1
@@ -269,7 +269,7 @@ def update(say=print) -> int:
             say(fmt.head("Tally %s: installing it into the agents (Claude Code had %s)" % (new, had), "✓"))
             rc = _reinstall(root, say)
             _restart_dashboard(root, say)
-            say(fmt.hints("restart Claude Code or /reload-plugins"))
+            say(fmt.hints(installer_restart()))
             return rc
         say(fmt.head("Tally %s is up to date" % new, "✓"))
         return 0
@@ -285,7 +285,7 @@ def update(say=print) -> int:
         if len(lines) > 30:
             say("    …")
     say(fmt.hints("full notes: %s/blob/main/CHANGELOG.md" % REPO_URL,
-                  "restart Claude Code or /reload-plugins"))
+                  installer_restart()))
     return rc
 
 
@@ -297,6 +297,11 @@ def _claude_plugin_version() -> Optional[str]:
         return entries[0].get("version") if entries else None
     except (OSError, ValueError, AttributeError, IndexError):
         return None
+
+
+def installer_restart() -> str:
+    from .installer import RESTART
+    return RESTART
 
 
 def _reinstall(root: Path, say) -> int:

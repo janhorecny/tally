@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.3 (2026-10-13)
+
+- **After an update, restart Claude Code:** `tally update`, the installer and the docs said "restart Claude Code or /reload-plugins". `/reload-plugins` keeps the hooks of the old version next to the new ones, so both run; they now ask for a full restart (`claude --continue` resumes the conversation). `/reload-plugins` stays fine for a first install.
+
 ## 0.11.2 (2026-10-13)
 
 - **Tally says when it runs twice:** if a prompt's hook was also handled by an older Tally version in the same session (its hooks stay registered after `/reload-plugins` until Claude Code restarts), the answer ends with `⚠ Tally ran twice … Restart Claude Code fully`. Two hooks of the same version stay quiet: they already run each command once.

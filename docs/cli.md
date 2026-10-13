@@ -614,7 +614,7 @@ tally update [--check]
 | (none) | Pull the latest version into the git checkout Tally runs from (fast-forward only), install it into every agent Tally is in, restart a running dashboard, and list what changed since your version. A checkout that is already current is installed into the agents when Claude Code still runs an older copy. |
 | `--check` | Only say whether a new version is out (asks GitHub now). |
 
-A checkout with local changes is left alone. Installed from Claude Code's plugin manager, it runs `claude plugin marketplace update tally` and `claude plugin update tally@tally` instead. Afterwards run `/reload-plugins` in Claude Code, `/reload` in pi, and restart Codex.
+A checkout with local changes is left alone. Installed from Claude Code's plugin manager, it runs `claude plugin marketplace update tally` and `claude plugin update tally@tally` instead. Afterwards restart Claude Code fully (`claude --continue` resumes the conversation; `/reload-plugins` would keep the old version's hooks too), run `/reload` in pi, and restart Codex.
 
 Tally also checks on its own once a day (setting `updates.check`) and mentions a new version at session start, below CLI commands and in the dashboard.
 

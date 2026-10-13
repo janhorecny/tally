@@ -155,7 +155,7 @@ tally update
 
 It pulls the latest version, installs it into every agent Tally is in, restarts a running dashboard and lists what changed. Then:
 
-- Claude Code: run `/reload-plugins`, or restart it;
+- Claude Code: restart it fully (`claude --continue` resumes the conversation). `/reload-plugins` keeps the hooks of the old version next to the new ones until a restart, and both would run;
 - pi: run `/reload`;
 - Codex: restart it.
 

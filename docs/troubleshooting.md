@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.11.2 · doctor · python 3.9.6
+▍Tally 0.11.3 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -130,7 +130,7 @@ Two todos from one `/tally:todo`, or two answers to one command, mean the agent 
 tally update
 ```
 
-Then run `/reload-plugins` in Claude Code (or restart it), `/reload` in pi, and restart Codex. New `/tally:*` commands appear only after this.
+Then restart Claude Code fully (`claude --continue` resumes the conversation), run `/reload` in pi, and restart Codex. New `/tally:*` commands appear only after this. After an update, `/reload-plugins` is not enough: the session keeps the old version's hooks next to the new ones (see [A command ran twice](#a-command-ran-twice)).
 
 - **"has local changes":** `tally update` only fast-forwards a clean checkout. Commit or stash your changes in the folder it names, or `git pull` there yourself and run `./install.sh`.
 - **"not a git checkout":** install again with the one-line installer; your history is kept.

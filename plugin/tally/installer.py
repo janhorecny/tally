@@ -25,6 +25,7 @@ BIN = PLUGIN / "bin" / "tally"
 AGENTS = ("claude", "codex", "pi")
 NAMES = {"claude": "Claude Code", "codex": "Codex", "pi": "pi"}
 CODEX_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SubagentStop", "PreCompact", "SessionEnd")
+RESTART = "restart Claude Code fully (claude --continue resumes); /reload-plugins would keep the old hooks too"
 
 
 def codex_home() -> Path:
@@ -110,6 +111,8 @@ def install_claude() -> str:
             raise RuntimeError((r.stdout + r.stderr).strip()[-400:])
     if "tally@tally" in _run(["claude", "plugin", "list"]).stdout:
         _run(["claude", "plugin", "update", "tally@tally"])
+        # a running session keeps the hooks it started with, next to the new ones, until it restarts
+        return "plugin tally@tally updated (%s); commands /tally:start …" % RESTART
     else:
         r = _run(["claude", "plugin", "install", "tally@tally", "--scope", "user"])
         if r.returncode != 0:
