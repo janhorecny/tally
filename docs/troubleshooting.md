@@ -8,10 +8,11 @@ Start with `tally doctor`. It shows:
 - the sessions recorded per agent;
 - whether Claude Code's transcripts are found;
 - for each agent, whether it is installed, found but not installed, or not found;
+- whether `tally setup` has run, and what Claude Code's status line shows;
 - whether any errors were logged.
 
 ```
-tally 0.4.1 · python 3.9.6
+▍Tally 0.5.0 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -21,6 +22,8 @@ transcripts   /Users/me/.claude/projects (ok)
 Claude Code   installed
 Codex         found, not installed (./install.sh --agents codex)
 pi            installed
+setup         done 2026-10-13 09:12
+status line   Tally
 errors        none
 ```
 
@@ -65,7 +68,7 @@ Nothing to do. The task follows the new session ID automatically, because it is 
 
 ## I don't see the todo reminder or the new-project question
 
-- **Headless mode:** both are `systemMessage`s on session start. They appear in interactive Claude Code, but `claude -p` does not print them. The status line shows the same information (`📋 3 todos`, or `Tally: new project · /tally:project …`).
+- **Headless mode:** both are `systemMessage`s on session start. They appear in interactive Claude Code, but `claude -p` does not print them. The status line shows the same information (`📋 3 todos`, or `▍Tally · new project: /tally:project …`). The welcome after installing waits for the first interactive session.
 - **Reminders switched off:** check that `todos.reminder` is `on` (`/tally:settings`).
 - **Project switched off:** check the project is not set to `off` (`/tally:projects`).
 
@@ -90,6 +93,10 @@ The `tally:todos` skill is loaded on demand. Ask explicitly ("import the plan in
 - **The first run** over a period reads every transcript of it into the sessions index; 30 days of heavy use took about 20 s. Later runs read only new data and take well under a second.
 - **Sessions differ from tasks:** a task counts only its own window, so it is usually smaller than the session it ran in.
 - **Rebuilding:** the index is a cache. Delete `~/.claude/tally/sessions.db` and it is rebuilt on the next run.
+
+## Colours or odd characters in the terminal
+
+The CLI colours its output only on a terminal, never when piped. `NO_COLOR=1` turns colours off. The logo uses box-drawing characters on a UTF-8 terminal and plain ASCII otherwise.
 
 ## Errors
 

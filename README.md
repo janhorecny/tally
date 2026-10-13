@@ -25,7 +25,7 @@ When you end it, you get totals plus subtotals per agent, subagent, workflow, ag
 ```
 
 ```
-Task #3 · Fix login redirect loop   [■ ended]
+▍Tally · ■ Task #3 ended: Fix login redirect loop
   prompt   The login page loops back to /login after OAuth callback, find out why and fix it
   time     44m 10s wall · 31m 02s active (12 turns) · 2026-10-12 14:03 → 14:47
   tokens   4.21M total · in 12.3k · out 85.1k · cache write 410.2k · cache read 3.70M
@@ -50,7 +50,7 @@ Task #3 · Fix login redirect loop   [■ ended]
 - **Todo list.** Quick capture with `@project`, priority and due date. `/tally:take` and `/tally:do` pick a todo up and measure what it costs, and reminders appear at session start. Plans from superpowers and similar tools are imported, and a skill lets Claude keep the board current.
 - **Projects.** The first time you open a repository, Tally asks whether to track it. You then get overall statistics per project (7 and 30 days, a daily series, models, tasks, todos).
 - **Accurate.** Tokens come from Claude Code's own transcripts. Its internal calls that never reach a transcript are reconciled from its session cost record. The result matches Claude Code's own cost to within 2% on 40 of 40 validated sessions.
-- **Your choice of detail.** `log.depth` is `summary`, `prompts` or `calls`. `log.prompts` is `full`, `preview` or `off`, for privacy.
+- **Your choice of detail.** `log.depth` is `summary`, `prompts` or `calls`. `log.prompts` is `full`, `preview` or `off`, for privacy. The first install asks about these in a short setup; `tally setup` asks again.
 - **Robust and fast.** It survives `/clear`, multiple sessions and parallel terminals, and takes about 33 ms per hook. Reports are frozen when a task ends.
 - **All sessions at a glance.** `/tally:sessions`, `tally sessions` and the dashboard's Sessions tab list every session of every agent, with or without a task: agent, project, time, prompts, tokens, cost and models. It reads the agents' own transcripts into a separate index, so it also covers history from before Tally was installed.
 - **Dashboard.** A local dashboard with tasks, a todo board, projects, sessions and settings. There is also a status line segment, a CLI, and CSV/JSON export.
@@ -65,7 +65,19 @@ git clone https://github.com/janhorecny/tally.git && cd tally
 ./install.sh
 ```
 
-`install.sh` detects **Claude Code, Codex and pi** and asks which ones to install into. To skip the questions, use `./install.sh --agents claude,pi` or `--yes` for every detected agent. Then:
+`install.sh` detects **Claude Code, Codex and pi** and asks which ones to install into. The first time, it also asks a few setup questions; Enter keeps the default:
+
+```
+▍Tally · Setup · Enter keeps the value in [brackets]
+  Store prompt text?          full / preview / off       [full]
+  Logging detail?             summary / prompts / calls  [prompts]
+  New projects:               ask / track / tasks        [ask]
+  Start a task automatically with each session? y/N
+  Show open todos at session start? Y/n
+  Add Tally to Claude Code's status line? Y/n
+```
+
+`tally setup` asks them again at any time. To skip all questions, use `./install.sh --agents claude,pi` (agents only) or `--yes` (every detected agent, default settings). Then:
 
 | agent | what gets installed | after installing |
 |---|---|---|
@@ -73,7 +85,7 @@ git clone https://github.com/janhorecny/tally.git && cd tally
 | Codex | hooks merged into `~/.codex/hooks.json`, skill in `~/.agents/skills` | approve the hooks once in Codex: `/hooks` |
 | pi | extension `~/.pi/agent/extensions/tally.ts`, skill | restart pi, or run `/reload` |
 
-It also links the CLI to `~/.local/bin/tally`. Run it again to update. `./uninstall.sh` removes Tally (or `--agents codex` from one agent only) and keeps your history; add `--purge` to delete that too. `tally doctor` shows what is installed where.
+It also links the CLI to `~/.local/bin/tally`. Run it again to update; an update asks nothing. The first session in each newly installed agent shows a short welcome. `./uninstall.sh` removes Tally (or `--agents codex` from one agent only) and keeps your history; add `--purge` to delete that too. `tally doctor` shows what is installed where.
 
 ## Commands
 
@@ -101,7 +113,7 @@ Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in
 | `/tally:settings [key value]` | `log.depth`, `log.prompts`, `todos.reminder`, `auto_start` … |
 | `/tally:dashboard` · `/tally:help` | Local dashboard (http://127.0.0.1:8765) · help. |
 
-The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | export | dashboard | statusline | doctor`. See the [CLI reference](docs/cli.md).
+The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | setup | export | dashboard | statusline | doctor`. `tally` alone shows the most used ones. See the [CLI reference](docs/cli.md).
 
 ## Documentation
 
@@ -120,7 +132,7 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # 44 end-to-end tests (Claude Code, Codex and pi transcripts)
+python3 -m unittest discover -s tests -v       # 60 end-to-end tests (Claude Code, Codex and pi transcripts)
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg

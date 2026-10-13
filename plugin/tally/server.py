@@ -246,7 +246,8 @@ def _todos(conn, project, status) -> list:
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False) -> None:
     httpd = ThreadingHTTPServer((host, port), Handler)
     url = "http://%s:%d/" % (host, port)
-    print("tally dashboard on %s (Ctrl+C to stop)" % url, flush=True)
+    from . import fmt
+    print("%s · dashboard on %s (Ctrl+C to stop)" % (fmt.BRAND, url), flush=True)
     if open_browser:
         webbrowser.open(url)
     try:

@@ -14,6 +14,8 @@ SCHEMA = {
     "todos.reminder": ((True, False), "Show the project's open todos when a session starts"),
     "todos.reminder_limit": (int, "How many todos the reminder lists"),
     "auto_start": (("off", "session"), "Start a task automatically with the first prompt of every session"),
+    "projects.default_mode": (("ask", "track", "tasks"),
+                              "New projects: ask how to track them, or track every session, or count only tasks"),
     "dashboard_port": (int, "Port of the local dashboard"),
 }
 
@@ -75,6 +77,13 @@ def set_value(key: str, value: Any) -> Any:
     node[parts[-1]] = value
     paths.save_config(raw)
     return value
+
+
+def show(value: Any) -> str:
+    """A value as typed by the user: on/off for switches."""
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return str(value)
 
 
 def describe() -> List[Tuple[str, Any, str, Any]]:

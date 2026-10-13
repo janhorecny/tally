@@ -104,11 +104,14 @@ tally todo import docs/plans/2026-10-12-export.md
 The first time an agent opens in a git repository Tally does not know yet, it asks (0 tokens):
 
 ```
-👋 Tally: first time in project website. Track it?
+▍Tally · 👋 First time in project website. Track it?
   /tally:project track   count every session here (overall project stats)
   /tally:project tasks   only tasks you start (/tally:start, /tally:take)
   /tally:project off     ignore this project, don't ask again
+  → tally setup sets a default for new projects
 ```
+
+To skip the question, set a default for new projects with `tally setup` or `/tally:settings projects.default_mode track` (or `tasks`). A new project then gets that mode, with a one-line notice instead of the question.
 
 | mode | what is counted |
 |---|---|
@@ -139,7 +142,7 @@ tally session <id or id prefix> # the full report of one session
 ```
 
 ```
-Sessions, last 7 days: 42 · 1.12B tokens · $512.40 · 318 prompts · active 21h 05m
+▍Tally · Sessions, last 7 days: 42 · 1.12B tokens · $512.40 · 318 prompts · active 21h 05m
   Claude Code 37 · 1.09B · $498.10   Codex 3 · 24.1M · $13.90   pi 2 · 310.2k · $0.40
 
   id       last activity    agent  project      span   active  prm   tokens      cost  models                   title / tasks
@@ -180,7 +183,19 @@ The same appears in the dashboard's task detail: summary tiles, a per-prompt tab
 /tally:settings todos.reminder off
 ```
 
-The dashboard's *Settings* tab offers the same controls. See [configuration](configuration.md) for every key.
+The dashboard's *Settings* tab offers the same controls, and `tally setup` asks about the main ones in a terminal. See [configuration](configuration.md) for every key.
+
+## Messages
+
+Every answer from Tally has the same shape, in every agent and in the terminal:
+
+```
+▍Tally · ▶ Task #3 started: Fix login redirect loop      ← what happened
+  Counting tokens and time for this session, …           ← details
+  → /tally:status live totals · /tally:end finish        ← what you can do next
+```
+
+Errors start with `▍Tally · ✗`. In a terminal the CLI adds colours; set `NO_COLOR=1` to turn them off.
 
 ## Agents
 
@@ -214,7 +229,7 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 ## Reading the report
 
 ```
-Task #3 · Fix login redirect loop   [■ ended]
+▍Tally · Task #3 · Fix login redirect loop   [■ ended]
   prompt   The login page loops back to /login after OAuth callback, find out why and fix it
   time     44m 10s wall · 31m 02s active (12 turns) · 2026-10-12 14:03 → 14:47
   tokens   4.21M total · in 12.3k · out 85.1k · cache write 410.2k · cache read 3.70M
@@ -270,14 +285,17 @@ The dashboard keeps running in the background after you close the page. To stop 
 
 ## Status line
 
-`tally statusline` reads Claude Code's status line JSON on stdin. While a task is running it prints one line; otherwise it prints nothing:
+`tally statusline` reads Claude Code's status line JSON on stdin and prints one line:
 
 ```
-▶ #3 Fix login redirect loop · 4.21M tok · $3.12 · 44m 10s
+▶ #3 Fix login redirect loop · 4.21M tok · $3.12 · 44m 10s · 📋 2
 ```
 
+Without an active task it shows the project's open todos (`📋 3 todos · 1 overdue`), a hint for a project that is not set up yet, or nothing.
+
+- **Set up for you:** `tally setup` (and the first install) offers to add it when Claude Code has no status line yet. Uninstalling removes it again.
 - **With ccstatusline:** add a *Custom Command* widget with the command `tally statusline`.
-- **As the only status line:** put this in `~/.claude/settings.json`:
+- **As the only status line, by hand:** put this in `~/.claude/settings.json`:
 
 ```json
 "statusLine": {"type": "command", "command": "tally statusline", "refreshInterval": 10}

@@ -1,9 +1,100 @@
-"""Plain-text rendering of reports for the terminal / blocked-hook messages."""
+"""Plain-text rendering of reports for the terminal / blocked-hook messages.
 
+Every message has the same shape, whichever agent or CLI shows it:
+
+  ▍Tally · ▶ Task #3 started: Fix login             head(): brand, mark, what happened
+    Counting this session, its subagents …          body, indented two spaces
+    → /tally:status live totals · /tally:end finish hints(): what to do next
+
+paint() colours that shape for a terminal; agents get it as plain text.
+"""
+
+import os
+import re
 import time
 from typing import List, Optional
 
 AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex", "pi": "pi"}
+
+BRAND = "▍Tally"
+STATUS_MARKS = {"todo": "○", "doing": "▶", "blocked": "⏸", "done": "✓", "dropped": "✗"}
+
+
+def head(text: str, mark: str = "") -> str:
+    """First line of every message: '▍Tally · ✓ text'."""
+    return "%s · %s%s" % (BRAND, mark + " " if mark else "", text)
+
+
+def hints(*items: str) -> str:
+    """Last line of a message: the next commands, '  → /tally:status live totals · /tally:end finish'."""
+    return "  → " + " · ".join(i for i in items if i)
+
+
+def error(text: str, *hint_items: str) -> str:
+    out = [head(text, "✗")]
+    if hint_items:
+        out.append(hints(*hint_items))
+    return "\n".join(out)
+
+
+def usage(syntax: str, what: str = "") -> str:
+    return error("Usage: " + syntax, what) if what else error("Usage: " + syntax)
+
+
+# ------------------------------------------------------------------ terminal colours
+
+_ACCENT = "\033[1;38;5;202m"        # the logo's orange
+_BOLD, _DIM, _RED, _RESET = "\033[1m", "\033[2m", "\033[31m", "\033[0m"
+_HINT_RE = re.compile(r"^  → ")
+
+LOGO = (" ┃ ┃ ┃ ┃╱", " ┃ ┃ ┃╱┃ ", " ┃ ┃╱┃ ┃ ", " ┃╱┃ ┃ ┃ ", "╱┃ ┃ ┃ ┃ ")
+LOGO_ASCII = (" | | | |/", " | | |/| ", " | |/| | ", " |/| | | ", "/| | | | ")
+
+
+def use_color(stream) -> bool:
+    """Colours only on a terminal, and never with NO_COLOR (https://no-color.org) or TERM=dumb."""
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        return False
+    try:
+        return stream.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def paint(text: str) -> str:
+    """Brand in orange, the head line bold (red for errors), hint lines dim."""
+    out = []
+    for line in text.split("\n"):
+        if line.startswith(BRAND):
+            rest = line[len(BRAND):]
+            out.append(_ACCENT + BRAND + _RESET + _BOLD + (_RED if rest.startswith(" · ✗") else "") + rest + _RESET)
+        elif _HINT_RE.match(line):
+            out.append(_DIM + line + _RESET)
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def logo(lines: List[str], color: bool = False, ascii_only: bool = False) -> str:
+    """The tally mark (four strokes, the fifth across) with text beside it, centred vertically."""
+    art = LOGO_ASCII if ascii_only else LOGO
+    pad = max(0, (len(art) - len(lines)) // 2)
+    text = [""] * pad + list(lines) + [""] * len(art)
+    out = []
+    for i, row in enumerate(art):
+        if color:
+            slash = "/" if ascii_only else "╱"
+            row = row.replace(slash, _ACCENT + slash + _RESET)
+        side = text[i]
+        if color and i == pad and side:
+            side = _BOLD + side + _RESET
+        out.append(("%s    %s" % (row, side)).rstrip())
+    return "\n".join(out)
+
+
+def can_draw(stream) -> bool:
+    """Box-drawing characters need a UTF-8 terminal; otherwise the ASCII logo is used."""
+    return "utf" in (getattr(stream, "encoding", None) or "").lower()
 
 
 def tokens(n: Optional[int]) -> str:
@@ -116,17 +207,20 @@ def render_tree(tree: List[dict], max_children: int = 8, max_depth: int = 4) -> 
     return lines
 
 
-def render_report(rep: dict, detail: bool = True) -> str:
+def render_report(rep: dict, detail: bool = True, title: Optional[str] = None, mark: str = "") -> str:
+    """title/mark replace the default head line ('Task #3 · name   [● active]')."""
     t = rep["task"]
     tm = rep["time"]
     tot = rep["totals"]
     out = []
     sess = rep.get("session")
-    if sess:
-        out.append("Session %s · %s   [%s]" % (sess["session_id"], _cut(sess.get("title") or "", 60),
-                                              AGENT_NAMES.get(sess["agent"], sess["agent"])))
+    if title is not None:
+        out.append(head(title, mark))
+    elif sess:
+        out.append(head("Session %s · %s   [%s]" % (sess["session_id"], _cut(sess.get("title") or "", 60),
+                                                   AGENT_NAMES.get(sess["agent"], sess["agent"]))))
     else:
-        out.append("Task #%d · %s   [%s]" % (t["id"], _cut(t["name"], 70), status_mark(t["status"])))
+        out.append(head("Task #%d · %s   [%s]" % (t["id"], _cut(t["name"], 70), status_mark(t["status"]))))
     where = []
     if t.get("project"):
         where.append("project " + t["project"])
@@ -179,10 +273,12 @@ def render_report(rep: dict, detail: bool = True) -> str:
 
 def render_list(rows: List[dict]) -> str:
     if not rows:
-        return "No tasks yet. Start one with /tally:start <name> or /tally:new <prompt>."
-    out = ["%4s  %-8s %-16s %9s %9s %9s %8s  %s" % ("#", "status", "started", "wall", "active", "tokens", "cost", "name")]
+        return "\n".join([head("No tasks yet"), hints("/tally:start <name> start one", "/tally:new <prompt>")])
+    out = [head("Tasks (%d)" % len(rows)), "",
+           "  %4s  %-8s %-16s %9s %9s %9s %8s  %s" % ("#", "status", "started", "wall", "active", "tokens", "cost",
+                                                     "name")]
     for r in rows:
-        out.append("%4d  %-8s %-16s %9s %9s %9s %8s  %s" % (
+        out.append("  %4d  %-8s %-16s %9s %9s %9s %8s  %s" % (
             r["id"], "active" if r["status"] == "active" else "ended", when(r["started_at"]),
             duration(r["wall_s"]), duration(r["active_s"]), tokens(r["total"]), money(r),
             _cut(r["name"], 48)))
@@ -245,9 +341,10 @@ def render_todos(conn, rows: list, project: Optional[str], show_project: bool = 
     from . import todos
     where = ("project " + project) if project else "all projects"
     if not rows:
-        return "No open todos in %s. Add one: /tally:todo <text> [@project] [!!] [due:fri]" % where
+        return "\n".join([head("No open todos in %s" % where, "📋"),
+                          hints("/tally:todo <text> [@project] [!!] [due:fri] add one")])
     now = time.time()
-    out = ["Todos · %s (%d)" % (where, len(rows))]
+    out = [head("Todos · %s (%d)" % (where, len(rows)), "📋")]
 
     def emit(r, depth):
         line = "  " + "   " * depth + todos.line_for(r, now, show_project=show_project and depth == 0)
@@ -262,16 +359,16 @@ def render_todos(conn, rows: list, project: Optional[str], show_project: bool = 
     for r in rows:
         emit(r, 0)
     out.append("")
-    out.append("  /tally:take <id> start measuring · /tally:do <id> let the agent work on it · /tally:done")
+    out.append(hints("/tally:take <id> start measuring", "/tally:do <id> let the agent work on it", "/tally:done"))
     return "\n".join(out)
 
 
 def render_project(st: dict) -> str:
     from .projects import MODE_HELP
     t, w, m = st["totals"], st["last_7d"], st["last_30d"]
-    out = ["Project %s   [%s: %s]" % (st["project"], st["mode"], MODE_HELP.get(st["mode"], ""))]
+    out = [head("Project %s   [%s: %s]" % (st["project"], st["mode"], MODE_HELP.get(st["mode"], "")))]
     if st["mode"] == "ask":
-        out.append("  not set up yet: /tally:project track | tasks | off")
+        out.append(hints("/tally:project track | tasks | off  set it up"))
     out.append("  all time %s tokens · %s · %d API calls · %d sessions" % (
         tokens(t["total"]), money(t), t["calls"], st["sessions"]))
     out.append("  last 7d  %s tokens · %s      last 30d %s tokens · %s" % (
@@ -308,8 +405,8 @@ def _short_model(m: str) -> str:
 def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
     t = ov["totals"]
     span = ("last %g day%s" % (ov["days"], "" if ov["days"] == 1 else "s")) if ov["days"] else "all time"
-    out = ["Sessions, %s: %d · %s tokens · %s · %d prompts · active %s" % (
-        span, t["sessions"], tokens(t["total"]), money(t), t["prompts"], duration(t["active_s"]))]
+    out = [head("Sessions, %s: %d · %s tokens · %s · %d prompts · active %s" % (
+        span, t["sessions"], tokens(t["total"]), money(t), t["prompts"], duration(t["active_s"])))]
     if len(ov["by_agent"]) > 1:
         out.append("  " + "   ".join("%s %d · %s · %s" % (AGENT_NAMES.get(a["agent"], a["agent"]), a["sessions"],
                                                          tokens(a["total"]), money(a)) for a in ov["by_agent"]))
@@ -336,5 +433,5 @@ def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
     if limit and len(ov["sessions"]) > limit:
         out.append("  … %d more (--limit 0 for all)" % (len(ov["sessions"]) - limit))
     out.append("")
-    out.append("  tally session <id or id prefix> for the full report of one session")
+    out.append(hints("tally session <id or id prefix> for the full report of one session"))
     return "\n".join(out)

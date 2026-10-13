@@ -3,6 +3,7 @@
 `tally` is the command line interface to the same database the agents write to. `./install.sh` links it to `~/.local/bin/tally`; without that link, run `python3 plugin/bin/tally` from the repository.
 
 ```
+tally                       the logo and the most used commands
 tally <command> [options]
 tally <command> -h          help for one command
 tally --version
@@ -13,6 +14,8 @@ Inside an agent session, the [in-agent commands](commands.md) are usually quicke
 **Session ids:** commands that act on "this session" (`start`, `resume`, `todo take`, and the defaults of `end`, `status` and `stats`) take `--session <id>`. Inside Claude Code it defaults to `$CLAUDE_CODE_SESSION_ID`. Outside an agent, pass it explicitly.
 
 **JSON:** every command that prints a report or a list has `--json`, for scripts.
+
+**Output:** messages start with `▍Tally ·` and errors with `▍Tally · ✗`; errors go to standard error with exit code 1. On a terminal the output is coloured. It is plain when piped, and `NO_COLOR=1` turns colours off everywhere.
 
 ## Contents
 
@@ -51,6 +54,7 @@ Inside an agent session, the [in-agent commands](commands.md) are usually quicke
 
 | settings and setup | |
 |---|---|
+| [`setup`](#tally-setup) | The onboarding questions. |
 | [`settings`](#tally-settings) | Show or change settings (validated). |
 | [`config`](#tally-config) | Show or set raw configuration keys. |
 | [`dashboard`](#tally-dashboard) | Local web dashboard. |
@@ -392,6 +396,37 @@ tally session 3f9c2a1b
 
 ## Settings and setup
 
+### `tally setup`
+
+Ask the onboarding questions again. The installer asks them once, on the first install.
+
+```
+tally setup
+```
+
+```
+▍Tally · Setup · Enter keeps the value in [brackets]
+  Store prompt text?          full / preview / off       [full]
+  Logging detail?             summary / prompts / calls  [prompts]
+  New projects:               ask / track / tasks        [ask]
+  Start a task automatically with each session? y/N
+  Show open todos at session start? Y/n
+  Add Tally to Claude Code's status line? Y/n
+```
+
+| question | setting |
+|---|---|
+| Store prompt text? | `log.prompts` |
+| Logging detail? | `log.depth` |
+| New projects | `projects.default_mode` |
+| Start a task automatically … | `auto_start` (`session` or `off`) |
+| Show open todos … | `todos.reminder` |
+| Add Tally to Claude Code's status line? | `statusLine` in `~/.claude/settings.json` |
+
+- **Answers:** the value in brackets is the current one, so Enter keeps it. A unique prefix is enough (`pr` for `prompts`), and a wrong answer is asked again. Everything is saved at the end; Ctrl-D quits without saving.
+- **Status line:** asked only when Claude Code is installed and has no status line yet. An existing status line is never changed; setup shows how to add Tally to it instead. Before writing, `settings.json` is backed up as `settings.json.bak-tally`. `tally uninstall` removes the status line again if it is still the one setup added.
+- **Needs a terminal:** in scripts, use [`tally settings`](#tally-settings).
+
 ### `tally settings`
 
 Show or change settings. Values are validated. In-agent: [`/tally:settings`](commands.md#tallysettings).
@@ -452,12 +487,12 @@ It prints, depending on the state:
 
 - an active task: `▶ #3 Fix login redirect loop · 4.21M tok · $3.12 · 44m 10s · 📋 2`;
 - no task, open todos: `📋 3 todos · 1 overdue`;
-- a project that is not set up yet: `Tally: new project · /tally:project track|tasks|off`;
+- a project that is not set up yet: `▍Tally · new project: /tally:project track|tasks|off`;
 - otherwise nothing.
 
 ### `tally install`
 
-Install into agents. `./install.sh` runs this and also links the CLI to `~/.local/bin/tally`.
+Install into agents. `./install.sh` runs this and also links the CLI to `~/.local/bin/tally`. The first install also asks the [setup](#tally-setup) questions (not with `--yes` or without a terminal), and each newly installed agent shows a one-time welcome at its next session start.
 
 ```
 tally install [--agents claude,codex,pi | --all] [-y]
@@ -479,11 +514,11 @@ Remove from agents. History is kept.
 tally uninstall [--agents LIST]
 ```
 
-Without `--agents` it removes Tally from every agent it is installed in. `./uninstall.sh` also removes the CLI link and stops the dashboard; `./uninstall.sh --purge` also deletes the data directory.
+Without `--agents` it removes Tally from every agent it is installed in, and from Claude Code's status line if setup added it. `./uninstall.sh` also removes the CLI link and stops the dashboard; `./uninstall.sh --purge` also deletes the data directory.
 
 ### `tally doctor`
 
-Check the installation: version, data directory, tasks, the last hook that fired, sessions per agent, the transcripts directory, the state per agent, and logged errors. See [Troubleshooting](troubleshooting.md).
+Check the installation: version, data directory, tasks, the last hook that fired, sessions per agent, the transcripts directory, the state per agent, whether setup has run, Claude Code's status line, and logged errors. See [Troubleshooting](troubleshooting.md).
 
 ```
 tally doctor

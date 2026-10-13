@@ -11,11 +11,20 @@ import time
 from . import __version__, commands, db, fmt, paths, report, tasks
 
 
+def _out(text: str) -> None:
+    """Print a Tally message, coloured on a terminal."""
+    print(fmt.paint(text) if fmt.use_color(sys.stdout) else text)
+
+
+def _die(text: str, *hints: str):
+    msg = fmt.error(text, *hints)
+    sys.exit(fmt.paint(msg) if fmt.use_color(sys.stderr) else msg)
+
+
 def _session(args) -> str:
     sid = getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID")
     if not sid:
-        sys.exit("No session id: pass --session <id> (inside Claude Code it is taken from "
-                 "$CLAUDE_CODE_SESSION_ID).")
+        _die("No session id", "pass --session <id>; inside Claude Code it is $CLAUDE_CODE_SESSION_ID")
     return sid
 
 
@@ -23,7 +32,7 @@ def _task_or_active(conn, args):
     if getattr(args, "id", None):
         t = tasks.get(conn, args.id)
         if t is None:
-            sys.exit("Task #%s not found." % args.id)
+            _die("Task #%s not found" % args.id, "tally list shows your tasks")
         return t
     sid = getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID")
     t = tasks.active_for_session(conn, sid) if sid else None
@@ -32,8 +41,8 @@ def _task_or_active(conn, args):
         if len(act) == 1:
             return act[0]
         if not act:
-            sys.exit("No active task. Pass a task id.")
-        sys.exit("Several active tasks (%s). Pass a task id." % ", ".join("#%d" % a["id"] for a in act))
+            _die("No active task", "pass a task id; tally list shows your tasks")
+        _die("Several active tasks (%s)" % ", ".join("#%d" % a["id"] for a in act), "pass a task id")
     return t
 
 
@@ -60,24 +69,25 @@ def cmd_slash(args):
     if args.json:
         print(json.dumps({"text": res.text, "block": res.block, "context": res.context}))
     elif res.text:
-        print(res.text)
+        _out(res.text)
 
 
 def cmd_start(args):
     conn = db.connect()
     name = " ".join(args.name).strip()
     res = commands.run(conn, _session(args), "start", name, cwd=os.getcwd())
-    print(res.text)
+    _out(res.text)
 
 
 def cmd_end(args):
     conn = db.connect()
     t = _task_or_active(conn, args)
     if t["status"] != "active":
-        print("Task #%d already ended." % t["id"])
-    else:
-        tasks.end(conn, t["id"], note=args.note)
-    print(fmt.render_report(report.summary_for(conn, tasks.get(conn, t["id"]))))
+        _out("\n".join([fmt.render_report(report.summary_for(conn, t)), "",
+                        fmt.hints("already ended; tally resume %d --session <id> reopens it" % t["id"])]))
+        return
+    tasks.end(conn, t["id"], note=args.note)
+    _out(commands._ended_text(conn, tasks.get(conn, t["id"])))
 
 
 def cmd_status(args):
@@ -87,24 +97,25 @@ def cmd_status(args):
     if args.json:
         print(json.dumps(rep, indent=2))
     else:
-        print(fmt.render_report(rep, detail=not args.brief))
+        _out(fmt.render_report(rep, detail=not args.brief))
 
 
 def cmd_show(args):
     conn = db.connect()
     t = tasks.get(conn, args.id)
     if t is None:
-        sys.exit("Task #%s not found." % args.id)
+        _die("Task #%s not found" % args.id, "tally list shows your tasks")
     rep = report.summary_for(conn, t)
     if args.json:
         rep["prompts"] = [dict(r) for r in tasks.prompts(conn, t["id"])]
         print(json.dumps(rep, indent=2))
     else:
-        print(fmt.render_report(rep))
+        lines = [fmt.render_report(rep)]
         if args.prompts:
-            print("\n  prompts")
+            lines.append("\n  prompts")
             for r in tasks.prompts(conn, t["id"]):
-                print("    %s  %s" % (fmt.when(r["ts"], "%m-%d %H:%M"), fmt._cut(r["prompt"] or "", 100)))
+                lines.append("    %s  %s" % (fmt.when(r["ts"], "%m-%d %H:%M"), fmt._cut(r["prompt"] or "", 100)))
+        _out("\n".join(lines))
 
 
 def cmd_list(args):
@@ -113,31 +124,34 @@ def cmd_list(args):
     if args.json:
         print(json.dumps(rows, indent=2))
     else:
-        print(fmt.render_list(rows))
+        _out(fmt.render_list(rows))
 
 
 def cmd_resume(args):
     conn = db.connect()
     res = commands.run(conn, _session(args), "resume", str(args.id))
-    print(res.text)
+    _out(res.text)
 
 
 def cmd_rename(args):
     conn = db.connect()
+    if tasks.get(conn, args.id) is None:
+        _die("Task #%s not found" % args.id, "tally list shows your tasks")
     t = tasks.rename(conn, args.id, " ".join(args.name))
-    print("Task #%d renamed to: %s" % (t["id"], t["name"]))
+    _out(fmt.head("Task #%d renamed: %s" % (t["id"], t["name"]), "✓"))
 
 
 def cmd_delete(args):
     conn = db.connect()
+    t = tasks.get(conn, args.id)
+    if t is None:
+        _die("Task #%s not found" % args.id, "tally list shows your tasks")
     if not args.yes:
-        t = tasks.get(conn, args.id)
-        if t is None:
-            sys.exit("Task #%s not found." % args.id)
         ans = input("Delete task #%d '%s'? [y/N] " % (t["id"], t["name"]))
         if ans.strip().lower() not in ("y", "yes"):
             return
-    print("deleted" if tasks.delete(conn, args.id) else "not found")
+    tasks.delete(conn, args.id)
+    _out(fmt.head("Task #%d deleted: %s" % (t["id"], t["name"]), "✓"))
 
 
 def cmd_export(args):
@@ -177,11 +191,14 @@ def cmd_session(args):
     path = ref if ref.endswith(".jsonl") or os.sep in ref else None
     found = sessions.index_session(ref, path)
     if found is None:
-        sys.exit("Transcript for session %s not found (Claude Code, Codex and pi sessions are searched)." % ref)
+        _die("Session %s not found" % ref, "Claude Code, Codex and pi sessions are searched; tally sessions lists them")
     rep = sessions.detail(found["session_id"])
     if rep is None or rep.get("empty"):
-        sys.exit("Session %s has no API calls." % found["session_id"])
-    print(json.dumps(rep, indent=2) if args.json else fmt.render_report(rep))
+        _die("Session %s has no API calls" % found["session_id"])
+    if args.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        _out(fmt.render_report(rep))
 
 
 def cmd_sessions(args):
@@ -203,7 +220,7 @@ def cmd_sessions(args):
         ov["sessions"] = ov["sessions"][: args.limit] if args.limit else ov["sessions"]
         print(json.dumps(ov, indent=2))
     else:
-        print(fmt.render_sessions(ov, limit=args.limit))
+        _out(fmt.render_sessions(ov, limit=args.limit))
 
 
 def cmd_dashboard(args):
@@ -213,7 +230,7 @@ def cmd_dashboard(args):
     port = args.port or int(cfg.get("dashboard_port", 8765))
     if args.background:
         url, started = server.ensure_running(open_browser=args.open)
-        print("Dashboard %s at %s" % ("started" if started else "already running", url))
+        _out(fmt.head("Dashboard %s at %s" % ("started" if started else "already running", url), "✓"))
         return
     server.serve(host, port, open_browser=args.open)
 
@@ -224,15 +241,17 @@ def cmd_stats(args):
     if args.id:
         t = tasks.get(conn, args.id)
         if t is None:
-            sys.exit("Task #%s not found." % args.id)
+            _die("Task #%s not found" % args.id, "tally list shows your tasks")
     else:
         active = tasks.active_tasks(conn)
         t = _task_or_active_soft(conn, args) or (active[0] if len(active) == 1 else None) or _latest(conn)
         if t is None:
-            sys.exit("No tasks yet.")
+            _die("No tasks yet", "tally start <name> --session <id> starts one")
     rep = report.summary_for(conn, t)
-    print(json.dumps({k: rep.get(k) for k in ("task", "time", "totals", "stats", "prompts")}, indent=2)
-          if args.json else fmt.render_stats(rep))
+    if args.json:
+        print(json.dumps({k: rep.get(k) for k in ("task", "time", "totals", "stats", "prompts")}, indent=2))
+    else:
+        _out(fmt.render_stats(rep))
 
 
 def _latest(conn):
@@ -271,7 +290,10 @@ def cmd_todo(args):
                 spec["notes"] = args.notes
             t = todos.add(conn, spec["title"], project=spec["project"], priority=spec["priority"],
                           due_at=spec["due_at"], notes=spec["notes"], parent_id=args.parent, source=args.source)
-            print(json.dumps(_todo_json(conn, t)) if args.json else "#%d %s (%s)" % (t["id"], t["title"], t["project"]))
+            if args.json:
+                print(json.dumps(_todo_json(conn, t)))
+            else:
+                _out(fmt.head("Todo #%d added to %s: %s" % (t["id"], t["project"] or "(no project)", t["title"]), "＋"))
         elif a in ("list", "ls"):
             st = {"open": todos.OPEN, "done": ("done", "dropped"), "all": None}.get(args.status, (args.status,))
             project = None if args.all else (args.project or here)
@@ -279,43 +301,47 @@ def cmd_todo(args):
             if args.json:
                 print(json.dumps([_todo_json(conn, r, with_children=args.tree) for r in rows], indent=2))
             else:
-                print(fmt.render_todos(conn, rows, project, show_project=project is None, tree=args.tree))
+                _out(fmt.render_todos(conn, rows, project, show_project=project is None, tree=args.tree))
         elif a == "next":
             r = todos.next_todo(conn, project=None if args.all else (args.project or here))
-            if r is None:
-                print("{}" if args.json else "Nothing open.")
+            if args.json:
+                print(json.dumps(_todo_json(conn, r)) if r is not None else "{}")
+            elif r is None:
+                _out(fmt.head("Nothing open", "📋"))
             else:
-                print(json.dumps(_todo_json(conn, r)) if args.json else todos.line_for(r, show_project=True))
+                _out(fmt.head("Next: " + todos.line_for(r, show_project=True), "📋"))
         elif a == "show":
             t = todos.get(conn, args.id)
             if t is None:
-                sys.exit("Todo #%s not found." % args.id)
+                _die("Todo #%s not found" % args.id, "tally todo list shows them")
             d = _todo_json(conn, t, with_children=True)
             if args.json:
                 print(json.dumps(d, indent=2))
             else:
-                print(todos.line_for(t, show_project=True))
+                lines = [fmt.head(todos.line_for(t, show_project=True), "📋")]
                 if t["notes"]:
-                    print("  notes  " + t["notes"])
+                    lines.append("  notes  " + t["notes"])
                 w = d["work"]
                 if w["tasks"]:
-                    print("  work   %d task%s · %s tokens · %s · %s active" % (
+                    lines.append("  work   %d task%s · %s tokens · %s · %s active" % (
                         w["tasks"], "" if w["tasks"] == 1 else "s", fmt.tokens(w["total"]),
                         fmt.money({"cost": w["cost"]}), fmt.duration(w["active_s"])))
                 for c in todos.children(conn, t["id"]):
-                    print("    " + todos.line_for(c))
+                    lines.append("    " + todos.line_for(c))
+                _out("\n".join(lines))
         elif a == "take":
             todo, task, _ = todos.take(conn, args.id, _session(args), cwd=os.getcwd())
-            print("Todo #%d taken; task #%d measures it." % (todo["id"], task["id"]))
+            _out(fmt.head("Todo #%d taken: %s · task #%d measures it" % (todo["id"], todo["title"], task["id"]), "▶"))
         elif a == "done":
             t = todos.set_status(conn, args.id, "done", note=args.note)
             for task in conn.execute("SELECT * FROM tasks WHERE todo_id = ? AND status = 'active'",
                                      (args.id,)).fetchall():
                 tasks.end(conn, task["id"], note=args.note or "todo done")
-            print("✓ #%d %s" % (t["id"], t["title"]))
+            _out(fmt.head("Todo #%d done: %s" % (t["id"], t["title"]), "✓"))
         elif a == "mark":
             t = todos.set_status(conn, args.id, args.status, note=args.note)
-            print("#%d is now %s" % (t["id"], t["status"]))
+            _out(fmt.head("Todo #%d is now %s: %s" % (t["id"], t["status"], t["title"]),
+                          fmt.STATUS_MARKS.get(t["status"], "")))
         elif a == "edit":
             fields = {}
             for k in ("title", "notes", "project", "priority"):
@@ -324,39 +350,37 @@ def cmd_todo(args):
             if args.due is not None:
                 fields["due_at"] = todos.parse_due(args.due) if args.due else None
             t = todos.update(conn, args.id, **fields)
-            print(todos.line_for(t, show_project=True))
+            _out(fmt.head("Todo updated: " + todos.line_for(t, show_project=True), "✓"))
         elif a == "rm":
             t = todos.get(conn, args.id)
             if t is None:
-                sys.exit("Todo #%s not found." % args.id)
+                _die("Todo #%s not found" % args.id, "tally todo list shows them")
             if not args.yes and input("Delete todo #%d '%s'? [y/N] " % (t["id"], t["title"])).lower() not in ("y", "yes"):
                 return
             todos.delete(conn, args.id)
-            print("deleted")
+            _out(fmt.head("Todo #%d deleted: %s" % (t["id"], t["title"]), "✓"))
         elif a == "import":
             r = todos.import_plan(conn, args.file, project=args.project, source=args.source)
             if args.json:
                 print(json.dumps(r))
             else:
-                print("Plan #%d %s (%s): %d created, %d updated · %d/%d done" % (
+                _out(fmt.head("Plan #%d %s (%s): %d created, %d updated · %d/%d done" % (
                     r["plan_id"], r["title"], r["project"], r["created"], r["updated"],
-                    r["progress_done"], r["progress_total"]))
+                    r["progress_done"], r["progress_total"]), "✓"))
     except ValueError as e:
-        sys.exit(str(e))
+        _die(str(e))
 
 
 def cmd_settings(args):
     from . import settings
     if args.key and args.value is not None:
         try:
-            print("%s = %s" % (args.key, json.dumps(settings.set_value(args.key, args.value))))
+            _out(fmt.head("%s = %s" % (args.key, settings.show(settings.set_value(args.key, args.value))), "✓"))
         except ValueError as e:
-            sys.exit(str(e))
+            _die(str(e), "tally settings lists them")
         return
-    for key, value, desc, allowed in settings.describe():
-        if args.key and key != args.key:
-            continue
-        print("%-22s %-10s [%s]\n%-22s %s" % (key, json.dumps(value), allowed, "", desc))
+    _out(commands._settings_command(args.key or "").replace("/tally:settings <key> <value>",
+                                                            "tally settings <key> <value>"))
 
 
 def cmd_project(args):
@@ -366,16 +390,21 @@ def cmd_project(args):
         if args.json:
             print(json.dumps([projects.stats(conn, n, series_days=1) for n in projects.all_names(conn)], indent=2))
         else:
-            print(commands._project_command(conn, "projects", "", os.getcwd()))
+            _out(commands._project_command(conn, "projects", "", os.getcwd()))
         return
     name = args.name or projects.detect(os.getcwd())
+    if not name:
+        _die("No project here", "run it inside a git repository, or name one: tally project <name>")
     if args.set:
         with db.transaction(conn):
             row = projects.set_mode(conn, name, args.set)
-        print("%s: %s (%s)" % (name, row["mode"], projects.MODE_HELP[row["mode"]]))
+        _out(fmt.head("%s: %s (%s)" % (name, row["mode"], projects.MODE_HELP[row["mode"]]), "✓"))
         return
     st = projects.stats(conn, name, days=args.days, series_days=args.series)
-    print(json.dumps(st, indent=2) if args.json else fmt.render_project(st))
+    if args.json:
+        print(json.dumps(st, indent=2))
+    else:
+        _out(fmt.render_project(st))
 
 
 def cmd_statusline(args):
@@ -398,7 +427,7 @@ def cmd_statusline(args):
         todo_part = ("📋 %d%s" % (len(open_rows), (" · %d overdue" % overdue) if overdue else "")) if open_rows else ""
         task = tasks.active_for_session(conn, sid) if sid else None
         if task is None and project and projects.mode_of(conn, project) == "ask":
-            print("Tally: new project · /tally:project track|tasks|off" + (" · " + todo_part if todo_part else ""))
+            print("%s · new project: /tally:project track|tasks|off" % fmt.BRAND + (" · " + todo_part if todo_part else ""))
             return
         if task is None:
             if todo_part:
@@ -447,8 +476,37 @@ def cmd_uninstall(args):
     return installer.uninstall(agents)
 
 
+def cmd_setup(args):
+    from . import onboarding
+    if not sys.stdin.isatty():
+        _die("tally setup asks questions and needs a terminal", "tally settings <key> <value> sets one without")
+    return 0 if onboarding.run(True, color=fmt.use_color(sys.stdout)) else 1
+
+
+OVERVIEW = (
+    ("tally status", "live totals of the active task"),
+    ("tally list", "recent tasks"),
+    ("tally sessions", "every session of every agent"),
+    ("tally todo list", "todos of this project"),
+    ("tally dashboard --open", "the local dashboard"),
+    ("tally setup", "the onboarding questions again"),
+    ("tally doctor", "check the installation"),
+)
+
+
+def overview() -> str:
+    """`tally` without a command: the logo and the commands used most."""
+    color = fmt.use_color(sys.stdout)
+    lines = [fmt.logo(["Tally " + __version__, "Per-task token & time tracking", "for Claude Code, Codex and pi"],
+                      color=color, ascii_only=not fmt.can_draw(sys.stdout)), ""]
+    lines += ["  %-24s %s" % row for row in OVERVIEW]
+    lines += ["", fmt.hints("tally --help all commands", "tally <command> -h its options")]
+    text = "\n".join(lines)
+    return fmt.paint(text) if color else text
+
+
 def cmd_doctor(args):
-    print("tally %s · python %s" % (__version__, sys.version.split()[0]))
+    _out("%s %s · doctor · python %s" % (fmt.BRAND, __version__, sys.version.split()[0]))
     print("data dir      %s" % paths.home())
     print("database      %s" % paths.db_path())
     conn = db.connect()
@@ -472,6 +530,14 @@ def cmd_doctor(args):
         state = ("installed" if inst[a] else
                  ("found, not installed (./install.sh --agents %s)" % a if found[a] else "not found"))
         print("%-13s %s" % (installer.NAMES[a], state))
+    from . import onboarding
+    setup = db.kv_get(conn, "setup")
+    print("setup         %s" % ("done %s" % fmt.when(json.loads(setup)["ts"]) if setup
+                                else "not run yet (tally setup)"))
+    state, _ = onboarding.statusline_state()
+    print("status line   %s" % {"ours": "Tally", "other": "another command (tally statusline can be added to it)",
+                                "absent": "none (tally setup can add it)",
+                                "invalid": "settings.json is not valid JSON"}[state])
     if paths.error_log_path().exists() and paths.error_log_path().stat().st_size:
         print("errors        see %s" % paths.error_log_path())
     else:
@@ -479,7 +545,8 @@ def cmd_doctor(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="tally", description="Per-task token and time tracking for Claude Code, Codex and pi.")
+    p = argparse.ArgumentParser(prog="tally", description="%s · per-task token and time tracking for Claude Code, "
+                                                          "Codex and pi." % fmt.BRAND)
     p.add_argument("--version", action="version", version="tally " + __version__)
     sub = p.add_subparsers(dest="cmd")
 
@@ -666,6 +733,9 @@ def build_parser():
     s.add_argument("--agents")
     s.set_defaults(func=cmd_uninstall)
 
+    s = sub.add_parser("setup", help="the onboarding questions: prompt storage, logging, new projects, status line")
+    s.set_defaults(func=cmd_setup)
+
     s = sub.add_parser("doctor", help="check installation")
     s.set_defaults(func=cmd_doctor)
     return p
@@ -675,7 +745,7 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
-        parser.print_help()
+        print(overview())
         return 0
     rc = args.func(args)
     return rc or 0

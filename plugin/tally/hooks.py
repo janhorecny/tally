@@ -87,7 +87,8 @@ def handle(event: str, p: dict):
                 tasks.touch_session(conn, sid, tpath, cwd, _pid(), project=name, agent=p.get("agent") or "claude")
                 if event == "SessionStart":
                     row, is_new = projects.register(conn, name, root)
-                    new_project = row if row is not None and row["mode"] == "ask" else None
+                    if row is not None and (is_new or row["mode"] == "ask"):
+                        new_project = row
 
         if event == "SessionStart":
             if p.get("source") in ("clear", "new"):
@@ -95,7 +96,7 @@ def handle(event: str, p: dict):
                                              previous_session=p.get("previous_session_id")
                                              or _recently_cleared(conn, cwd, now))
             if p.get("source") in ("startup", "resume", None):
-                return _session_message(conn, cwd, new_project)
+                return _session_message(conn, cwd, new_project, p.get("agent") or "claude")
             return None
 
         if event == "UserPromptSubmit":
@@ -131,15 +132,22 @@ def _recently_cleared(conn, cwd, now, window: float = 30.0):
     return d.get("session_id") if now - float(d.get("ts", 0)) <= window else None
 
 
-def _session_message(conn, cwd, new_project):
-    """Shown to the user only (systemMessage, 0 tokens): the setup question for
-    a project Tally has not been told how to track, and the open todos."""
-    from . import projects, settings, todos
+def _session_message(conn, cwd, new_project, agent="claude"):
+    """Shown to the user only (systemMessage, 0 tokens): a welcome after
+    installing, the setup question for a project Tally has not been told how
+    to track (or a notice of its default mode), and the open todos."""
+    from . import onboarding, projects, settings, todos
     cfg = paths.load_config()
     name = projects.detect(cwd)
     parts = []
+    welcome = onboarding.take_welcome(conn, agent)
+    if welcome:
+        parts.append(welcome)
     if new_project is not None:
-        parts.append(projects.setup_prompt(new_project["name"]))
+        if new_project["mode"] == "ask":
+            parts.append(projects.setup_prompt(new_project["name"]))
+        else:
+            parts.append(projects.default_notice(new_project["name"], new_project["mode"]))
     if name and projects.mode_of(conn, name) != "off" and settings.get("todos.reminder", cfg):
         text = todos.reminder(conn, name, int(settings.get("todos.reminder_limit", cfg) or 5))
         if text:

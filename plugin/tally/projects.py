@@ -60,14 +60,16 @@ def get(conn, name: str):
 
 
 def register(conn, name: Optional[str], path: Optional[str] = None):
-    """Record a project; returns (row, is_new)."""
+    """Record a project in the mode of setting projects.default_mode (ask by default); returns (row, is_new)."""
     if not name:
         return None, False
     row = get(conn, name)
     if row is not None:
         return row, False
+    from . import settings
+    mode = settings.get("projects.default_mode")
     conn.execute("INSERT OR IGNORE INTO projects(name, path, mode, first_seen) VALUES(?,?,?,?)",
-                 (name, path, "ask", time.time()))
+                 (name, path, mode if mode in MODES else "ask", time.time()))
     return get(conn, name), True
 
 
@@ -91,10 +93,20 @@ def session_tracked(conn, session_id: str) -> bool:
 
 
 def setup_prompt(name: str) -> str:
-    return ("👋 Tally: first time in project %s. Track it?\n"
-            "  /tally:project track   count every session here (overall project stats)\n"
-            "  /tally:project tasks   only tasks you start (/tally:start, /tally:take)\n"
-            "  /tally:project off     ignore this project, don't ask again" % name)
+    from . import fmt
+    return "\n".join([
+        fmt.head("First time in project %s. Track it?" % name, "👋"),
+        "  /tally:project track   count every session here (overall project stats)",
+        "  /tally:project tasks   only tasks you start (/tally:start, /tally:take)",
+        "  /tally:project off     ignore this project, don't ask again",
+        fmt.hints("tally setup sets a default for new projects")])
+
+
+def default_notice(name: str, mode: str) -> str:
+    """New project with a default mode from settings: no question, one line instead."""
+    from . import fmt
+    return "\n".join([fmt.head("New project %s: %s (%s)" % (name, mode, MODE_HELP[mode]), "👋"),
+                      fmt.hints("/tally:project %s change it" % " | ".join(m for m in MODES if m != mode))])
 
 
 def all_names(conn) -> list:

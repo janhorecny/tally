@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 (2026-10-13)
+
+### Onboarding
+
+- **`tally setup`:** a few questions with defaults: prompt storage (`log.prompts`), logging detail (`log.depth`), what new projects get, automatic tasks, todo reminders, and Claude Code's status line. The first `./install.sh` asks them once; `--yes` or no terminal keeps the defaults. Answers are saved only at the end (Ctrl-D quits without changes), and running it again offers the current values.
+- **Status line:** added to `~/.claude/settings.json` only when Claude Code has none (with a `settings.json.bak-tally` backup). An existing status line is left alone, with instructions for ccstatusline or your own script. `tally uninstall` removes it again if it is unchanged.
+- **New setting `projects.default_mode`** (`ask`, `track`, `tasks`): a new project gets this mode and a one-line notice instead of the question.
+- **Welcome:** the first session of each newly installed agent shows a short introduction (0 tokens).
+
+### Branding
+
+- **One message shape everywhere:** `▍Tally · <mark> <what happened>`, details, then a `→` line with the next commands. Errors start with `▍Tally · ✗` and say what to do instead (`Task #12 not found → /tally:list shows your tasks`). The same in Claude Code, Codex, pi and the CLI.
+- **CLI:** colours on a terminal (the logo's orange for the brand, red errors, dim hints; `NO_COLOR` turns them off), errors on standard error, and `tally` alone shows the tally-mark logo with the most used commands. `tally doctor` also shows the setup and the status line.
+- **Dashboard:** the logo in the header, a favicon and the title *Tally*. Codex shows *Tally* while a hook runs.
+
+### Fixes
+
+- `/tally:project <name> <bad mode>` raised an error inside the hook instead of answering.
+- `tally rename` of a task that does not exist failed with a traceback.
+
 ## 0.4.1 (2026-10-13)
 
 ### Documentation

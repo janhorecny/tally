@@ -22,6 +22,10 @@ DEFAULT_CONFIG = {
         # full | preview (first 300 characters) | off (prompt text never stored)
         "prompts": "full",
     },
+    "projects": {
+        # how a project Tally has not seen yet is tracked: ask | track | tasks
+        "default_mode": "ask",
+    },
     "todos": {
         # show open todos of the project when a Claude Code session starts
         "reminder": True,

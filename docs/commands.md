@@ -9,6 +9,14 @@ These commands run inside an agent session. The same commands exist in every age
 
 Tally answers every command locally, so **they cost no tokens**. The exceptions are [`new`](#tallynew) and [`do`](#tallydo), which hand work to the model. In Claude Code the answer appears under the line `UserPromptSubmit operation blocked by hook:`, which is expected.
 
+Every answer has the same shape:
+
+```
+▍Tally · ▶ Task #3 started: Fix login redirect loop      ← what happened (✗ for an error)
+  Counting tokens and time for this session, …           ← details
+  → /tally:status live totals · /tally:end finish        ← what you can do next
+```
+
 For scripts and the terminal, see the [CLI reference](cli.md).
 
 **Syntax:** `<arg>` is required, `[arg]` is optional, and `a|b` means one of them. A task or todo `id` can be written as `12` or `#12`.
@@ -414,7 +422,7 @@ A project's overall statistics, or set how it is tracked.
 
 Without a mode it shows the statistics: all time, the last 7 and 30 days, a daily sparkline, usage by model, tasks and their share of the usage, and todos.
 
-Tally asks for the mode the first time an agent opens in a new repository. See [Projects](usage.md#projects).
+Tally asks for the mode the first time an agent opens in a new repository, unless `projects.default_mode` is `track` or `tasks`. See [Projects](usage.md#projects).
 
 ```
 /tally:project
@@ -482,9 +490,10 @@ Show or change settings.
 | `todos.reminder` | `on` (default) or `off` |
 | `todos.reminder_limit` | a number (default 5) |
 | `auto_start` | `off` (default) or `session` |
+| `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
 | `dashboard_port` | a number (default 8765) |
 
-What each key means: [Configuration](configuration.md).
+What each key means: [Configuration](configuration.md). In a terminal, [`tally setup`](cli.md#tally-setup) asks about the main ones.
 
 ```
 /tally:settings

@@ -80,6 +80,7 @@ class Env:
         # never read the real Codex / pi session folders (tally sessions discovers them)
         os.environ["CODEX_HOME"] = str(self.tmp / "codex")
         os.environ["PI_CODING_AGENT_DIR"] = str(self.tmp / "pi-agent")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.tmp / "claude")      # never the real settings.json
 
     def main(self, sid=SID) -> Path:
         return self.proj / (sid + ".jsonl")
@@ -154,7 +155,7 @@ class EndToEnd(unittest.TestCase):
         now = time.time()
         # history before the task: must not be counted
         e.append(e.main(), user(now - 300), assistant(now - 290, "msg_old", "req_old", out=5000))
-        self.assertIn("first time in project proj", e.hook("SessionStart", source="startup")["systemMessage"])
+        self.assertIn("First time in project proj", e.hook("SessionStart", source="startup")["systemMessage"])
 
         res = e.hook("UserPromptSubmit", prompt="/tally:start Fix login bug")
         self.assertEqual(res["decision"], "block")
@@ -550,6 +551,10 @@ class ReviewRegressions(unittest.TestCase):
         try:
             ok = urllib.request.urlopen("http://127.0.0.1:%d/api/health" % port, timeout=5)
             self.assertEqual(ok.status, 200)
+            page = urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=5).read().decode()
+            self.assertIn("<title>Tally</title>", page)
+            self.assertIn('<link rel="icon" href="data:image/svg+xml,', page)
+            self.assertIn('<svg class="logo"', page)
             req = urllib.request.Request("http://127.0.0.1:%d/api/tasks" % port, headers={"Host": "evil.example:80"})
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 urllib.request.urlopen(req, timeout=5)
@@ -619,7 +624,7 @@ class TodosAndStats(unittest.TestCase):
         e = self.env
         e.append(e.main(), user(time.time() - 10))
         r = e.hook("UserPromptSubmit", prompt="/tally:todo Fix the export !!! due:+2d")
-        self.assertIn("Todo #1 in proj: Fix the export", r["reason"])          # project = cwd basename
+        self.assertIn("Todo #1 added to proj: Fix the export", r["reason"])          # project = cwd basename
         r = e.hook("UserPromptSubmit", prompt="/tally:todos")
         self.assertIn("#1 Fix the export !!!", r["reason"])
         r = e.hook("UserPromptSubmit", prompt="/tally:take 1")
@@ -664,7 +669,7 @@ class TodosAndStats(unittest.TestCase):
         e = self.env
         e.hook("UserPromptSubmit", prompt="/tally:todo Call the client due:dnes")
         r = e.hook("SessionStart", source="startup")
-        self.assertIn("first time in project proj", r["systemMessage"])
+        self.assertIn("First time in project proj", r["systemMessage"])
         self.assertIn("📋 proj: 1 open todo", r["systemMessage"])
         self.assertIn("Call the client", r["systemMessage"])
         self.assertIsNone(e.hook("SessionStart", source="clear"))
@@ -835,6 +840,18 @@ class Projects(unittest.TestCase):
         e.hook("UserPromptSubmit", prompt="/tally:project off")
         e.hook("UserPromptSubmit", prompt="/tally:todo something")
         self.assertIsNone(e.hook("SessionStart", source="startup"))     # off: no reminder either
+
+    def test_default_mode_for_new_projects(self):
+        from tally import db, projects, settings
+        e = self.env
+        settings.set_value("projects.default_mode", "track")
+        r = e.hook("SessionStart", source="startup")
+        self.assertIn("▍Tally · 👋 New project proj: track", r["systemMessage"])
+        self.assertNotIn("Track it?", r["systemMessage"])
+        self.assertEqual(projects.mode_of(db.connect(), "proj"), "track")
+        self.assertIsNone(e.hook("SessionStart", source="startup"))     # told once
+        with self.assertRaises(ValueError):
+            settings.set_value("projects.default_mode", "off")          # off would hide new projects silently
 
     def test_track_mode_counts_every_session(self):
         e = self.env
@@ -1061,6 +1078,7 @@ class Installer(unittest.TestCase):
         self.assertEqual(sorted(data["hooks"]), sorted(installer.CODEX_EVENTS))
         self.assertEqual(data["hooks"]["Stop"][0]["hooks"][0]["command"], "echo mine")     # kept
         self.assertTrue(installer._is_tally(data["hooks"]["Stop"][1]))
+        self.assertEqual(data["hooks"]["Stop"][1]["hooks"][0]["statusMessage"], "Tally")
         self.assertTrue(installer.installed()["codex"])
         installer.install(["codex"])                                                       # idempotent
         self.assertEqual(len(json.loads(hooks.read_text())["hooks"]["Stop"]), 2)
@@ -1264,6 +1282,342 @@ class CliSmoke(unittest.TestCase):
         self.assertIn("CLI task", r.stdout)
         r = self.run_cli("doctor")
         self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("▍Tally "), r.stdout)
+        self.assertIn("setup         not run yet (tally setup)", r.stdout)
+        self.assertIn("status line   none (tally setup can add it)", r.stdout)
+
+
+def run_in_pty(argv, answers=(), env=None, timeout=20.0):
+    """Run argv in a pseudo-terminal, typing each answer after the next question; returns the output."""
+    import pty
+    import re
+    import select
+    pid, fd = pty.fork()
+    if pid == 0:                                             # child
+        os.environ.update(env or {})
+        os.environ["TERM"] = "xterm-256color"
+        os.execv(argv[0], argv)
+    out, sent, idle = b"", 0, time.time()
+    deadline = time.time() + timeout
+    try:
+        while time.time() < deadline:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if ready:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                out += chunk
+                idle = time.time()
+            plain = re.sub(r"\x1b\[[0-9;]*m", "", out.decode("utf-8", "replace"))
+            if sent < len(answers) and re.search(r"(\] |Y/n |y/N )$", plain):
+                os.write(fd, (answers[sent] + "\r").encode())
+                sent += 1
+                out += b"\n"
+            elif sent >= len(answers) and time.time() - idle > 3:
+                break
+    finally:
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+        os.waitpid(pid, 0)
+        os.close(fd)
+    return out.decode("utf-8", "replace")
+
+
+class Branding(unittest.TestCase):
+    """Every message has the same head line, in every agent's syntax and in the CLI."""
+
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def test_every_command_output_is_branded(self):
+        from tally import fmt
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        ok = ["/tally:help", "/tally:list", "/tally:start Fix login", "/tally:start Second task", "/tally:status",
+              "/tally:stats", "/tally:show", "/tally:rename Fix OAuth", "/tally:todo Write notes !! due:fri",
+              "/tally:todos", "/tally:todos all", "/tally:take 1", "/tally:mark 1 blocked", "/tally:done 1",
+              "/tally:project", "/tally:projects", "/tally:project track", "/tally:settings",
+              "/tally:settings log.depth calls", "/tally:sessions", "/tally:end", "/tally:resume 1", "/tally:end 1"]
+        errors = ["/tally:status 99", "/tally:resume", "/tally:new", "/tally:mark 1 nonsense", "/tally:todo",
+                  "/tally:settings nope x", "/tally:settings nope", "/tally:sessions nonsense",
+                  "/tally:project x bogus", "/tally:take 77", "/tally:done 77", "/tally:show 99", "/tally:rename"]
+        import re
+        for prompt in ok + errors:
+            r = e.hook("UserPromptSubmit", prompt=prompt)
+            self.assertIsNotNone(r, prompt)
+            lines = r["reason"].split("\n")
+            self.assertRegex(lines[0], r"^%s( \d+\.\d+\.\d+)? · " % re.escape(fmt.BRAND), prompt)
+            self.assertEqual(lines[0].startswith(fmt.BRAND + " · ✗"), prompt in errors, (prompt, lines[0]))
+            for line in lines[1:]:
+                self.assertTrue(line == "" or line.startswith((fmt.BRAND, "  ")), (prompt, line))
+        # starting a task while one runs: the ended report and the start, each with its own head line
+        e.hook("UserPromptSubmit", prompt="/tally:start Third")
+        r = e.hook("UserPromptSubmit", prompt="/tally:start Fourth")
+        heads = [l for l in r["reason"].split("\n") if l.startswith(fmt.BRAND)]
+        self.assertEqual(len(heads), 2, r["reason"])
+        self.assertRegex(heads[0], r"■ Task #\d+ ended: Third$")
+        self.assertRegex(heads[1], r"▶ Task #\d+ started: Fourth$")
+
+    def test_codex_syntax_keeps_the_brand(self):
+        from tally import fmt, hooks
+        out = io.StringIO()
+        hooks.main("UserPromptSubmit", stdin=io.StringIO(json.dumps(
+            {"session_id": SID, "cwd": "/Users/me/proj", "prompt": "tally:help"})), stdout=out, agent="codex")
+        reason = json.loads(out.getvalue())["reason"]
+        self.assertTrue(reason.startswith(fmt.BRAND + " "), reason)
+        self.assertIn("tally:start [name]", reason)
+        self.assertNotIn("/tally:", reason)
+
+    def test_terminal_colours(self):
+        from unittest import mock
+        from tally import fmt
+        text = "\n".join([fmt.head("Task #1 started", "▶"), "  body", fmt.hints("/tally:end finish")])
+        painted = fmt.paint(text)
+        self.assertTrue(painted.startswith("\033[1;38;5;202m▍Tally\033[0m\033[1m · ▶ Task #1 started\033[0m"), painted)
+        self.assertIn("\n  body\n", painted)
+        self.assertTrue(painted.endswith("\033[2m  → /tally:end finish\033[0m"), painted)
+        self.assertIn("\033[31m · ✗ nope", fmt.paint(fmt.error("nope")))
+        self.assertEqual(fmt.paint("  plain"), "  plain")
+
+        class Tty(io.StringIO):
+            def isatty(self):
+                return True
+
+        with mock.patch.dict(os.environ, {"NO_COLOR": "", "TERM": "xterm"}):
+            self.assertTrue(fmt.use_color(Tty()))
+            self.assertFalse(fmt.use_color(io.StringIO()))              # piped: never
+        with mock.patch.dict(os.environ, {"NO_COLOR": "1", "TERM": "xterm"}):
+            self.assertFalse(fmt.use_color(Tty()))
+        with mock.patch.dict(os.environ, {"NO_COLOR": "", "TERM": "dumb"}):
+            self.assertFalse(fmt.use_color(Tty()))
+
+    def test_logo(self):
+        from tally import fmt
+        rows = fmt.logo(["Tally 9.9", "second line"]).split("\n")
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(rows[0].endswith("┃╱"))
+        self.assertTrue(rows[1].endswith("    Tally 9.9"), rows)            # text centred beside the mark
+        self.assertTrue(rows[2].endswith("    second line"), rows)
+        fmt.logo(["Tally 9.9"], ascii_only=True).encode("ascii")              # no box drawing at all
+        self.assertIn("\033[1;38;5;202m╱\033[0m", fmt.logo(["x"], color=True))
+        self.assertTrue(fmt.can_draw(io.TextIOWrapper(io.BytesIO(), encoding="utf-8")))
+        self.assertFalse(fmt.can_draw(io.TextIOWrapper(io.BytesIO(), encoding="ascii")))
+
+    def run_cli(self, *args, **kw):
+        return subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally")] + list(args), capture_output=True,
+                              text=True, env=os.environ, timeout=60, stdin=subprocess.DEVNULL, **kw)
+
+    def test_cli_overview_errors_and_plain_output_when_piped(self):
+        from tally import __version__
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"╱┃ ┃ ┃ ┃|/\| \| \| \|")            # box drawing, or ASCII off UTF-8
+        self.assertIn("Tally " + __version__, r.stdout)
+        self.assertIn("tally setup", r.stdout)
+        self.assertNotIn("\033[", r.stdout)
+        r = self.run_cli("show", "42")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stderr.strip(), "▍Tally · ✗ Task #42 not found\n  → tally list shows your tasks")
+        r = self.run_cli("setup")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("needs a terminal", r.stderr)
+        r = self.run_cli("settings", "log.depth", "calls")
+        self.assertEqual(r.stdout.strip(), "▍Tally · ✓ log.depth = calls")
+        r = self.run_cli("settings", "todos.reminder")
+        self.assertIn("todos.reminder         on", r.stdout)
+        self.assertIn("→ tally settings <key> <value> change one", r.stdout)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs a pseudo-terminal")
+    def test_cli_in_a_terminal(self):
+        tally = str(PLUGIN / "bin" / "tally")
+        out = run_in_pty([sys.executable, tally], env={"NO_COLOR": ""})
+        self.assertRegex(out, "\033\\[1;38;5;202m[╱/]\033\\[0m")                   # the orange stroke
+        self.assertIn("\033[2m  → tally --help all commands", out)
+        out = run_in_pty([sys.executable, tally], env={"NO_COLOR": "1"})
+        self.assertNotIn("\033[", out)
+        self.assertRegex(out, r"╱┃ ┃ ┃ ┃|/\| \| \| \|")
+
+
+class Onboarding(unittest.TestCase):
+    """tally setup: questions, the Claude Code status line, the welcome after installing."""
+
+    def setUp(self):
+        self.env = Env()
+        self.claude = self.env.tmp / "claude"
+        self.settings_json = self.claude / "settings.json"
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def run_setup(self, *answers, agents=("claude",)):
+        from tally import onboarding
+        it = iter(answers)
+        self.prompts, self.said = [], []
+
+        def ask(prompt):
+            self.prompts.append(prompt)
+            value = next(it)
+            if value is EOFError:
+                raise EOFError()
+            return value
+        return onboarding.run(True, agents=list(agents), ask=ask, say=self.said.append, banner=False)
+
+    def test_answers_are_saved_and_offered_next_time(self):
+        from tally import onboarding, settings
+        # 't' fits track and tasks, so the question comes again
+        self.assertTrue(self.run_setup("off", "ca", "t", "track", "y", "", ""))
+        self.assertEqual(settings.get("log.prompts"), "off")
+        self.assertEqual(settings.get("log.depth"), "calls")
+        self.assertEqual(settings.get("projects.default_mode"), "track")
+        self.assertEqual(settings.get("auto_start"), "session")
+        self.assertIs(settings.get("todos.reminder"), True)
+        self.assertIn("    choose one of: ask, track, tasks", self.said)
+        self.assertTrue(onboarding.done())
+        self.assertEqual(json.loads(self.settings_json.read_text())["statusLine"], {
+            "type": "command", "command": onboarding.statusline_command(), "refreshInterval": 10})
+        self.assertIn('python3 "%s" statusline' % (PLUGIN / "bin" / "tally"), onboarding.statusline_command())
+        self.assertTrue(any("status line added" in line for line in self.said[-1].split("\n")))
+        # again: the current values are offered, Enter keeps them
+        self.assertTrue(self.run_setup("", "", "", "", ""))
+        self.assertIn("[off]", self.prompts[0])
+        self.assertIn("[track]", self.prompts[2])
+        self.assertIn("Y/n", self.prompts[3])
+        self.assertEqual(settings.get("log.depth"), "calls")
+        self.assertIn("  Claude Code's status line already shows Tally.", self.said)
+        self.assertIn("Saved, nothing changed", self.said[-1])
+
+    def test_ctrl_d_saves_nothing(self):
+        from tally import onboarding, settings
+        self.assertFalse(self.run_setup("off", "calls", EOFError))
+        self.assertEqual(settings.get("log.prompts"), "full")
+        self.assertEqual(settings.get("log.depth"), "prompts")
+        self.assertFalse(onboarding.done())
+        self.assertFalse(self.settings_json.exists())
+
+    def test_three_wrong_answers_keep_the_value(self):
+        from tally import settings
+        self.assertTrue(self.run_setup("x", "y", "z", "", "", "maybe", "", "", "n"))
+        self.assertEqual(settings.get("log.prompts"), "full")
+        self.assertIn("    keeping full", self.said)
+        self.assertIn("    answer y or n", self.said)
+        self.assertFalse(self.settings_json.exists())                         # status line declined
+
+    def test_existing_or_broken_settings_are_left_alone(self):
+        self.claude.mkdir(parents=True)
+        mine = {"statusLine": {"type": "command", "command": "npx ccstatusline"}, "model": "opus"}
+        self.settings_json.write_text(json.dumps(mine))
+        self.run_setup("", "", "", "", "")
+        self.assertEqual(len(self.prompts), 5)                                # no status line question
+        self.assertEqual(json.loads(self.settings_json.read_text()), mine)
+        self.assertTrue(any("ccstatusline: a Custom Command widget" in line for line in self.said))
+        self.settings_json.write_text("{not json")
+        self.run_setup("", "", "", "", "")
+        self.assertEqual(len(self.prompts), 5)
+        self.assertEqual(self.settings_json.read_text(), "{not json")
+        self.assertTrue(any("is not valid JSON" in line for line in self.said))
+
+    def test_status_line_joins_existing_settings_and_uninstall_removes_only_it(self):
+        from unittest import mock
+        from tally import installer
+        self.claude.mkdir(parents=True)
+        mine = {"model": "opus", "env": {"A": "1"}}
+        self.settings_json.write_text(json.dumps(mine))
+        self.run_setup("", "", "", "", "", "y")
+        data = json.loads(self.settings_json.read_text())
+        self.assertEqual({k: v for k, v in data.items() if k != "statusLine"}, mine)
+        self.assertEqual(json.loads((self.claude / "settings.json.bak-tally").read_text()), mine)
+        with mock.patch.object(installer.shutil, "which", return_value=None):
+            self.assertIn("status line removed", installer.uninstall_claude())
+        self.assertEqual(json.loads(self.settings_json.read_text()), mine)
+        # a status line the user changed afterwards stays
+        self.settings_json.write_text(json.dumps(dict(mine, statusLine={"type": "command",
+                                                                         "command": "tally statusline | lolcat"})))
+        with mock.patch.object(installer.shutil, "which", return_value=None):
+            self.assertNotIn("status line removed", installer.uninstall_claude())
+        self.assertIn("lolcat", self.settings_json.read_text())
+
+    def test_no_status_line_question_without_claude_code(self):
+        self.run_setup("", "", "", "", "", agents=("codex", "pi"))
+        self.assertEqual(len(self.prompts), 5)
+        self.assertFalse(self.settings_json.exists())
+
+    def test_non_interactive_asks_nothing(self):
+        from unittest import mock
+        from tally import onboarding
+        said = []
+        with mock.patch("builtins.input", side_effect=AssertionError("asked")):
+            self.assertTrue(onboarding.run(False, agents=["claude"], say=said.append))
+        self.assertTrue(onboarding.done())
+        self.assertEqual(said, ["✓ Settings     defaults (change any time: tally setup)"])
+        self.assertFalse(self.settings_json.exists())
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs a pseudo-terminal")
+    def test_tally_setup_in_a_terminal(self):
+        from tally import settings
+        out = run_in_pty([sys.executable, str(PLUGIN / "bin" / "tally"), "setup"],
+                         answers=["preview", "", "tasks", "", "n", "y"], env={"NO_COLOR": "1"})
+        self.assertIn("▍Tally · Setup · Enter keeps the value in [brackets]", out)
+        self.assertIn("▍Tally · ✓ Saved", out)
+        self.assertEqual(settings.get("log.prompts"), "preview")
+        self.assertEqual(settings.get("projects.default_mode"), "tasks")
+        self.assertIs(settings.get("todos.reminder"), False)
+        self.assertIn("statusLine", self.settings_json.read_text())
+
+
+class InstallerOnboarding(unittest.TestCase):
+    """The first install asks the setup questions once and greets each new agent once."""
+
+    def setUp(self):
+        self.env = Env()
+        self.home = self.env.tmp / "fakehome"
+        (self.home / ".codex").mkdir(parents=True)
+        (self.home / ".pi" / "agent").mkdir(parents=True)
+        self.saved = {k: os.environ.get(k) for k in ("HOME", "CODEX_HOME", "PI_CODING_AGENT_DIR")}
+        os.environ["HOME"] = str(self.home)
+        os.environ.pop("CODEX_HOME", None)
+        os.environ.pop("PI_CODING_AGENT_DIR", None)
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self.env.cleanup()
+
+    def session_start(self, agent, sid):
+        from tally import hooks
+        out = io.StringIO()
+        hooks.main("SessionStart", stdin=io.StringIO(json.dumps(
+            {"session_id": sid, "cwd": str(self.env.tmp), "source": "startup"})), stdout=out, agent=agent)
+        text = out.getvalue().strip()
+        return json.loads(text).get("systemMessage", "") if text else ""
+
+    def test_setup_once_and_a_welcome_per_new_agent(self):
+        from unittest import mock
+        from tally import installer, settings
+        with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=["off", "", "", "", ""]):
+            stdin.isatty.return_value = True
+            self.assertEqual(installer.install(["codex", "pi"]), 0)
+        self.assertEqual(settings.get("log.prompts"), "off")
+        with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=AssertionError("asked")):
+            stdin.isatty.return_value = True
+            self.assertEqual(installer.install(["codex", "pi"]), 0)             # an update asks nothing
+        codex = self.session_start("codex", "C1")
+        self.assertIn("▍Tally · 👋 Installed.", codex)
+        self.assertIn("tally:start <name>", codex)
+        self.assertNotIn("/tally:", codex)                                       # Codex syntax
+        self.assertIn("/tally:sessions", self.session_start("pi", "P1"))      # pi's extension rewrites it
+        self.assertNotIn("Installed.", self.session_start("codex", "C2"))      # once per agent
+        self.assertNotIn("Installed.", self.session_start("pi", "P2"))
 
 
 if __name__ == "__main__":

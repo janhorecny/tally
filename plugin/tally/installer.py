@@ -118,11 +118,13 @@ def install_claude() -> str:
 
 
 def uninstall_claude() -> str:
+    from . import onboarding
+    line = "; status line removed" if onboarding.remove_statusline() else ""
     if not shutil.which("claude"):
-        return "claude CLI not found"
+        return "claude CLI not found" + line
     _run(["claude", "plugin", "uninstall", "tally@tally"])
     _run(["claude", "plugin", "marketplace", "remove", "tally"])
-    return "plugin removed"
+    return "plugin removed" + line
 
 
 # ------------------------------------------------------------------ Codex
@@ -149,7 +151,7 @@ def install_codex() -> str:
         kept = [e for e in hooks.get(event, []) if not _is_tally(e)]
         kept.append({"hooks": [{"type": "command", "command": _hook_cmd(event, "codex"),
                                 "timeout": 3 if event == "SessionEnd" else 60,
-                                "statusMessage": "tally"}]})
+                                "statusMessage": "Tally"}]})
         hooks[event] = kept
     path.write_text(json.dumps(data, indent=2) + "\n")
     skill = agents_skills_home() / "tally-todos" / "SKILL.md"
@@ -232,10 +234,19 @@ def choose(requested: Optional[List[str]], assume_yes: bool) -> List[str]:
 
 
 def install(requested: Optional[List[str]] = None, assume_yes: bool = False) -> int:
+    """Install into the chosen agents; on the first install also ask the setup questions."""
+    from . import __version__, fmt, onboarding
+    interactive = not assume_yes and sys.stdin.isatty()
+    color = fmt.use_color(sys.stdout)
+    if sys.stdout.isatty():
+        _say(fmt.logo(["Tally " + __version__, "Per-task token & time tracking", "for Claude Code, Codex and pi"],
+                      color=color, ascii_only=not fmt.can_draw(sys.stdout)))
+        _say("")
     agents = choose(requested, assume_yes)
     if not agents:
         _say("Nothing selected.")
         return 0
+    before = installed()
     rc = 0
     for a in agents:
         try:
@@ -244,6 +255,11 @@ def install(requested: Optional[List[str]] = None, assume_yes: bool = False) -> 
             rc = 1
             _say("✗ %-12s %s" % (NAMES[a], e))
     _record(agents)
+    after = installed()
+    onboarding.queue_welcome([a for a in agents if after[a] and not before[a]])
+    if not onboarding.done():
+        _say("")
+        onboarding.run(interactive, agents=agents, color=color, banner=False)
     return rc
 
 

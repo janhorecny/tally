@@ -1,6 +1,6 @@
 {
   "name": "tally",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "tally: track tokens and time per task (main session, subagents, workflows) in a local SQLite database. /tally:start, /tally:end, /tally:status, /tally:list, /tally:dashboard.",
   "author": {
     "name": "Galton",

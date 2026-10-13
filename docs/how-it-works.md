@@ -68,6 +68,7 @@ Paths starting with `tally/` are in `plugin/tally/`.
 | `plugin/agents/pi/tally.ts` | pi extension: events → `tally hook --agent pi`, the `/tally` command, the footer status. |
 | `tally/adapters.py`, `tally/codex.py` | Transcript readers for pi and Codex. |
 | `tally/installer.py` | `tally install` / `uninstall` for Claude Code, Codex and pi. |
+| `tally/onboarding.py` | `tally setup` (first-run questions, the Claude Code status line) and the welcome after installing. |
 | `plugin/hooks/hooks.json` | Hook registrations. Every hook runs `python3 bin/tally hook <Event>`. |
 | `plugin/commands/*.md` | Slash command definitions. The hook answers them. Their bodies are only a fallback that runs the CLI when hooks are disabled. |
 | `plugin/bin/tally` | Launcher. `hook` goes straight to `tally.hooks`, without argparse. Everything else goes to `tally.cli`. |
@@ -83,7 +84,7 @@ Paths starting with `tally/` are in `plugin/tally/`.
 | `tally/settings.py`, `tally/paths.py` | Validated settings, `config.json`, data and transcript locations. |
 | `plugin/skills/todos/SKILL.md` | The `tally:todos` skill; the installer copies it for Codex and pi as `tally-todos`. |
 | `tally/pricing.py` | Price table and per-call cost. |
-| `tally/fmt.py` | Text rendering for the terminal. |
+| `tally/fmt.py` | Text rendering: the shared message shape (`▍Tally ·` head, details, `→` hints), terminal colours, the logo. |
 | `tally/server.py`, `dashboard.html` | Local dashboard: a JSON API and a single HTML page. |
 | `tally/db.py` | SQLite schema, migrations, transactions. |
 
@@ -96,7 +97,7 @@ Claude Code's events are below. Codex gets the same six events through `~/.codex
 | `UserPromptSubmit` | `/tally:*`: runs the command and returns `{"decision":"block","reason":…}`, so the reason is shown to you and the model is never called. A normal prompt while a task is active is stored, and a turn timer starts. | ~35 ms |
 | `Stop` | Reads new transcript bytes of the session (only while a task is active) and closes the turn timer. | ~35 ms plus the new bytes |
 | `SubagentStop`, `PreCompact` | Read new transcript bytes. | same |
-| `SessionStart` | Records the session (transcript path, cwd, Claude Code PID). On `source=clear`, attaches the new session to the active task. | ~33 ms |
+| `SessionStart` | Records the session (transcript path, cwd, Claude Code PID). On `source=clear`, attaches the new session to the active task. Shows, as a `systemMessage` (0 tokens): the welcome once after installing, the new-project question or notice, and open todos. | ~33 ms |
 | `SessionEnd` | Reads the rest, closes the turn, and notes a `/clear` for the carry-over. | same |
 
 Times are medians on an M-series Mac. About 18 ms of each is Python interpreter startup. Hooks that have nothing to do (no active task) touch the database once and exit. Only `/tally:*` prompts import the command and report modules.

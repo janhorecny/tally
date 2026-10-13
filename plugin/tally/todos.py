@@ -319,16 +319,17 @@ def reminder(conn, project: Optional[str], limit: int = 5) -> Optional[str]:
     now = time.time()
     doing = sum(1 for r in rows if r["status"] == "doing")
     overdue = sum(1 for r in rows if r["due_at"] and r["due_at"] < now)
-    head = "📋 %s: %d open todo%s" % (project, len(rows), "" if len(rows) == 1 else "s")
+    from . import fmt
+    head = "%s: %d open todo%s" % (project, len(rows), "" if len(rows) == 1 else "s")
     extra = [x for x in ("%d doing" % doing if doing else "", "%d overdue" % overdue if overdue else "") if x]
     if extra:
         head += " (" + ", ".join(extra) + ")"
-    lines = [head]
+    lines = [fmt.head(head, "📋")]
     for r in rows[:limit]:
         lines.append("  %s" % line_for(r, now))
     if len(rows) > limit:
         lines.append("  … %d more" % (len(rows) - limit))
-    lines.append("  /tally:todos · /tally:take <id> · /tally:do <id>")
+    lines.append(fmt.hints("/tally:todos", "/tally:take <id>", "/tally:do <id>"))
     return "\n".join(lines)
 
 
