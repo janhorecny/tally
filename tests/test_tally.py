@@ -874,20 +874,19 @@ class DashboardProcess(unittest.TestCase):
         "        b = json.dumps({'app': 'tally', 'version': sys.argv[2], 'pid': os.getpid()}).encode()\n"
         "        self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers()\n"
         "        self.wfile.write(b)\n"
-        "HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n")
+        "srv = HTTPServer(('127.0.0.1', int(sys.argv[1])), H)\n"
+        "print('ready', flush=True)\n"
+        "srv.serve_forever()\n")
 
     def fake_dashboard(self, version):
         import socket
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
-        proc = subprocess.Popen([sys.executable, "-c", self.FAKE, str(port), version])
-        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
-        from tally import server
-        for _ in range(50):
-            if server.is_running("127.0.0.1", port):
-                break
-            time.sleep(0.1)
+        proc = subprocess.Popen([sys.executable, "-c", self.FAKE, str(port), version], stdout=subprocess.PIPE,
+                                text=True)
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait(), proc.stdout.close()))
+        self.assertEqual(proc.stdout.readline().strip(), "ready")           # listening: no timing guesswork
         return proc, port
 
     def test_outdated_dashboard_is_stopped(self):
