@@ -332,6 +332,14 @@ def is_running(host: str, port: int) -> bool:
     return health(host, port) is not None
 
 
+def _is_dashboard(args: list) -> bool:
+    """A Python interpreter running the tally launcher with `dashboard`, and nothing
+    else: a shell or an editor whose command line merely mentions both words must
+    never match."""
+    return (len(args) >= 3 and os.path.basename(args[0]).lower().startswith("python")
+            and (args[1] == "tally" or args[1].endswith("/tally")) and args[2] == "dashboard")
+
+
 def _dashboard_pids(port: int) -> list:
     """Processes started as `tally dashboard ... --port <port>` (versions before
     0.6 do not report their pid in /api/health)."""
@@ -344,7 +352,7 @@ def _dashboard_pids(port: int) -> list:
     for line in out.splitlines():
         pid, _, cmd = line.strip().partition(" ")
         args = cmd.split()
-        if "dashboard" not in args or not any(a.endswith("/tally") or a == "tally" for a in args):
+        if not _is_dashboard(args):
             continue
         # without --port it runs on the configured port
         on = args[args.index("--port") + 1] if "--port" in args[:-1] else str(default_port)

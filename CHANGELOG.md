@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2 (2026-10-13)
+
+- **Dashboard, session and task detail:** the cost tile includes Claude Code's own unlogged calls, like the sessions list (it showed $24.00 where the list showed $24.70), with the estimate named in the hint and the note below. A session without subagents says *main session only* instead of *0 agents*.
+- **Replacing old dashboards:** finding a pre-0.6 dashboard by its process list now matches only a Python interpreter running the `tally` launcher with `dashboard`. Before, any process whose command line mentioned both words could be stopped, such as a shell running `tally dashboard` in a longer command.
+
 ## 0.6.1 (2026-10-13)
 
 Reviewed against a real installation: no tasks yet, 750 sessions in 54 projects.

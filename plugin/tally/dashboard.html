@@ -586,6 +586,8 @@ function renderDetail(rep, target) {
   const t = rep.task, tm = rep.time, tot = rep.totals, sess = rep.session;
   const active = t.status === "active";
   const agents = rep.by_type.filter(x => x.agent_type !== "main").reduce((a, x) => a + x.agents, 0);
+  const un = rep.unlogged || {};
+  const unCost = (un.status === "estimated" || un.status === "partial") && un.cost ? un.cost : 0;
   const comp = [
     ["Input", tot.input, "--series-1", "uncached input tokens"],
     ["Output", tot.output, "--series-2", "generated tokens (incl. thinking)"],
@@ -611,10 +613,10 @@ function renderDetail(rep, target) {
   h.push(`<div class="tiles">
     ${tile("Total tokens", fmtTok(tot.total), fmtFull(tot.total), "input + output + cache write + cache read")}
     ${tile("Output tokens", fmtTok(tot.output), fmtFull(tot.output))}
-    ${tile("Est. cost", fmtCost(tot.cost, tot.cost_partial), "at API list price", "Estimate from token counts and list prices; subscription plans are not billed per token.")}
+    ${tile("Est. cost", fmtCost(tot.cost + unCost, tot.cost_partial), unCost ? "incl. ≈ " + fmtCost(unCost) + " unlogged" : "at API list price", "Estimate from token counts and list prices; subscription plans are not billed per token." + (unCost ? " Includes Claude Code's own calls that are not in the transcripts, estimated from its session cost record." : ""))}
     ${tile("Wall time", fmtDur(tm.wall_s), active ? "running" : "start → end")}
     ${tile("Active time", fmtDur(tm.active_s), plural(tm.turns, "turn"), "time the agent was working on turns")}
-    ${tile("API calls", fmtFull(tot.calls), plural(agents, "agent"))}
+    ${tile("API calls", fmtFull(tot.calls), agents ? plural(agents, "agent") : "main session only")}
   </div>`);
 
   if (tot.total) {
@@ -697,9 +699,8 @@ function renderDetail(rep, target) {
     h.push(`<div class="section"><div class="section-title">Tools</div><table><thead><tr><th>tool</th><th>calls</th><th></th><th>errors</th></tr></thead><tbody>${
       st.tools.slice(0, 25).map(x => `<tr><td>${esc(x.tool)}</td><td class="num">${fmtFull(x.calls)}</td><td><div class="share"><div class="track"><div class="bar" style="width:${pct(x.calls, maxT)}%"></div></div></div></td><td class="num ${x.errors ? "crit" : "muted"}">${x.errors || ""}</td></tr>`).join("")}</tbody></table></div>`);
   }
-  const un = rep.unlogged || {};
-  if ((un.status === "estimated" || un.status === "partial") && un.total) {
-    h.push(`<div class="note">Plus ≈ <b class="num">${fmtTok(un.total)}</b> tokens (<span class="num">${fmtCost(un.cost)}</span>) of Claude Code's own calls that are not written to transcripts (background-agent summaries, prompt suggestions, titles). Estimated from the session cost record Claude Code writes on exit${un.status === "partial" ? "; partial, the session continued afterwards" : ""}. Not included in the totals above.</div>`);
+  if (unCost || ((un.status === "estimated" || un.status === "partial") && un.total)) {
+    h.push(`<div class="note">The cost includes ≈ <span class="num">${fmtCost(un.cost)}</span> (≈ <b class="num">${fmtTok(un.total)}</b> tokens) of Claude Code's own calls that are not written to transcripts (background-agent summaries, prompt suggestions, titles), estimated from the session cost record Claude Code writes on exit${un.status === "partial" ? "; partial, the session continued afterwards" : ""}. The token counts and tables above contain only the logged calls.</div>`);
   }
   if (t.end_note) h.push(`<div class="note">Note: ${esc(t.end_note)}</div>`);
   h.push(sess && sess.agent !== "claude"
