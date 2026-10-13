@@ -12,7 +12,7 @@ import sys
 import time
 import traceback
 
-from . import paths
+from . import __version__, paths
 
 
 def _log_error(event: str) -> None:
@@ -80,7 +80,9 @@ def handle(event: str, p: dict):
         now = time.time()
         new_project = None
         with db.transaction(conn):
-            db.kv_set(conn, "last_hook", json.dumps({"event": event, "ts": now, "session_id": sid}))
+            before = _last_hook(conn)
+            db.kv_set(conn, "last_hook", json.dumps({"event": event, "ts": now, "session_id": sid,
+                                                     "version": __version__}))
             if event in ("SessionStart", "UserPromptSubmit"):
                 from . import projects
                 name, root = projects.detect_root(cwd)
@@ -100,7 +102,11 @@ def handle(event: str, p: dict):
             return None
 
         if event == "UserPromptSubmit":
-            return _prompt(conn, sid, p, tpath, cwd)
+            out = _prompt(conn, sid, p, tpath, cwd)
+            if out and out.get("decision") == "block" and (_older(before, event, sid, now)
+                                                            or _older(_last_hook(conn), event, sid, now)):
+                out = dict(out, reason=out["reason"] + "\n" + OLDER_HOOK)
+            return out
 
         if event in ("Stop", "SubagentStop", "SessionEnd", "PreCompact"):
             if event == "SessionEnd" and p.get("reason") == "clear" and cwd:
@@ -197,6 +203,26 @@ def _prompt(conn, sid, p, tpath, cwd):
                         prompt_id=pid)
             _open_turn(conn, sid, prompt_id=pid)
     return None
+
+
+OLDER_HOOK = ("  ⚠ Tally ran twice: the agent still has the hooks of an older Tally version (from before "
+              "/reload-plugins). Restart Claude Code fully (claude --continue resumes this conversation).")
+
+
+def _last_hook(conn) -> dict:
+    from . import db
+    try:
+        d = json.loads(db.kv_get(conn, "last_hook") or "{}")
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _older(hook: dict, event: str, sid: str, now: float) -> bool:
+    """The same event of the same session, a moment apart, from an older version
+    (before 0.11.2 the record had no version): its hooks are registered too."""
+    return (hook.get("session_id") == sid and hook.get("event") == event and abs(float(hook.get("ts", 0)) - now) < 2
+            and hook.get("version") != __version__)
 
 
 ONCE_S = 3.0          # the same command in the same session this soon: the same prompt, answered once

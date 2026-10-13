@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.2 (2026-10-13)
+
+- **Tally says when it runs twice:** if a prompt's hook was also handled by an older Tally version in the same session (its hooks stay registered after `/reload-plugins` until Claude Code restarts), the answer ends with `⚠ Tally ran twice … Restart Claude Code fully`. Two hooks of the same version stay quiet: they already run each command once.
+- **Checked for every command that changes something** (start, new, end, resume, rename, todo, take, do, done, mark, project, settings): with the hook run twice at once, each has one effect and both runs give the same answer.
+
 ## 0.11.1 (2026-10-13)
 
 - **No second todo from an old hook:** a Claude Code session started before 0.10.1 keeps its old hooks after `/reload-plugins`, and they add the todo without the once-per-prompt guard. The same todo (title, project, parent) added again within 5 seconds is now the same todo, from `/tally:todo`, the CLI and the dashboard (a double click too). Plan imports are not affected. A full restart of Claude Code removes the old hooks.

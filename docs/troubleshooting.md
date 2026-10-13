@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.11.1 · doctor · python 3.9.6
+▍Tally 0.11.2 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -121,6 +121,7 @@ Two todos from one `/tally:todo`, or two answers to one command, mean the agent 
 
 - **Restart Claude Code** once, fully: quit it and start it again (`claude --continue` resumes the conversation). `/reload-plugins` alone is not enough.
 - **Since 0.10.1** a command runs once per prompt, and **since 0.11.1** the same todo added again within 5 seconds is the same todo, so a newer hook no longer adds a second one.
+- **Since 0.11.2** Tally notices it and says so under the answer: `⚠ Tally ran twice: the agent still has the hooks of an older Tally version`.
 - **The extra todo:** open the card on the board and *Delete* it, or `tally todo rm <id>`.
 
 ## Updating

@@ -160,6 +160,67 @@ class DoubleHooks(unittest.TestCase):
         with unittest.mock.patch("tally.hooks.ONCE_S", 0), unittest.mock.patch("tally.todos.TWIN_S", 0):
             self.assertIn("Todo #2 added", e.hook("UserPromptSubmit", prompt=prompt)["reason"])  # later: again
 
+    def test_every_command_runs_once_when_the_hook_runs_twice(self):
+        """Each command that changes something, run by two hook processes at once with the same prompt
+        (two registrations of the same version): one effect, the same answer twice."""
+        import threading
+        from tally import db
+        e = self.env
+        e.append(e.main(), user(time.time(), "hi", prompt_id="p1"))
+        tally = [sys.executable, str(PLUGIN / "bin" / "tally"), "hook", "UserPromptSubmit"]
+
+        def twice(prompt):
+            payload = json.dumps({"session_id": SID, "transcript_path": str(e.main()), "cwd": "/Users/me/proj",
+                                  "hook_event_name": "UserPromptSubmit", "prompt": prompt})
+            outs = [None, None]
+
+            def call(i):
+                outs[i] = subprocess.run(tally, input=payload, capture_output=True, text=True, env=os.environ,
+                                         timeout=60).stdout
+            threads = [threading.Thread(target=call, args=(i,)) for i in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(outs[0], outs[1], prompt)
+            self.assertNotIn("✗", outs[0], prompt)
+            self.assertNotIn("ran twice", outs[0], prompt)                       # the same version: no warning
+            return outs[0]
+
+        conn = db.connect()
+        one = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
+        twice("/tally:start Parser work")
+        self.assertEqual(one("SELECT COUNT(*) FROM tasks"), 1)
+        twice("/tally:rename 1 Parser rewrite")
+        self.assertEqual(one("SELECT name FROM tasks WHERE id = 1"), "Parser rewrite")
+        twice("/tally:end shipped")
+        self.assertEqual((one("SELECT status FROM tasks WHERE id = 1"), one("SELECT end_note FROM tasks WHERE id = 1")),
+                         ("ended", "shipped"))
+        twice("/tally:resume 1")
+        self.assertEqual(one("SELECT COUNT(*) FROM task_sessions WHERE task_id = 1 AND detached_at IS NULL"), 1)
+        twice("/tally:end")
+        twice("/tally:todo Fix the export !! @proj")
+        twice("/tally:todo Write the docs @proj")
+        self.assertEqual(one("SELECT COUNT(*) FROM todos"), 2)
+        twice("/tally:take 1")
+        self.assertEqual(one("SELECT COUNT(*) FROM tasks WHERE todo_id = 1"), 1)
+        twice("/tally:mark 1 blocked")
+        self.assertEqual(one("SELECT status FROM todos WHERE id = 1"), "blocked")
+        twice("/tally:done 1")
+        self.assertEqual((one("SELECT status FROM todos WHERE id = 1"),
+                          one("SELECT COUNT(*) FROM tasks WHERE todo_id = 1 AND status = 'active'")), ("done", 0))
+        twice("/tally:do 2")
+        self.assertEqual(one("SELECT COUNT(*) FROM tasks WHERE todo_id = 2"), 1)
+        twice("/tally:end")
+        twice("/tally:new Refactor the reader")
+        self.assertEqual(one("SELECT COUNT(*) FROM tasks WHERE name LIKE 'Refactor%'"), 1)
+        twice("/tally:project track")
+        self.assertEqual(one("SELECT mode FROM projects WHERE name = 'proj'"), "track")
+        twice("/tally:settings log.depth calls")
+        from tally import settings
+        self.assertEqual(settings.get("log.depth"), "calls")
+        self.assertEqual(one("SELECT COUNT(*) FROM tasks"), 4)                    # start, take, do, new
+
     def test_an_old_hook_without_the_guard_ran_first(self):
         """A session started before 0.10.1 keeps its old hooks after /reload-plugins: they add the
         todo without telling anyone; the new hook then finds it instead of adding it again."""
@@ -167,8 +228,13 @@ class DoubleHooks(unittest.TestCase):
         e = self.env
         conn = db.connect()
         old = todos.add(conn, "Write the release notes", project="proj")         # what the old hook did
+        with db.transaction(conn):                                                # its record has no version
+            db.kv_set(conn, "last_hook", json.dumps({"event": "UserPromptSubmit", "ts": time.time(), "session_id": SID}))
         reply = e.hook("UserPromptSubmit", prompt="/tally:todo Write the release notes @proj")
         self.assertIn("Todo #%d added" % old["id"], reply["reason"])
+        self.assertIn("⚠ Tally ran twice", reply["reason"])                      # and says what to do
+        self.assertIn("Restart Claude Code fully", reply["reason"])
+        self.assertNotIn("ran twice", e.hook("UserPromptSubmit", prompt="/tally:todos")["reason"])   # alone again
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0], 1)
         todos.add(conn, "Run the tests", project="proj", parent_id=old["id"], source="import")
         todos.add(conn, "Run the tests", project="proj", parent_id=old["id"], source="import")
