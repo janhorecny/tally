@@ -264,6 +264,13 @@ def update(say=print) -> int:
     new = _version_in(root)
     _save(dict(state(), latest=new, checked_at=time.time(), error=None))
     if not behind:
+        had = _claude_plugin_version()
+        if had and had != new:                   # Claude Code runs a copy: install the checkout's version
+            say(fmt.head("Tally %s: installing it into the agents (Claude Code had %s)" % (new, had), "✓"))
+            rc = _reinstall(root, say)
+            _restart_dashboard(root, say)
+            say(fmt.hints("restart Claude Code or /reload-plugins"))
+            return rc
         say(fmt.head("Tally %s is up to date" % new, "✓"))
         return 0
     say(fmt.head("Updated Tally %s → %s" % (old, new), "✓"))
@@ -280,6 +287,16 @@ def update(say=print) -> int:
     say(fmt.hints("full notes: %s/blob/main/CHANGELOG.md" % REPO_URL,
                   "restart Claude Code or /reload-plugins"))
     return rc
+
+
+def _claude_plugin_version() -> Optional[str]:
+    """The version of the copy Claude Code runs, if the plugin is installed."""
+    try:
+        data = json.loads((paths.claude_dir() / "plugins" / "installed_plugins.json").read_text())
+        entries = (data.get("plugins") or {}).get("tally@tally") or []
+        return entries[0].get("version") if entries else None
+    except (OSError, ValueError, AttributeError, IndexError):
+        return None
 
 
 def _reinstall(root: Path, say) -> int:

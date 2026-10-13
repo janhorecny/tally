@@ -2215,6 +2215,15 @@ class Updates(unittest.TestCase):
         self.assertNotIn("· First", r.stdout)
         self.assertIn('__version__ = "0.0.2"', (inst / "plugin" / "tally" / "__init__.py").read_text())
         self.assertIn("Tally 0.0.2 is up to date", run("update").stdout)
+        # Claude Code still runs an older copy (a checkout updated by hand): install the checkout's version
+        plugins = self.env.tmp / "claude" / "plugins"
+        plugins.mkdir(parents=True, exist_ok=True)
+        (plugins / "installed_plugins.json").write_text(json.dumps({"plugins": {"tally@tally": [{"version": "0.0.1"}]}}))
+        r = subprocess.run([sys.executable, str(inst / "plugin" / "bin" / "tally"), "update"], capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL,
+                           env=dict(os.environ, PATH="/usr/bin:/bin"))              # no claude CLI here
+        self.assertIn("Tally 0.0.2: installing it into the agents (Claude Code had 0.0.1)", r.stdout)
+        self.assertIn("✗ Claude Code", r.stdout)                             # it tried
         from tally import updates
         self.assertEqual(updates.state()["latest"], "0.0.2")
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3 (2026-10-13)
+
+- **`tally update` in a checkout that is already current** (one you pulled or committed to by hand) installs its version into the agents when Claude Code still runs an older copy, instead of only saying it is up to date.
+
 ## 0.9.2 (2026-10-13)
 
 - **Version check:** asks GitHub for the latest release instead of reading the manifest on `main`, which GitHub's CDN serves up to five minutes old; the manifest stays the fallback when the API is unavailable. You hear about published releases only, right after they are out.
