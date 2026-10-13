@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 (2026-10-13)
+
+- **Dashboard processes on Linux** are found through `/proc` (exact arguments, no `ps` needed), so a dashboard of an older version is replaced there too.
+
+### Development
+
+- **Checks run locally:** `scripts/check.sh` runs the tests, lint, byte-compile, the plugin manifests and the links in the docs in about 10 s; `--all` adds Python 3.8, 3.11 and 3.13 (uv) and Linux in Docker, about a minute. `.githooks/pre-push` runs the quick checks before every push (`git config core.hooksPath .githooks`).
+- **GitHub Actions off:** the workflow is disabled and runs only by hand, on Linux. Its macOS jobs were billed at ten times the minutes: about 1,170 of the 1,227 minutes this repository used.
+
 ## 0.7.1 (2026-10-13)
 
 - **Exports:** counts in Markdown exports have thousands separators (`2,433 prompts · 76,786 API calls`).

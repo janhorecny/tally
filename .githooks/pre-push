@@ -1,0 +1,4 @@
+#!/bin/sh
+# The quick checks of scripts/check.sh before every push (GitHub Actions is off).
+# Skip once: git push --no-verify. Full matrix: scripts/check.sh --all
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh"

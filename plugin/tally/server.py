@@ -316,22 +316,39 @@ def _is_dashboard(args: list) -> bool:
 def _dashboard_pids(port: int) -> list:
     """Processes started as `tally dashboard ... --port <port>` (versions before
     0.6 do not report their pid in /api/health)."""
-    try:
-        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
     default_port = int(paths.load_config().get("dashboard_port", 8765))
     pids = []
-    for line in out.splitlines():
-        pid, _, cmd = line.strip().partition(" ")
-        args = cmd.split()
+    for pid, args in _processes():
         if not _is_dashboard(args):
             continue
         # without --port it runs on the configured port
         on = args[args.index("--port") + 1] if "--port" in args[:-1] else str(default_port)
-        if on == str(port) and pid.isdigit() and int(pid) != os.getpid():
-            pids.append(int(pid))
+        if on == str(port) and pid != os.getpid():
+            pids.append(pid)
     return pids
+
+
+def _processes():
+    """(pid, argv) of the running processes: /proc on Linux (exact arguments, no ps
+    needed), else ps."""
+    if os.path.isdir("/proc/self"):
+        for d in os.listdir("/proc"):
+            if d.isdigit():
+                try:
+                    raw = Path("/proc", d, "cmdline").read_bytes()
+                except OSError:
+                    continue
+                if raw:
+                    yield int(d), raw.rstrip(b"\0").decode("utf-8", "replace").split("\0")
+        return
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if pid.isdigit():
+            yield int(pid), cmd.split()
 
 
 def stop_outdated(host: str, port: int) -> bool:

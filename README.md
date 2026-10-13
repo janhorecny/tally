@@ -133,11 +133,15 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # 67 end-to-end tests (Claude Code, Codex and pi transcripts)
+scripts/check.sh                               # 67 end-to-end tests, lint, byte-compile, manifests, doc links (~10 s)
+scripts/check.sh --all                         # also Python 3.8, 3.11, 3.13 (uv) and Linux (Docker), ~1 min
+git config core.hooksPath .githooks            # run scripts/check.sh before every push
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg
 ```
+
+Checks run locally. The GitHub Actions workflow is disabled and only runs when started by hand, on Linux, because macOS runners are billed at ten times the minutes.
 
 Layout:
 

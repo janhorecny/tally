@@ -931,12 +931,17 @@ class DashboardProcess(unittest.TestCase):
         self.assertEqual(server._dashboard_pids(port), [old.pid])
         from tally import settings
         settings.set_value("dashboard_port", port)                                   # `tally dashboard` without --port
-        with unittest.mock.patch.object(server.subprocess, "run", return_value=subprocess.CompletedProcess(
-                [], 0, stdout="  4242 /usr/bin/python3 /x/bin/tally dashboard --open\n 4243 vim tally.py\n"
-                              " 4244 /bin/zsh -c tally dashboard --background; python3 -m unittest\n"
-                              " 4245 /Library/Frameworks/Python.framework/Resources/Python.app/Contents/MacOS/Python"
-                              " /Users/me/.local/bin/tally dashboard\n")):
+        procs = [(4242, ["/usr/bin/python3", "/x/bin/tally", "dashboard", "--open"]), (4243, ["vim", "tally.py"]),
+                 (4244, ["/bin/zsh", "-c", "tally dashboard --background; python3 -m unittest"]),
+                 (4245, ["/Library/Frameworks/Python.framework/Resources/Python.app/Contents/MacOS/Python",
+                         "/Users/me/.local/bin/tally", "dashboard"])]
+        with unittest.mock.patch.object(server, "_processes", return_value=procs):
             self.assertEqual(server._dashboard_pids(port), [4242, 4245])         # never the shell (4244)
+        if not os.path.isdir("/proc/self"):                                       # macOS: ps, split on spaces
+            with unittest.mock.patch.object(server.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout="  4242 /usr/bin/python3 /x/bin/tally dashboard --open\n"
+                                  " 4244 /bin/zsh -c tally dashboard --background; python3 -m unittest\n")):
+                self.assertEqual(server._dashboard_pids(port), [4242])
         self.assertTrue(server.stop_outdated("127.0.0.1", port))
         self.assertIsNotNone(old.wait(timeout=5))
 

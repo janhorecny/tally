@@ -30,7 +30,7 @@ These are proposals, not commitments. Each is grouped by value, with a short not
 17. **Team mode.** An optional sync of ended-task snapshots to a shared store (a Git repo, S3 or a small server) for a team dashboard, with per-user attribution. Only snapshots would be synced, never prompts.
 18. **Self-calibrating prices.** Fit per-model prices from the `cost-state` records Claude Code writes (`scripts/validate_against_claude.py` already does the comparison). When a price changes, the change is detected automatically.
 19. **MCP read-only server.** Let Claude answer "what did the last three tasks cost?" from the database. It should be opt-in, since tool definitions cost context tokens in every session.
-20. **Windows.** CI already runs on macOS and Ubuntu (Python 3.8 to 3.13). Add a Windows job and use `py -3` in `hooks.json` there.
+20. **Windows.** `scripts/check.sh --all` already covers macOS and Linux (Python 3.8 to 3.13). Windows needs `py -3` in `hooks.json` and a way to run the checks there.
 
 ## Agents
 
