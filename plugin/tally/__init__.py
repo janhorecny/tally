@@ -5,4 +5,4 @@ token usage is read from Claude Code's own transcripts (main session, subagents
 and workflow agents).
 """
 
-__version__ = "0.7.2"
+__version__ = "0.7.3"

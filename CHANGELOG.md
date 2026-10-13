@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.3 (2026-10-13)
+
+- **Dashboard tables:** the selected and hovered rows had no inner padding at their edges, so the highlight started right at the text. Edge cells now keep 10px inside the row, and tables reach into the section padding so their text stays aligned with the titles.
+- **One inset:** card headers, stat tiles, the task list and the sessions table use the same 20px from the card edge as the sections, so titles, tiles, table headers and rows line up.
+
 ## 0.7.2 (2026-10-13)
 
 - **Dashboard processes on Linux** are found through `/proc` (exact arguments, no `ps` needed), so a dashboard of an older version is replaced there too.

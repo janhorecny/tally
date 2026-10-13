@@ -128,7 +128,8 @@ header .controls { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 900px) { .wrap { padding: 16px; } }
 .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
 .view > .card + .card { margin-top: 20px; }
-.card-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; flex-wrap: wrap; }
+/* one inset everywhere: 20px from the card edge to the text */
+.card-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px 10px; flex-wrap: wrap; }
 .card-head h2 { font-size: 13px; font-weight: 650; margin: 0; color: var(--text-primary); }
 .card-head .count { color: var(--text-muted); font-size: 12px; }
 .card-head .grow { flex: 1; }
@@ -145,14 +146,14 @@ header .controls { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 1000px) { .tasks-layout { grid-template-columns: minmax(0, 1fr); } }
 .tasklist { position: sticky; top: 74px; max-height: calc(100vh - 94px); display: flex; flex-direction: column; }
 @media (max-width: 1000px) { .tasklist { position: static; max-height: 46vh; } }
-.tasklist .filters { display: flex; gap: 6px; padding: 0 16px 12px; }
+.tasklist .filters { display: flex; gap: 6px; padding: 0 20px 12px; }
 .tasklist .filters input { flex: 1; min-width: 0; }
 .tasklist #tasks { overflow: auto; border-top: 1px solid var(--border); }
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; padding: 5px 10px; font-size: 12px; color: var(--text-secondary); }
 .seg button + button { border-left: 1px solid var(--border-strong); }
 .seg button.on { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
-.trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 3px 10px; padding: 11px 16px; cursor: pointer;
+.trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 3px 10px; padding: 11px 20px; cursor: pointer;
   border-bottom: 1px solid var(--border); }
 .trow:hover { background: var(--hover); }
 .trow.sel { background: var(--select); }
@@ -185,7 +186,7 @@ a.chip:hover { text-decoration: none; border-color: var(--border-strong); color:
 /* flex, not grid: a wrapped last row stretches instead of leaving an empty grey cell */
 .tiles { display: flex; flex-wrap: wrap; gap: 1px; background: var(--border);
   border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-top: 16px; }
-.tile { flex: 1 1 140px; min-width: 0; background: var(--surface-1); padding: 14px 16px; }
+.tile { flex: 1 1 140px; min-width: 0; background: var(--surface-1); padding: 14px 20px; }
 .tile .label { color: var(--text-secondary); font-size: 12px; }
 .tile .value { font-size: 24px; font-weight: 650; margin-top: 2px; letter-spacing: -.01em; }
 .tile .hint { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -199,8 +200,13 @@ a.chip:hover { text-decoration: none; border-color: var(--border-strong); color:
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: right; font-weight: 600; color: var(--text-muted); font-size: 12px; padding: 7px 8px; border-bottom: 1px solid var(--baseline); white-space: nowrap; }
 td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
-th:first-child, td:first-child { text-align: left; padding-left: 0; }
-th:last-child, td:last-child { padding-right: 0; }
+/* hover and selection highlight whole rows: the edge cells keep 10px inside the row,
+   and the table reaches 10px into the section's padding, so the text stays aligned
+   with the section titles */
+th:first-child, td:first-child { text-align: left; padding-left: 10px; }
+th:last-child, td:last-child { padding-right: 10px; }
+.section .tscroll, .section > table, .section > div > table { margin-left: -10px; margin-right: -10px; width: calc(100% + 20px); }
+.section .tscroll > table { width: 100%; margin: 0; }
 td.lbl { white-space: normal; max-width: 0; width: 42%; }
 td.lbl .t { display: flex; align-items: center; gap: 6px; min-width: 0; }
 td.lbl .t span.txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -292,8 +298,8 @@ tbody tr:hover td { background: var(--hover); }
 .stbl td.ttl { white-space: normal; max-width: 0; width: 28%; }
 .stbl td.ttl span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stbl th:nth-child(-n+4), .stbl td:nth-child(-n+4), .stbl th:last-child, .stbl td:last-child { text-align: left; }
-.stbl th:first-child, .stbl td:first-child { padding-left: 16px; }
-.stbl th:last-child, .stbl td:last-child { padding-right: 16px; }
+.stbl th:first-child, .stbl td:first-child { padding-left: 20px; }
+.stbl th:last-child, .stbl td:last-child { padding-right: 20px; }
 .stbl tbody tr { cursor: pointer; }
 /* narrow screens keep what identifies a row and what it cost; the rest is in the detail */
 .stbl td.prj, .ptbl td.pname { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
@@ -1020,7 +1026,7 @@ async function loadProjectsView() {
       <td class="c-track"><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
       <td class="num c-sess">${p.sessions}</td><td class="num c-ptok">${fmtTok(p.last_30d.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
       <td class="num c-tasks">${p.tasks}</td><td class="num c-todos">${p.open_todos}</td><td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
-    <div class="note" style="padding:12px 0 0">Sessions, tokens and cost: every session of the last 30 days, from the agents' transcripts, whatever the tracking mode. Tracking decides what Tally keeps for good: <b>track</b> every session, <b>tasks</b> only the tasks you start, <b>off</b> nothing (and the project disappears from these numbers).</div>`;
+    <div class="note" style="padding:12px 10px 0">Sessions, tokens and cost: every session of the last 30 days, from the agents' transcripts, whatever the tracking mode. Tracking decides what Tally keeps for good: <b>track</b> every session, <b>tasks</b> only the tasks you start, <b>off</b> nothing (and the project disappears from these numbers).</div>`;
   $$("select[data-mode]", $("#projtable")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
     guard(postJSON("/api/projects/" + encodeURIComponent(el.dataset.mode), {mode: el.value}).then(() => { toast(el.dataset.mode + ": " + el.value); return loadProjectsView(); })); });
   $$("tr[data-p]", $("#projtable")).forEach(tr => {
@@ -1138,7 +1144,7 @@ function renderSessions(d) {
         <td class="num">${fmtTok(st.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(st.total, max)}%"></div></div></div></td>
         <td class="num"${s.unlogged ? ` data-tip="<b>${fmtCost(cost)}</b>incl. ≈ ${fmtCost(s.unlogged.cost)} of Claude Code's own unlogged calls"` : ""}>${fmtCost(cost, st.cost_partial)}</td>
         <td class="muted c-models" data-tip="${esc(mtip)}">${esc(s.models.slice(0, 2).map(m => shortModel(m.model)).join(", "))}${s.models.length > 2 ? " +" + (s.models.length - 2) : ""}</td></tr>`;
-    }).join("")}</tbody></table>${d.count > d.sessions.length ? `<div class="note" style="padding:10px 16px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : ""}`;
+    }).join("")}</tbody></table>${d.count > d.sessions.length ? `<div class="note" style="padding:10px 20px">Showing ${d.sessions.length} of ${d.count} sessions.</div>` : ""}`;
   $$("tr[data-sid]", $("#stable")).forEach(tr => {
     tr.onclick = e => { if (!e.target.closest("a")) selectSession(tr.dataset.sid, true); };
     tr.onkeydown = e => { if (e.key === "Enter") selectSession(tr.dataset.sid, true); };
