@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.4 (2026-10-13)
+
+- **Readable in the Claude app:** the app's Code tab shows command output in a proportional font and collapses runs of spaces, so columns and indentation vanished. In the app (`CLAUDE_CODE_ENTRYPOINT=claude-desktop`) Tally now keeps them with em spaces; the terminal output is unchanged.
+- The README says where Tally works in the Claude app: local sessions of the Code tab, not cloud sessions or Chat.
+
 ## 0.11.3 (2026-10-13)
 
 - **After an update, restart Claude Code:** `tally update`, the installer and the docs said "restart Claude Code or /reload-plugins". `/reload-plugins` keeps the hooks of the old version next to the new ones, so both run; they now ask for a full restart (`claude --continue` resumes the conversation). `/reload-plugins` stays fine for a first install.

@@ -46,6 +46,8 @@ def main(event: str, stdin=None, stdout=None, agent=None, payload_text=None) -> 
         out = handle(event, payload)
         if out is not None and payload.get("agent") == "codex":
             out = _codex_syntax(out)
+        elif out is not None and os.environ.get("CLAUDE_CODE_ENTRYPOINT") in APP_ENTRYPOINTS:
+            out = _app_syntax(out)
         if out is not None:
             stdout.write(json.dumps(out))
             stdout.write("\n")
@@ -62,6 +64,17 @@ def _codex_syntax(out: dict) -> dict:
     for k in ("reason", "systemMessage"):
         if isinstance(out.get(k), str):
             out[k] = out[k].replace("/tally:", "tally:")
+    return out
+
+
+APP_ENTRYPOINTS = {"claude-desktop", "claude-desktop-3p"}       # Claude Code in the Claude app (Code tab)
+
+
+def _app_syntax(out: dict) -> dict:
+    from . import fmt
+    for k in ("reason", "systemMessage"):
+        if isinstance(out.get(k), str):
+            out[k] = fmt.for_app(out[k])
     return out
 
 
@@ -82,7 +95,8 @@ def handle(event: str, p: dict):
         with db.transaction(conn):
             before = _last_hook(conn)
             db.kv_set(conn, "last_hook", json.dumps({"event": event, "ts": now, "session_id": sid,
-                                                     "version": __version__}))
+                                                     "version": __version__,
+                                                     "entrypoint": os.environ.get("CLAUDE_CODE_ENTRYPOINT")}))
             if event in ("SessionStart", "UserPromptSubmit"):
                 from . import projects
                 name, root = projects.detect_root(cwd)

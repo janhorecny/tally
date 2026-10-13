@@ -2011,6 +2011,24 @@ class Branding(unittest.TestCase):
         self.assertIn("tally:start [name]", reason)
         self.assertNotIn("/tally:", reason)
 
+    def test_claude_app_keeps_columns(self):
+        """The Claude app collapses runs of spaces: columns and indentation become em spaces."""
+        from unittest import mock
+        from tally import fmt, hooks
+        payload = json.dumps({"session_id": SID, "cwd": "/Users/me/proj", "prompt": "/tally:help"})
+        reasons = {}
+        for entry in ("cli", "claude-desktop"):
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
+                hooks.main("UserPromptSubmit", stdin=io.StringIO(payload), stdout=out)
+            reasons[entry] = json.loads(out.getvalue())["reason"]
+        app = reasons["claude-desktop"]
+        self.assertIn("  /tally:start [name]  ", reasons["cli"])
+        self.assertNotRegex(app, r"\S  |\n ")
+        self.assertIn("\n" + fmt.EM * 2 + "/tally:start [name]" + fmt.EM * 2 + "start a task", app)
+        self.assertTrue(app.startswith(fmt.BRAND + " "), app)
+        self.assertEqual(app.replace(fmt.EM, "").replace(" ", ""), reasons["cli"].replace(" ", ""))
+
     def test_terminal_colours(self):
         from unittest import mock
         from tally import fmt

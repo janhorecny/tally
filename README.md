@@ -109,6 +109,8 @@ What gets installed:
 
 The first session in each newly installed agent shows a short welcome. `tally doctor` shows what is installed where.
 
+The Claude app works too: its **Code** tab runs Claude Code locally, with the same plugins and settings as the terminal, so `/tally:*` commands work in its local sessions. Cloud sessions and the Chat tab don't load local plugins, so Tally isn't available there.
+
 ### Other ways to install
 
 #### Claude Code only, from its plugin manager

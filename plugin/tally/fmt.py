@@ -71,7 +71,23 @@ def paint(text: str) -> str:
     return "\n".join(out)
 
 
-TAGLINE = "Per-task token & time tracking for Claude Code, Codex and pi"
+EM = " "
+_GAP = re.compile(r"(?<=\S) {2,}(?=\S)")
+
+
+def for_app(text: str) -> str:
+    """The Claude app shows hook output in a proportional font and collapses
+    runs of spaces, so columns and indentation vanish. Em spaces survive:
+    one per two columns of indentation (at most three: a description under a
+    long command), two between columns."""
+    out = []
+    for line in text.split("\n"):
+        body = line.lstrip(" ")
+        out.append(EM * min(3, (len(line) - len(body)) // 2) + _GAP.sub(EM * 2, body) if body else "")
+    return "\n".join(out)
+
+
+TAGLINE ="Per-task token & time tracking for Claude Code, Codex and pi"
 # figlet font "standard"
 WORDMARK = (
     " _____     _ _",
