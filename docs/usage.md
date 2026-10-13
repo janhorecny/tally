@@ -268,18 +268,21 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 ## Dashboard
 
-`/tally:dashboard` or `tally dashboard --open` serves http://127.0.0.1:8765. It shows:
+`/tally:dashboard` or `tally dashboard --open` serves http://127.0.0.1:8765.
 
-- the task list (live, refreshed every 5 s while a task is active);
-- summary tiles;
-- token composition;
-- the expandable breakdown tree with share bars;
-- tables by model, by agent type and by workflow;
-- the prompts of the task.
+| tab | what you can do |
+|---|---|
+| *Tasks* | Filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
+| *Todos* | A board with Doing, Todo, Blocked and Done. Add todos with the quick syntax, change the status, tick plan steps, **edit** title, priority, due date, project and notes, or **delete** a todo. *Copy /tally:do* copies the command that hands a todo to your agent. |
+| *Projects* | Tracking modes, totals, a 30-day chart, models and recent tasks per project. |
+| *Sessions* | Every session of every agent; see [Sessions](#sessions). |
+| *Settings* | The same settings as `/tally:settings`, grouped and described. |
 
-Further tabs: *Todos* (a board), *Projects* (modes, 30-day chart), *Sessions* (every session of every agent, see [Sessions](#sessions)) and *Settings*.
-
-Hover the bars for exact numbers. Light and dark themes follow the system, or the selector in the header.
+- **Live:** an active task refreshes every 5 seconds. The header shows when the data was last loaded, or that the dashboard server is not reachable.
+- **Project filter:** the selector in the header limits Tasks, Todos and Sessions to one project.
+- **Keyboard:** `R` reloads the data, `/` jumps to the task filter, `Enter` opens the focused row.
+- **Themes:** light and dark follow the system, or the selector in the header.
+- **Updates:** a dashboard left running by an older Tally version is replaced automatically by `/tally:dashboard` or `tally dashboard`.
 
 The dashboard keeps running in the background after you close the page. To stop it: `pkill -f "tally dashboard"`.
 

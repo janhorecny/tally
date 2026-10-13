@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.5.0 · doctor · python 3.9.6
+▍Tally 0.6.0 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -96,7 +96,7 @@ The `tally:todos` skill is loaded on demand. Ask explicitly ("import the plan in
 
 ## Colours or odd characters in the terminal
 
-The CLI colours its output only on a terminal, never when piped. `NO_COLOR=1` turns colours off. The logo uses box-drawing characters on a UTF-8 terminal and plain ASCII otherwise.
+The CLI colours its output only on a terminal, never when piped. `NO_COLOR=1` turns colours off. The banner is plain ASCII; only the `▍` marks need a UTF-8 terminal, and they fall back to `|` elsewhere.
 
 ## Errors
 
@@ -108,6 +108,10 @@ Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/er
 - If the port is taken, run `tally config dashboard_port 8766`.
 - Background output is logged to `~/.claude/tally/dashboard.log`.
 - To stop a background dashboard: `pkill -f "tally dashboard"`.
+
+## The dashboard looks old or shows errors after an update
+
+A dashboard started by an older Tally version keeps running until it is stopped. `/tally:dashboard` and `tally dashboard` replace it automatically. If you open the page directly, run one of them once, or `pkill -f "tally dashboard"`.
 
 ## Updating
 

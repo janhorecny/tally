@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 (2026-10-13)
+
+### Dashboard
+
+- **New look:** an app icon and the version in the header, cards with consistent spacing, one date format (`7 Oct, 07:30`, `Today`, `3 min ago`) whatever the browser's language, higher text contrast in the light theme, visible keyboard focus, and layouts that fit down to phone width.
+- **Tasks:** filter by name and status; the detail can **rename** a task, **end** an active one and **delete** an ended one, with an inline confirmation. Long paths no longer crowd the header, and large workflow phases start collapsed.
+- **Todos:** **edit** title, priority, due date, project and notes, **delete** a todo, and copy its `/tally:do` command. Overdue items stand out; dropped ones are struck through.
+- **Projects:** selecting a project no longer changes the global filter; the 30-day chart has date ticks and follows the window width.
+- **Sessions:** rows open with the keyboard too, and the detail can be closed.
+- **Settings:** grouped, with readable names next to the keys.
+- **Feedback:** saved changes and errors appear as notifications, and the header shows when the dashboard server is not reachable.
+- **Updates:** `/api/health` reports version and process id; `/tally:dashboard` and `tally dashboard` replace a dashboard left running by an older version instead of reusing it.
+
+### CLI
+
+- **Banner:** a figlet wordmark with a gold-to-orange gradient, the tagline and the version, on `tally`, `tally --help`, `tally setup` and the installer. `tally setup` highlights the current value of each question.
+
 ## 0.5.0 (2026-10-13)
 
 ### Onboarding

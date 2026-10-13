@@ -232,6 +232,15 @@ def cmd_dashboard(args):
         url, started = server.ensure_running(open_browser=args.open)
         _out(fmt.head("Dashboard %s at %s" % ("started" if started else "already running", url), "✓"))
         return
+    if server.stop_outdated(host, port):
+        _out(fmt.head("Stopped the dashboard of an older Tally version", "✓"))
+    elif server.is_running(host, port):
+        url = "http://%s:%d/" % (host, port)
+        if args.open:
+            import webbrowser
+            webbrowser.open(url)
+        _out(fmt.head("Dashboard already running at %s" % url, "✓"))
+        return
     server.serve(host, port, open_browser=args.open)
 
 
@@ -495,14 +504,23 @@ OVERVIEW = (
 
 
 def overview() -> str:
-    """`tally` without a command: the logo and the commands used most."""
+    """`tally` without a command: the banner and the commands used most."""
     color = fmt.use_color(sys.stdout)
-    lines = [fmt.logo(["Tally " + __version__, "Per-task token & time tracking", "for Claude Code, Codex and pi"],
-                      color=color, ascii_only=not fmt.can_draw(sys.stdout)), ""]
-    lines += ["  %-24s %s" % row for row in OVERVIEW]
+    dim = (lambda s: "\033[2m%s\033[0m" % s) if color else (lambda s: s)
+    lines = [fmt.banner(__version__, color, not fmt.can_draw(sys.stdout))]
+    lines += ["  %-24s %s" % (cmd, dim(what)) for cmd, what in OVERVIEW]
     lines += ["", fmt.hints("tally --help all commands", "tally <command> -h its options")]
     text = "\n".join(lines)
     return fmt.paint(text) if color else text
+
+
+class Parser(argparse.ArgumentParser):
+    """The root parser shows the banner above its help on a terminal, like `tally` alone."""
+
+    def print_help(self, file=None):
+        if file is None and self.prog == "tally" and sys.stdout.isatty():
+            print(fmt.banner(__version__, fmt.use_color(sys.stdout), not fmt.can_draw(sys.stdout)))
+        super().print_help(file)
 
 
 def cmd_doctor(args):
@@ -545,7 +563,7 @@ def cmd_doctor(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="tally", description="%s · per-task token and time tracking for Claude Code, "
+    p = Parser(prog="tally", description="%s · per-task token and time tracking for Claude Code, "
                                                           "Codex and pi." % fmt.BRAND)
     p.add_argument("--version", action="version", version="tally " + __version__)
     sub = p.add_subparsers(dest="cmd")

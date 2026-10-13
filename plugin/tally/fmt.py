@@ -47,10 +47,6 @@ _ACCENT = "\033[1;38;5;202m"        # the logo's orange
 _BOLD, _DIM, _RED, _RESET = "\033[1m", "\033[2m", "\033[31m", "\033[0m"
 _HINT_RE = re.compile(r"^  → ")
 
-LOGO = (" ┃ ┃ ┃ ┃╱", " ┃ ┃ ┃╱┃ ", " ┃ ┃╱┃ ┃ ", " ┃╱┃ ┃ ┃ ", "╱┃ ┃ ┃ ┃ ")
-LOGO_ASCII = (" | | | |/", " | | |/| ", " | |/| | ", " |/| | | ", "/| | | | ")
-
-
 def use_color(stream) -> bool:
     """Colours only on a terminal, and never with NO_COLOR (https://no-color.org) or TERM=dumb."""
     if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
@@ -75,25 +71,36 @@ def paint(text: str) -> str:
     return "\n".join(out)
 
 
-def logo(lines: List[str], color: bool = False, ascii_only: bool = False) -> str:
-    """The tally mark (four strokes, the fifth across) with text beside it, centred vertically."""
-    art = LOGO_ASCII if ascii_only else LOGO
-    pad = max(0, (len(art) - len(lines)) // 2)
-    text = [""] * pad + list(lines) + [""] * len(art)
-    out = []
-    for i, row in enumerate(art):
-        if color:
-            slash = "/" if ascii_only else "╱"
-            row = row.replace(slash, _ACCENT + slash + _RESET)
-        side = text[i]
-        if color and i == pad and side:
-            side = _BOLD + side + _RESET
-        out.append(("%s    %s" % (row, side)).rstrip())
+TAGLINE = "Per-task token & time tracking for Claude Code, Codex and pi"
+# figlet font "standard"
+WORDMARK = (
+    " _____     _ _",
+    "|_   _|_ _| | |_   _",
+    "  | |/ _` | | | | | |",
+    "  | | (_| | | | |_| |",
+    "  |_|\\__,_|_|_|\\__, |",
+    "               |___/",
+)
+GRADIENT = (214, 208, 208, 202, 202, 166)    # gold to burnt orange, one shade per line (256-colour palette)
+
+
+def banner(subtitle: str = "", color: bool = False, ascii_only: bool = False) -> str:
+    """The wordmark, the tagline and a dim subtitle such as the version or "setup · 0.5.0"."""
+    def fg(code: int, text: str) -> str:
+        return "\033[38;5;%dm%s%s" % (code, text, _RESET) if color else text
+
+    out = [""]
+    out += ["  " + fg(shade, line) for shade, line in zip(GRADIENT, WORDMARK)]
+    mark = fg(208, "|" if ascii_only else "▍")
+    out.append("  %s %s" % (mark, _BOLD + TAGLINE + _RESET if color else TAGLINE))
+    if subtitle:
+        out.append("  " + (_DIM + subtitle + _RESET if color else subtitle))
+    out.append("")
     return "\n".join(out)
 
 
 def can_draw(stream) -> bool:
-    """Box-drawing characters need a UTF-8 terminal; otherwise the ASCII logo is used."""
+    """Block characters need a UTF-8 terminal; otherwise plain ASCII is used."""
     return "utf" in (getattr(stream, "encoding", None) or "").lower()
 
 

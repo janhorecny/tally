@@ -469,7 +469,7 @@ tally dashboard [--open] [--background] [--host HOST] [--port PORT]
 | `--background` | Start detached (or reuse a running dashboard) and return. Default: run in the foreground. |
 | `--host`, `--port` | Default: `dashboard_host` and `dashboard_port` from the configuration (127.0.0.1:8765). |
 
-To stop a background dashboard: `pkill -f "tally dashboard"`.
+If a dashboard of the same version is already running, it is reused; one of an older version is stopped and replaced. To stop a background dashboard: `pkill -f "tally dashboard"`.
 
 ### `tally statusline`
 

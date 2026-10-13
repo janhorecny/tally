@@ -822,6 +822,85 @@ class TodosAndStats(unittest.TestCase):
         finally:
             httpd.shutdown()
 
+    def test_dashboard_task_actions(self):
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from tally import db, server, tasks
+        e = self.env
+        e.hook("UserPromptSubmit", prompt="/tally:start First")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % port
+
+        def post(path, body, headers=None):
+            req = urllib.request.Request(base + path, data=json.dumps(body).encode(), method="POST",
+                                         headers=dict({"Content-Type": "application/json"},
+                                                      **({"X-Tally": "1"} if headers is None else headers)))
+            return json.loads(urllib.request.urlopen(req, timeout=5).read())
+
+        def fails(path, body, code, headers=None):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                post(path, body, headers)
+            self.assertEqual(cm.exception.code, code)
+            cm.exception.close()
+        try:
+            fails("/api/tasks/1", {"action": "delete"}, 403, {})                    # cross-site: refused
+            self.assertEqual(post("/api/tasks/1", {"action": "rename", "name": "  Renamed  "})["name"], "Renamed")
+            fails("/api/tasks/1", {"action": "rename", "name": " "}, 400)
+            fails("/api/tasks/1", {"action": "explode"}, 400)
+            fails("/api/tasks/99", {"action": "end"}, 404)
+            self.assertEqual(post("/api/tasks/1", {"action": "end"})["status"], "ended")
+            fails("/api/tasks/1", {"action": "end"}, 400)                           # already ended
+            self.assertEqual(post("/api/tasks/1", {"action": "delete"}), {"deleted": 1})
+            self.assertIsNone(tasks.get(db.connect(), 1))
+            health = json.loads(urllib.request.urlopen(base + "/api/health", timeout=5).read())
+            self.assertEqual(health["pid"], os.getpid())
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
+class DashboardProcess(unittest.TestCase):
+    """A dashboard left running by another Tally version is replaced, the current one is kept."""
+
+    FAKE = (
+        "import json, os, sys\n"
+        "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+        "class H(BaseHTTPRequestHandler):\n"
+        "    def log_message(self, *a): pass\n"
+        "    def do_GET(self):\n"
+        "        b = json.dumps({'app': 'tally', 'version': sys.argv[2], 'pid': os.getpid()}).encode()\n"
+        "        self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers()\n"
+        "        self.wfile.write(b)\n"
+        "HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n")
+
+    def fake_dashboard(self, version):
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        proc = subprocess.Popen([sys.executable, "-c", self.FAKE, str(port), version])
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+        from tally import server
+        for _ in range(50):
+            if server.is_running("127.0.0.1", port):
+                break
+            time.sleep(0.1)
+        return proc, port
+
+    def test_outdated_dashboard_is_stopped(self):
+        from tally import __version__, server
+        old, port = self.fake_dashboard("0.0.1")
+        self.assertEqual(server.health("127.0.0.1", port)["version"], "0.0.1")
+        self.assertTrue(server.stop_outdated("127.0.0.1", port))
+        self.assertIsNotNone(old.wait(timeout=5))
+        self.assertFalse(server.is_running("127.0.0.1", port))
+        current, port = self.fake_dashboard(__version__)
+        self.assertFalse(server.stop_outdated("127.0.0.1", port))
+        self.assertIsNone(current.poll())                                         # still running
+
 
 class Projects(unittest.TestCase):
     def setUp(self):
@@ -1399,15 +1478,17 @@ class Branding(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NO_COLOR": "", "TERM": "dumb"}):
             self.assertFalse(fmt.use_color(Tty()))
 
-    def test_logo(self):
+    def test_banner(self):
         from tally import fmt
-        rows = fmt.logo(["Tally 9.9", "second line"]).split("\n")
-        self.assertEqual(len(rows), 5)
-        self.assertTrue(rows[0].endswith("┃╱"))
-        self.assertTrue(rows[1].endswith("    Tally 9.9"), rows)            # text centred beside the mark
-        self.assertTrue(rows[2].endswith("    second line"), rows)
-        fmt.logo(["Tally 9.9"], ascii_only=True).encode("ascii")              # no box drawing at all
-        self.assertIn("\033[1;38;5;202m╱\033[0m", fmt.logo(["x"], color=True))
+        rows = fmt.banner("9.9").split("\n")
+        self.assertEqual(rows[1:7], ["  " + line for line in fmt.WORDMARK])
+        self.assertEqual(rows[7], "  ▍ " + fmt.TAGLINE)
+        self.assertEqual(rows[8], "  9.9")
+        fmt.banner("9.9", ascii_only=True).encode("ascii")                    # no block characters at all
+        painted = fmt.banner("9.9", color=True)
+        for shade in set(fmt.GRADIENT):
+            self.assertIn("\033[38;5;%dm" % shade, painted)
+        self.assertIn("\033[2m9.9\033[0m", painted)
         self.assertTrue(fmt.can_draw(io.TextIOWrapper(io.BytesIO(), encoding="utf-8")))
         self.assertFalse(fmt.can_draw(io.TextIOWrapper(io.BytesIO(), encoding="ascii")))
 
@@ -1419,8 +1500,9 @@ class Branding(unittest.TestCase):
         from tally import __version__
         r = self.run_cli()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stdout, r"╱┃ ┃ ┃ ┃|/\| \| \| \|")            # box drawing, or ASCII off UTF-8
-        self.assertIn("Tally " + __version__, r.stdout)
+        self.assertIn("|_   _|_ _| | |_   _", r.stdout)
+        self.assertIn("Per-task token & time tracking", r.stdout)
+        self.assertIn("  " + __version__ + "\n", r.stdout)
         self.assertIn("tally setup", r.stdout)
         self.assertNotIn("\033[", r.stdout)
         r = self.run_cli("show", "42")
@@ -1439,11 +1521,15 @@ class Branding(unittest.TestCase):
     def test_cli_in_a_terminal(self):
         tally = str(PLUGIN / "bin" / "tally")
         out = run_in_pty([sys.executable, tally], env={"NO_COLOR": ""})
-        self.assertRegex(out, "\033\\[1;38;5;202m[╱/]\033\\[0m")                   # the orange stroke
+        self.assertIn("\033[38;5;214m _____     _ _\033[0m", out)                # the gradient wordmark
         self.assertIn("\033[2m  → tally --help all commands", out)
+        help_out = run_in_pty([sys.executable, tally, "--help"], env={"NO_COLOR": ""})
+        self.assertIn("|_   _|_ _| | |_   _", help_out)                                # banner above the help
+        self.assertIn("usage: tally", help_out)
+        self.assertNotIn("_____", run_in_pty([sys.executable, tally, "start", "-h"], env={"NO_COLOR": ""}))
         out = run_in_pty([sys.executable, tally], env={"NO_COLOR": "1"})
         self.assertNotIn("\033[", out)
-        self.assertRegex(out, r"╱┃ ┃ ┃ ┃|/\| \| \| \|")
+        self.assertIn("|_   _|_ _| | |_   _", out)
 
 
 class Onboarding(unittest.TestCase):

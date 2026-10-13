@@ -239,9 +239,7 @@ def install(requested: Optional[List[str]] = None, assume_yes: bool = False) -> 
     interactive = not assume_yes and sys.stdin.isatty()
     color = fmt.use_color(sys.stdout)
     if sys.stdout.isatty():
-        _say(fmt.logo(["Tally " + __version__, "Per-task token & time tracking", "for Claude Code, Codex and pi"],
-                      color=color, ascii_only=not fmt.can_draw(sys.stdout)))
-        _say("")
+        _say(fmt.banner("install · " + __version__, color, not fmt.can_draw(sys.stdout)))
     agents = choose(requested, assume_yes)
     if not agents:
         _say("Nothing selected.")

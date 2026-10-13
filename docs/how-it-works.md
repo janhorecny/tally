@@ -239,5 +239,6 @@ The heaviest session on the development machine had 527 transcript files, 298 MB
 - **Dashboard:**
   - It binds to `127.0.0.1`.
   - It rejects requests whose `Host` header is not localhost, which blocks DNS-rebinding pages from reading your prompts.
-  - Writes (todos, settings, project modes) also need a custom `X-Tally` header and, when the browser sends one, its own `Origin`. Other web pages therefore cannot change anything.
+  - Writes (tasks, todos, settings, project modes) also need a custom `X-Tally` header and, when the browser sends one, its own `Origin`. Other web pages therefore cannot change anything.
+  - `/api/health` reports the version and process id, so a dashboard of an older version can be found and replaced.
 - **Hooks never break the agent:** every error is caught and logged, and the hook exits 0.

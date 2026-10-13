@@ -190,27 +190,30 @@ def run(interactive: bool, agents: Optional[List[str]] = None, ask: Optional[Cal
         return True
     if banner:
         from . import __version__
-        say(fmt.logo(["Tally " + __version__, "Per-task token & time tracking", "for Claude Code, Codex and pi"],
-                     color=color, ascii_only=not fmt.can_draw(sys.stdout)))
-        say("")
+        say(fmt.banner("setup · " + __version__, color, not fmt.can_draw(sys.stdout)))
     say(paint(fmt.head("Setup · Enter keeps the value in [brackets]")))
+
+    def style(text: str, code: str) -> str:
+        return "\033[%sm%s\033[0m" % (code, text) if color else text
+
     answers = []
     try:
         for key, question, choices in QUESTIONS:
             current = settings.get(key)
             if choices:
-                prompt = "  %-27s %-26s [%s] " % (question, " / ".join(choices), current)
+                prompt = "  %-27s %s [%s] " % (question, style("%-26s" % " / ".join(choices), "2"),
+                                                style(str(current), "38;5;208"))
                 value = _ask(ask, say, prompt, lambda a, c=choices, v=current: _choice(a, c, v),
                              "choose one of: " + ", ".join(choices), current)
             else:
                 yes_value, no_value = YES_NO[key]
                 is_yes = current == yes_value
-                prompt = "  %s %s " % (question, "Y/n" if is_yes else "y/N")
+                prompt = "  %s %s " % (question, style("Y/n" if is_yes else "y/N", "38;5;208"))
                 answer = _ask(ask, say, prompt, lambda a, v=is_yes: _yes_no(a, v), "answer y or n", is_yes)
                 value = yes_value if answer else no_value
             if value != current:
                 answers.append((key, value))
-        add_line = _statusline_question(ask, say, agents)
+        add_line = _statusline_question(ask, say, agents, style)
     except Skipped:
         say("")
         say(paint(fmt.error("Setup skipped; nothing changed", "tally setup asks again")))
@@ -235,7 +238,7 @@ def _wants_statusline(agents: Optional[List[str]]) -> bool:
     return installer.installed()["claude"] or installer.detect()["claude"]
 
 
-def _statusline_question(ask: Callable, say: Callable, agents: Optional[List[str]]) -> bool:
+def _statusline_question(ask: Callable, say: Callable, agents: Optional[List[str]], style=lambda t, c: t) -> bool:
     """Whether to add Tally to Claude Code's status line (asked only when it has none)."""
     if not _wants_statusline(agents):
         return False
@@ -252,5 +255,5 @@ def _statusline_question(ask: Callable, say: Callable, agents: Optional[List[str
         say("  %s is not valid JSON, so it is left alone. To show Tally, add:" % claude_settings_path())
         say('    "statusLine": {"type": "command", "command": %s}' % json.dumps(statusline_command()))
         return False
-    return _ask(ask, say, "  Add Tally to Claude Code's status line? Y/n ", lambda a: _yes_no(a, True),
-                "answer y or n", True)
+    return _ask(ask, say, "  Add Tally to Claude Code's status line? %s " % style("Y/n", "38;5;208"),
+                lambda a: _yes_no(a, True), "answer y or n", True)

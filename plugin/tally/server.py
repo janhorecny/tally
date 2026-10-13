@@ -1,7 +1,9 @@
 """Local web dashboard (stdlib http.server, binds to 127.0.0.1 by default)."""
 
 import json
+import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -77,7 +79,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, HTML.read_bytes(), "text/html; charset=utf-8")
                 return
             if url.path == "/api/health":
-                self._json({"app": "tally", "version": __version__})
+                self._json({"app": "tally", "version": __version__, "pid": os.getpid()})
                 return
             if url.path == "/api/sessions":
                 from . import sessions
@@ -163,6 +165,10 @@ class Handler(BaseHTTPRequestHandler):
             conn = db.connect()
             try:
                 from . import settings, todos
+                m = re.match(r"^/api/tasks/(\d+)$", url.path)
+                if m:
+                    self._task_action(conn, int(m.group(1)), body)
+                    return
                 if url.path == "/api/todos":
                     spec = todos.parse_quick(str(body.get("text") or body.get("title") or ""),
                                              body.get("project") or None)
@@ -206,6 +212,31 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, 400)
         except Exception as exc:  # pragma: no cover - defensive
             self._json({"error": str(exc)}, 500)
+
+
+    def _task_action(self, conn, task_id: int, body: dict) -> None:
+        """end | rename | delete a task from the dashboard."""
+        t = tasks.get(conn, task_id)
+        if t is None:
+            self._json({"error": "task #%d not found" % task_id}, 404)
+            return
+        action = body.get("action")
+        if action == "end":
+            if t["status"] != "active":
+                raise ValueError("task #%d has already ended" % task_id)
+            tasks.end(conn, task_id, note=str(body.get("note") or "") or None)
+        elif action == "rename":
+            name = str(body.get("name") or "").strip()
+            if not name:
+                raise ValueError("a name is required")
+            tasks.rename(conn, task_id, name)
+        elif action == "delete":
+            tasks.delete(conn, task_id)
+            self._json({"deleted": task_id})
+            return
+        else:
+            raise ValueError("action must be end, rename or delete")
+        self._json(dict(tasks.get(conn, task_id)))
 
 
 def _projects(conn, full: bool = False) -> list:
@@ -256,12 +287,35 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False)
         pass
 
 
-def is_running(host: str, port: int) -> bool:
+def health(host: str, port: int):
+    """The running dashboard's {app, version, pid}, or None."""
     try:
         with urllib.request.urlopen("http://%s:%d/api/health" % (host, port), timeout=0.5) as r:
-            return json.loads(r.read()).get("app") == "tally"
+            d = json.loads(r.read())
+            return d if d.get("app") == "tally" else None
     except Exception:
+        return None
+
+
+def is_running(host: str, port: int) -> bool:
+    return health(host, port) is not None
+
+
+def stop_outdated(host: str, port: int) -> bool:
+    """Stop a dashboard left running by an older Tally (its API would not match
+    the page). Returns True if one was stopped."""
+    h = health(host, port)
+    if h is None or h.get("version") == __version__ or not h.get("pid"):
         return False
+    try:
+        os.kill(int(h["pid"]), signal.SIGTERM)
+    except (OSError, ValueError):
+        return False
+    for _ in range(30):
+        time.sleep(0.1)
+        if _port_free(host, port):
+            break
+    return True
 
 
 def _port_free(host: str, port: int) -> bool:
@@ -276,6 +330,7 @@ def ensure_running(open_browser: bool = False):
     port = int(cfg.get("dashboard_port", 8765))
     url = "http://%s:%d/" % (host, port)
     started = False
+    stop_outdated(host, port)
     if not is_running(host, port):
         if not _port_free(host, port):
             raise RuntimeError("port %d is used by another program; set another with "
