@@ -125,6 +125,42 @@ class Env:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
 
+class DoubleHooks(unittest.TestCase):
+    """An agent that calls the prompt hook twice for one prompt (hooks registered twice)."""
+
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def test_a_command_runs_once_and_both_calls_answer_the_same(self):
+        import threading
+        from tally import db
+        e = self.env
+        e.append(e.main(), user(time.time(), "hi", prompt_id="p1"))
+        prompt = "/tally:todo Write the release notes @proj"
+        payload = json.dumps({"session_id": SID, "transcript_path": str(e.main()), "cwd": "/Users/me/proj",
+                              "hook_event_name": "UserPromptSubmit", "prompt": prompt})
+        tally = [sys.executable, str(PLUGIN / "bin" / "tally"), "hook", "UserPromptSubmit"]
+        outs = [None, None]
+
+        def call(i):
+            outs[i] = subprocess.run(tally, input=payload, capture_output=True, text=True, env=os.environ,
+                                     timeout=60).stdout
+        threads = [threading.Thread(target=call, args=(i,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        conn = db.connect()
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0], 1)
+        self.assertEqual(outs[0], outs[1])
+        self.assertIn("Todo #1 added", json.loads(outs[0])["reason"])
+        with unittest.mock.patch("tally.hooks.ONCE_S", 0):                   # later, the same command runs again
+            self.assertIn("Todo #2 added", e.hook("UserPromptSubmit", prompt=prompt)["reason"])
+
+
 class CommandParsing(unittest.TestCase):
     def test_parse(self):
         from tally import commands

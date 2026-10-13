@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.10.0 · doctor · python 3.9.6
+▍Tally 0.10.1 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -114,6 +114,10 @@ Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/er
 ## The dashboard looks old or shows errors after an update
 
 A dashboard started by an older Tally version keeps running until it is stopped. `/tally:dashboard` and `tally dashboard` replace it automatically. If you open the page directly, run one of them once, or `tally dashboard --stop` first.
+
+## A command ran twice
+
+Two todos from one `/tally:todo`, or two answers to one command, mean the agent ran Tally's prompt hook twice: right after `/reload-plugins` with a new version, Claude Code can keep the hooks of the old version next to the new ones. Since 0.10.1 Tally runs a command once per prompt; restart Claude Code once so the old hooks are gone, and delete the extra todo in the dashboard (*Todos → Edit → Delete*) or with `tally todo rm <id>`.
 
 ## Updating
 

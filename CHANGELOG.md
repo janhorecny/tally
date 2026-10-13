@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1 (2026-10-13)
+
+- **A command runs once per prompt:** when an agent calls the prompt hook twice for one prompt (hooks registered twice, for example right after `/reload-plugins` with a new version), `/tally:todo` added the todo twice. The second call now waits for the first and gives the same answer. The same command typed again after 3 seconds runs again.
+
 ## 0.10.0 (2026-10-13)
 
 ### Terminal

@@ -171,14 +171,17 @@ def _prompt(conn, sid, p, tpath, cwd):
         parsed = commands.parse(prompt)
         if parsed:
             cmd, args = parsed
-            res = commands.run(conn, sid, cmd, args, cwd=cwd, transcript_path=tpath, prompt_id=pid)
-            if res.block:
-                return {"decision": "block", "reason": res.text, "suppressOriginalPrompt": True}
-            _open_turn(conn, sid, prompt_id=pid)   # /tally:new, /tally:do: the prompt goes on to the model
-            if res.context:
-                return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                               "additionalContext": res.context}}
-            return None
+
+            def run():
+                res = commands.run(conn, sid, cmd, args, cwd=cwd, transcript_path=tpath, prompt_id=pid)
+                if res.block:
+                    return {"decision": "block", "reason": res.text, "suppressOriginalPrompt": True}
+                _open_turn(conn, sid, prompt_id=pid)   # /tally:new, /tally:do: the prompt goes on to the model
+                if res.context:
+                    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                   "additionalContext": res.context}}
+                return None
+            return _once(conn, sid, prompt, run)
 
     task = tasks.active_for_session(conn, sid)
     if task is not None:
@@ -194,6 +197,44 @@ def _prompt(conn, sid, p, tpath, cwd):
                         prompt_id=pid)
             _open_turn(conn, sid, prompt_id=pid)
     return None
+
+
+ONCE_S = 3.0          # the same command in the same session this soon: the same prompt, answered once
+
+
+def _once(conn, sid, prompt, run):
+    """Run a /tally:* command once per prompt. An agent can call the hook twice
+    for one prompt (hooks registered twice, e.g. after a plugin was reloaded
+    with a new version), which would add a todo twice. The second call waits
+    for the first one and gives the same answer."""
+    import hashlib
+    from . import db
+    key = "once:" + sid
+    digest = hashlib.sha1(prompt.encode("utf-8", "replace")).hexdigest()
+    now = time.time()
+    with db.transaction(conn):
+        try:
+            prev = json.loads(db.kv_get(conn, key) or "{}")
+        except ValueError:
+            prev = {}
+        twin = prev.get("hash") == digest and now - float(prev.get("ts", 0)) < ONCE_S
+        if not twin:
+            db.kv_set(conn, key, json.dumps({"hash": digest, "ts": now, "done": False}))
+    if twin:
+        deadline = now + 10
+        while not prev.get("done") and time.time() < deadline:
+            time.sleep(0.05)
+            try:
+                prev = json.loads(db.kv_get(conn, key) or "{}")
+            except ValueError:
+                prev = {}
+        return prev.get("result")
+    result = None
+    try:
+        result = run()
+    finally:
+        db.kv_set(conn, key, json.dumps({"hash": digest, "ts": now, "done": True, "result": result}))
+    return result
 
 
 # Turn timing from hooks (prompt submitted -> Stop). Interactive sessions also
