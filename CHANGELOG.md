@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1 (2026-10-13)
+
+- **No second todo from an old hook:** a Claude Code session started before 0.10.1 keeps its old hooks after `/reload-plugins`, and they add the todo without the once-per-prompt guard. The same todo (title, project, parent) added again within 5 seconds is now the same todo, from `/tally:todo`, the CLI and the dashboard (a double click too). Plan imports are not affected. A full restart of Claude Code removes the old hooks.
+
 ## 0.11.0 (2026-10-13)
 
 ### A kanban board

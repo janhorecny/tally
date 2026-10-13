@@ -101,11 +101,24 @@ def get(conn, todo_id: int):
     return conn.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
 
 
+TWIN_S = 5.0        # the same todo added again this soon is the same one (a double submit, a hook run twice)
+
+
 def add(conn, title: str, project: Optional[str] = None, priority: int = 0, due_at: Optional[float] = None,
         notes: Optional[str] = None, parent_id: Optional[int] = None, source: str = "user",
-        source_ref: Optional[str] = None, status: str = "todo", position: Optional[int] = None):
+        source_ref: Optional[str] = None, status: str = "todo", position: Optional[int] = None,
+        once: bool = False):
+    """Add a todo. once: if the same title was added to the same project and
+    parent a moment ago, return that one instead (commands, the dashboard;
+    not plan imports, whose steps may repeat a title)."""
     now = time.time()
     with db.transaction(conn):
+        if once:
+            twin = conn.execute(
+                "SELECT id FROM todos WHERE title = ? AND project IS ? AND parent_id IS ? AND created_at > ? "
+                "ORDER BY id DESC LIMIT 1", (title.strip(), project, parent_id, now - TWIN_S)).fetchone()
+            if twin is not None:
+                return get(conn, twin[0])
         cur = conn.execute(
             "INSERT INTO todos(project, title, notes, status, priority, due_at, parent_id, position, source, "
             "source_ref, created_at, updated_at, done_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",

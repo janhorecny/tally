@@ -276,7 +276,7 @@ def _todo_command(conn, session_id, cmd, args, cwd, transcript_path, prompt_id) 
         except ValueError as e:
             return Result(fmt.error(str(e)))
         t = todos.add(conn, spec["title"], project=spec["project"], priority=spec["priority"],
-                      due_at=spec["due_at"], notes=spec["notes"], source="user")
+                      due_at=spec["due_at"], notes=spec["notes"], source="user", once=True)
         return Result("\n".join([
             fmt.head("Todo #%d added to %s: %s%s" % (
                 t["id"], t["project"] or "(no project)", t["title"],

@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.11.0 · doctor · python 3.9.6
+▍Tally 0.11.1 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -117,7 +117,11 @@ A dashboard started by an older Tally version keeps running until it is stopped.
 
 ## A command ran twice
 
-Two todos from one `/tally:todo`, or two answers to one command, mean the agent ran Tally's prompt hook twice: right after `/reload-plugins` with a new version, Claude Code can keep the hooks of the old version next to the new ones. Since 0.10.1 Tally runs a command once per prompt; restart Claude Code once so the old hooks are gone, and delete the extra todo in the dashboard (open the card, *Delete*) or with `tally todo rm <id>`.
+Two todos from one `/tally:todo`, or two answers to one command, mean the agent ran Tally's prompt hook twice. After `/reload-plugins` with a new version, Claude Code keeps the hooks the session started with next to the new ones, so the old version runs too.
+
+- **Restart Claude Code** once, fully: quit it and start it again (`claude --continue` resumes the conversation). `/reload-plugins` alone is not enough.
+- **Since 0.10.1** a command runs once per prompt, and **since 0.11.1** the same todo added again within 5 seconds is the same todo, so a newer hook no longer adds a second one.
+- **The extra todo:** open the card on the board and *Delete* it, or `tally todo rm <id>`.
 
 ## Updating
 

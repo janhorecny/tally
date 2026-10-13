@@ -320,7 +320,7 @@ def cmd_todo(args):
             if args.notes:
                 spec["notes"] = args.notes
             t = todos.add(conn, spec["title"], project=spec["project"], priority=spec["priority"],
-                          due_at=spec["due_at"], notes=spec["notes"], parent_id=args.parent, source=args.source)
+                          due_at=spec["due_at"], notes=spec["notes"], parent_id=args.parent, source=args.source, once=True)
             if args.json:
                 print(json.dumps(_todo_json(conn, t)))
             else:

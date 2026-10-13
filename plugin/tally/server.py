@@ -214,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
                     status = body.get("status") if body.get("status") in ("todo", "doing", "blocked") else "todo"
                     t = todos.add(conn, spec["title"], project=spec["project"], priority=spec["priority"],
                                   due_at=spec["due_at"], notes=spec["notes"] or body.get("notes"),
-                                  parent_id=parent["id"] if parent else None, source="dashboard", status=status)
+                                  parent_id=parent["id"] if parent else None, source="dashboard", status=status, once=True)
                     self._json(dict(t), 201)
                     return
                 m = re.match(r"^/api/todos/(\d+)$", url.path)

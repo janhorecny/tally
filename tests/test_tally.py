@@ -157,8 +157,22 @@ class DoubleHooks(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0], 1)
         self.assertEqual(outs[0], outs[1])
         self.assertIn("Todo #1 added", json.loads(outs[0])["reason"])
-        with unittest.mock.patch("tally.hooks.ONCE_S", 0):                   # later, the same command runs again
-            self.assertIn("Todo #2 added", e.hook("UserPromptSubmit", prompt=prompt)["reason"])
+        with unittest.mock.patch("tally.hooks.ONCE_S", 0), unittest.mock.patch("tally.todos.TWIN_S", 0):
+            self.assertIn("Todo #2 added", e.hook("UserPromptSubmit", prompt=prompt)["reason"])  # later: again
+
+    def test_an_old_hook_without_the_guard_ran_first(self):
+        """A session started before 0.10.1 keeps its old hooks after /reload-plugins: they add the
+        todo without telling anyone; the new hook then finds it instead of adding it again."""
+        from tally import db, todos
+        e = self.env
+        conn = db.connect()
+        old = todos.add(conn, "Write the release notes", project="proj")         # what the old hook did
+        reply = e.hook("UserPromptSubmit", prompt="/tally:todo Write the release notes @proj")
+        self.assertIn("Todo #%d added" % old["id"], reply["reason"])
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0], 1)
+        todos.add(conn, "Run the tests", project="proj", parent_id=old["id"], source="import")
+        todos.add(conn, "Run the tests", project="proj", parent_id=old["id"], source="import")
+        self.assertEqual(len(todos.children(conn, old["id"])), 2)                # plan steps may repeat a title
 
 
 class CommandParsing(unittest.TestCase):
