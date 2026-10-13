@@ -1,8 +1,8 @@
 """New versions: a daily check in the background and `tally update`.
 
-The check is one GET of the plugin manifest on GitHub (setting updates.check,
-on by default; TALLY_NO_UPDATE_CHECK=1 turns it off too). Nothing about the
-user is sent. It runs in a detached process, so hooks and commands never wait
+The check is one GET of the latest GitHub release (the plugin manifest on
+main if the API is unavailable; setting updates.check, on by default;
+TALLY_NO_UPDATE_CHECK=1 turns it off too). Nothing about the user is sent. It runs in a detached process, so hooks and commands never wait
 for the network; they only read the result, ~/.claude/tally/update.json.
 
 A newer version is announced at most once a day per place: the session start
@@ -25,7 +25,8 @@ from typing import List, Optional, Tuple
 from . import __version__, db, fmt, paths, settings
 
 REPO_URL = "https://github.com/janhorecny/tally"
-MANIFEST_URL = "https://raw.githubusercontent.com/janhorecny/tally/main/plugin/.claude-plugin/plugin.json"
+RELEASE_URL = "https://api.github.com/repos/janhorecny/tally/releases/latest"     # fresh; 60 requests/h per IP
+MANIFEST_URL = "https://raw.githubusercontent.com/janhorecny/tally/main/plugin/.claude-plugin/plugin.json"  # cached 5 min
 INSTALL_LINE = "curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh | bash"
 DAY = 86400
 RETRY_S = 6 * 3600                       # after a failed check
@@ -72,15 +73,19 @@ def _save(data: dict) -> None:
 def check_now(timeout: float = 5.0) -> dict:
     """Fetch the latest version now; stores and returns {latest, checked_at, error}."""
     import urllib.request
-    url = os.environ.get("TALLY_UPDATE_URL") or MANIFEST_URL
+    urls = [os.environ["TALLY_UPDATE_URL"]] if os.environ.get("TALLY_UPDATE_URL") else [RELEASE_URL, MANIFEST_URL]
     data = dict(state(), attempted_at=time.time())
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "tally/" + __version__})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            latest = json.loads(resp.read().decode("utf-8"))["version"]
-        data.update(latest=str(latest), checked_at=time.time(), error=None)
-    except Exception as exc:                 # offline, rate limited, moved: try again later
-        data.update(error=str(exc)[:200])
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "tally/" + __version__,
+                                                       "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                doc = json.loads(resp.read().decode("utf-8"))
+            latest = str(doc.get("tag_name") or doc["version"]).lstrip("v")      # a release, or the manifest
+            data.update(latest=latest, checked_at=time.time(), error=None)
+            break
+        except Exception as exc:             # offline, rate limited, moved: the next URL, else later
+            data.update(error=str(exc)[:200])
     _save(data)
     return data
 

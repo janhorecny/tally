@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2 (2026-10-13)
+
+- **Version check:** asks GitHub for the latest release instead of reading the manifest on `main`, which GitHub's CDN serves up to five minutes old; the manifest stays the fallback when the API is unavailable. You hear about published releases only, right after they are out.
+
 ## 0.9.1 (2026-10-13)
 
 - **Installed from Claude Code's plugin manager:** `tally update` and the new-version notice no longer point at Claude Code's own clone of the marketplace; they say `claude plugin marketplace update tally && claude plugin update tally@tally`, and `tally update` runs exactly that.

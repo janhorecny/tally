@@ -22,7 +22,7 @@ The Claude Code integration end to end. Codex and pi follow the same pattern; se
           ~/.claude/tally/tally.db  ──▶  /tally:status · CLI · dashboard · status line
 ```
 
-Tally is a Claude Code **plugin**, a set of **Codex hooks** and a **pi extension**, all backed by one Python package that uses only the standard library. It never calls a model. Its only network request is a daily version check (the plugin manifest from GitHub; nothing is sent, `updates.check off` turns it off); the dashboard listens on localhost only. It reads only the transcripts the agents already write.
+Tally is a Claude Code **plugin**, a set of **Codex hooks** and a **pi extension**, all backed by one Python package that uses only the standard library. It never calls a model. Its only network request is a daily version check (the latest GitHub release; nothing is sent, `updates.check off` turns it off); the dashboard listens on localhost only. It reads only the transcripts the agents already write.
 
 ## Agents
 
@@ -236,7 +236,7 @@ The heaviest session on the development machine had 527 transcript files, 298 MB
 ## Security and privacy
 
 - **Local only:** all data stays in `~/.claude/tally`, and nothing is sent anywhere.
-- **Version check:** once a day a detached process fetches `plugin/.claude-plugin/plugin.json` from `raw.githubusercontent.com` and stores the version in `~/.claude/tally/update.json`. The request carries only a `User-Agent: tally/<version>` header. Hooks and commands read the stored result and never wait for the network. Off: `updates.check off` or `TALLY_NO_UPDATE_CHECK=1`.
+- **Version check:** once a day a detached process asks `api.github.com` for the latest release of `janhorecny/tally` (if that fails, it reads `plugin/.claude-plugin/plugin.json` on `main` from `raw.githubusercontent.com`) and stores the version in `~/.claude/tally/update.json`. The request carries only a `User-Agent: tally/<version>` header. Hooks and commands read the stored result and never wait for the network. Off: `updates.check off` or `TALLY_NO_UPDATE_CHECK=1`.
 - **Updates** come from `git pull` of the checkout Tally runs from (`tally update`), fast-forward only; a checkout with local changes is left alone.
 - **Prompts are stored** in the database (`prompts` table), so treat the file like your transcripts.
 - **Dashboard:**

@@ -31,7 +31,7 @@ Per-project tracking modes (`track`, `tasks`, `off`) are stored in the database,
 | `auto_start` | `"off"` | `"off"`: tasks start only with `/tally:start` or `/tally:new`. `"session"`: the first prompt of every new session starts a task named after that prompt. |
 | `projects.default_mode` | `"ask"` | The mode of a project Tally sees for the first time. `"ask"`: show the setup question. `"track"` or `"tasks"`: use that mode and show a one-line notice instead. |
 | `sessions.scope` | `"enabled"` | What the sessions overview reads from the agents' transcripts. `"enabled"`: projects set to `track` or `tasks`, sessions a task counted, and sessions added one by one in the dashboard; the rest is only counted. `"all"`: every session, except projects set to `off`. |
-| `updates.check` | `true` | Once a day, fetch the latest version number from GitHub in the background and say when a new version is out (session start, CLI, dashboard). Nothing about you is sent. `false`: never. |
+| `updates.check` | `true` | Once a day, ask GitHub for the latest release in the background and say when a new version is out (session start, CLI, dashboard). Nothing about you is sent. `false`: never. |
 | `dashboard_host` | `"127.0.0.1"` | Interface the dashboard binds to. Keep it on localhost, because the API has no authentication. |
 | `dashboard_port` | `8765` | Port of the dashboard. |
 | `dashboard_idle_minutes` | `120` | A dashboard started in the background (`/tally:dashboard`, `tally dashboard --background`) stops after this many minutes without an open page. `0`: never. |

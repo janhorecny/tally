@@ -105,7 +105,7 @@ tally update
 
 It pulls the latest version, installs it into every agent Tally is in, restarts a running dashboard and lists what changed. Then run `/reload-plugins` in Claude Code (or restart it), `/reload` in pi, and restart Codex.
 
-**You hear about new versions** at most once a day: in the session start message of your agents, below CLI commands on a terminal, and as a ⬆ chip next to the version in the dashboard (a click copies `tally update`). To know, Tally fetches the version number of the plugin manifest from GitHub once a day, in the background. Nothing about you or your usage is sent. `tally update --check` checks right now; `tally settings updates.check off` turns the check off.
+**You hear about new versions** at most once a day: in the session start message of your agents, below CLI commands on a terminal, and as a ⬆ chip next to the version in the dashboard (a click copies `tally update`). To know, Tally asks GitHub for the latest release once a day, in the background. Nothing about you or your usage is sent. `tally update --check` checks right now; `tally settings updates.check off` turns the check off.
 
 Installed from Claude Code's plugin manager: `claude plugin marketplace update tally && claude plugin update tally@tally`. Release notes: [CHANGELOG](CHANGELOG.md) and [GitHub releases](https://github.com/janhorecny/tally/releases).
 
@@ -163,7 +163,7 @@ python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{
 scripts/release.sh                             # publish the version in __init__.py: checks, push, tag, GitHub release
 ```
 
-**Releasing:** bump the version in `plugin/tally/__init__.py`, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, add its section on top of `CHANGELOG.md`, commit, then `scripts/release.sh`. Installed copies see a new version on `main` within a day and `tally update` pulls `main`, so push only finished versions there.
+**Releasing:** bump the version in `plugin/tally/__init__.py`, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, add its section on top of `CHANGELOG.md`, commit, then `scripts/release.sh`. Installed copies hear about the new release within a day, and `tally update` pulls `main`, so push only finished versions there.
 
 Checks run locally. The GitHub Actions workflow is disabled and only runs when started by hand, on Linux, because macOS runners are billed at ten times the minutes.
 

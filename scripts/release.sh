@@ -4,8 +4,8 @@
 #   scripts/release.sh            the version must be committed on main, with its CHANGELOG section on top
 #   scripts/release.sh --dry-run  only the checks
 #
-# Installed copies learn about a new version from plugin/.claude-plugin/plugin.json
-# on main, once a day; `tally update` pulls main. So push only finished versions to main.
+# Installed copies learn about a new version from the latest GitHub release (this
+# script creates it), once a day; `tally update` pulls main. Push only finished versions.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"

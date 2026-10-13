@@ -2123,6 +2123,8 @@ class Updates(unittest.TestCase):
         self.assertEqual((st["latest"], bool(st["error"])), ("99.0.0", True))
         self.assertFalse(updates.due())
         self.assertTrue(updates.due(time.time() + updates.RETRY_S + 1))
+        self.manifest.write_text(json.dumps({"tag_name": "v100.1.0", "name": "Tally 100.1.0"}))   # a GitHub release
+        self.assertEqual(updates.check_now()["latest"], "100.1.0")
 
     def test_session_start_and_doctor_mention_it(self):
         from tally import hooks, updates
