@@ -45,7 +45,7 @@ HELP = """▍Tally %s · tokens and time per task, including subagents and workf
 
   Other
     /tally:settings [key [val]] show or change settings (log.depth, log.prompts, todos.reminder, …)
-    /tally:dashboard            open the local web dashboard
+    /tally:dashboard [stop]     open the local web dashboard, or stop it
     /tally:help                 this help
 
   Commands are answered locally and cost no tokens, except /tally:new and /tally:do,
@@ -231,7 +231,13 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
         return Result(fmt.head("Task #%d renamed: %s" % (task["id"], task["name"]), "✓"))
 
     if cmd == "dashboard":
-        from . import server
+        from . import paths, server
+        if args.strip() == "stop":
+            cfg = paths.load_config()
+            host, port = cfg.get("dashboard_host", "127.0.0.1"), int(cfg.get("dashboard_port", 8765))
+            if server.stop(host, port):
+                return Result(fmt.head("Dashboard stopped", "■") + "\n" + fmt.hints("/tally:dashboard starts it again"))
+            return Result(fmt.head("No dashboard is running") + "\n" + fmt.hints("/tally:dashboard starts it"))
         url, started = server.ensure_running(open_browser=True)
         return Result(fmt.head("Dashboard %s at %s" % ("started" if started else "running", url), "✓"))
 

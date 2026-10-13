@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.7.3 · doctor · python 3.9.6
+▍Tally 0.7.4 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -107,11 +107,12 @@ Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/er
 - `tally dashboard --open` runs it in the foreground and shows any error directly.
 - If the port is taken, run `tally config dashboard_port 8766`.
 - Background output is logged to `~/.claude/tally/dashboard.log`.
-- To stop a background dashboard: `pkill -f "tally dashboard"`.
+- To stop a background dashboard: `tally dashboard --stop` or `/tally:dashboard stop`.
+- **The page says the server is not running:** a dashboard started in the background stops after two hours without an open page (`dashboard_idle_minutes`). Run `/tally:dashboard` to start it again, or set `dashboard_idle_minutes` to `0` to keep it running.
 
 ## The dashboard looks old or shows errors after an update
 
-A dashboard started by an older Tally version keeps running until it is stopped. `/tally:dashboard` and `tally dashboard` replace it automatically. If you open the page directly, run one of them once, or `pkill -f "tally dashboard"`.
+A dashboard started by an older Tally version keeps running until it is stopped. `/tally:dashboard` and `tally dashboard` replace it automatically. If you open the page directly, run one of them once, or `tally dashboard --stop` first.
 
 ## Updating
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.4 (2026-10-13)
+
+- **Stopping the dashboard:** `/tally:dashboard stop`, `tally dashboard --stop`, and a *Stop the dashboard* button in *Settings → Dashboard* (`POST /api/shutdown`, same-origin like every write).
+- **Idle stop:** a dashboard started in the background stops by itself after `dashboard_idle_minutes` (new setting, default 120, `0` = never) without an open page; an open page checks in every minute. `/tally:dashboard` starts it again.
+
 ## 0.7.3 (2026-10-13)
 
 - **Dashboard tables:** the selected and hovered rows had no inner padding at their edges, so the highlight started right at the text. Edge cells now keep 10px inside the row, and tables reach into the section padding so their text stays aligned with the titles.

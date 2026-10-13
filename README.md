@@ -112,7 +112,7 @@ Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in
 | `/tally:project [name] [track\|tasks\|off]` · `/tally:projects` | Overall statistics of this project, or set its mode · all projects. |
 | `/tally:sessions [days\|all] [agent] [here]` | Every session of every agent with tokens, cost, models and time (default: 7 days). |
 | `/tally:settings [key value]` | `log.depth`, `log.prompts`, `todos.reminder`, `auto_start` … |
-| `/tally:dashboard` · `/tally:help` | Local dashboard (http://127.0.0.1:8765) · help. |
+| `/tally:dashboard [stop]` · `/tally:help` | Local dashboard (http://127.0.0.1:8765), or stop it · help. |
 
 The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | setup | export | dashboard | statusline | doctor`. `tally` alone shows the most used ones. See the [CLI reference](docs/cli.md).
 
@@ -133,7 +133,7 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-scripts/check.sh                               # 67 end-to-end tests, lint, byte-compile, manifests, doc links (~10 s)
+scripts/check.sh                               # 69 end-to-end tests, lint, byte-compile, manifests, doc links (~10 s)
 scripts/check.sh --all                         # also Python 3.8, 3.11, 3.13 (uv) and Linux (Docker), ~1 min
 git config core.hooksPath .githooks            # run scripts/check.sh before every push
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)

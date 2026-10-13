@@ -7,6 +7,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import webbrowser
@@ -68,6 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def do_GET(self):
+        self.server.last_request = time.time()
         if not self._host_allowed():
             self._send(403, b"forbidden host", "text/plain; charset=utf-8")
             return
@@ -176,10 +178,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, 500)
 
     def do_POST(self):
+        self.server.last_request = time.time()
         if not self._host_allowed() or not self._origin_ok():
             self._send(403, b"forbidden", "text/plain; charset=utf-8")
             return
         url = urlparse(self.path)
+        if url.path == "/api/shutdown":
+            self._json({"stopping": True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         try:
             body = self._body()
             conn = db.connect()
@@ -278,17 +285,34 @@ def _todos(conn, project, status) -> list:
     return out
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False, idle_minutes: float = 0) -> None:
+    """Serve until Ctrl+C, /api/shutdown, SIGTERM, or idle_minutes without a request
+    (an open page pings every minute, so this means: nobody has it open)."""
     httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd.last_request = time.time()
     url = "http://%s:%d/" % (host, port)
     from . import fmt
-    print("%s · dashboard on %s (Ctrl+C to stop)" % (fmt.BRAND, url), flush=True)
+    print("%s · dashboard on %s (Ctrl+C to stop%s)" % (
+        fmt.BRAND, url, ", stops after %g min without an open page" % idle_minutes if idle_minutes else ""), flush=True)
+    if idle_minutes:
+        threading.Thread(target=_stop_when_idle, args=(httpd, idle_minutes * 60), daemon=True).start()
     if open_browser:
         webbrowser.open(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        httpd.server_close()
+
+
+def _stop_when_idle(httpd, limit_s: float) -> None:
+    while True:
+        time.sleep(min(60.0, max(0.1, limit_s / 4)))
+        if time.time() - httpd.last_request > limit_s:
+            print("dashboard idle for %g min, stopping" % (limit_s / 60), flush=True)
+            httpd.shutdown()
+            return
 
 
 def health(host: str, port: int):
@@ -357,6 +381,16 @@ def stop_outdated(host: str, port: int) -> bool:
     h = health(host, port)
     if h is None or h.get("version") == __version__:
         return False
+    return _terminate(host, port, h)
+
+
+def stop(host: str, port: int) -> bool:
+    """Stop the dashboard on host:port, whatever its version. False if none runs."""
+    h = health(host, port)
+    return h is not None and _terminate(host, port, h)
+
+
+def _terminate(host: str, port: int, h: dict) -> bool:
     pids = [int(h["pid"])] if str(h.get("pid", "")).isdigit() else _dashboard_pids(port)
     stopped = False
     for pid in pids:
@@ -382,6 +416,7 @@ def ensure_running(open_browser: bool = False):
     cfg = paths.load_config()
     host = cfg.get("dashboard_host", "127.0.0.1")
     port = int(cfg.get("dashboard_port", 8765))
+    idle = cfg.get("dashboard_idle_minutes", 120)
     url = "http://%s:%d/" % (host, port)
     started = False
     stop_outdated(host, port)
@@ -392,7 +427,8 @@ def ensure_running(open_browser: bool = False):
         paths.home().mkdir(parents=True, exist_ok=True)
         with open(paths.home() / "dashboard.log", "a") as log:
             subprocess.Popen(
-                [sys.executable, str(BIN), "dashboard", "--host", host, "--port", str(port)],
+                [sys.executable, str(BIN), "dashboard", "--host", host, "--port", str(port),
+                 "--idle-minutes", str(idle or 0)],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True,
             )
         for _ in range(30):

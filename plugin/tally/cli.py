@@ -231,6 +231,12 @@ def cmd_dashboard(args):
     cfg = paths.load_config()
     host = args.host or cfg.get("dashboard_host", "127.0.0.1")
     port = args.port or int(cfg.get("dashboard_port", 8765))
+    if args.stop:
+        if server.stop(host, port):
+            _out(fmt.head("Dashboard stopped (http://%s:%d/)" % (host, port), "■"))
+        else:
+            _out(fmt.head("No dashboard running at http://%s:%d/" % (host, port)))
+        return
     if args.background:
         url, started = server.ensure_running(open_browser=args.open)
         _out(fmt.head("Dashboard %s at %s" % ("started" if started else "already running", url), "✓"))
@@ -244,7 +250,7 @@ def cmd_dashboard(args):
             webbrowser.open(url)
         _out(fmt.head("Dashboard already running at %s" % url, "✓"))
         return
-    server.serve(host, port, open_browser=args.open)
+    server.serve(host, port, open_browser=args.open, idle_minutes=args.idle_minutes or 0)
 
 
 def cmd_stats(args):
@@ -669,6 +675,8 @@ def build_parser():
     s.add_argument("--port", type=int)
     s.add_argument("--open", action="store_true", help="open the browser")
     s.add_argument("--background", action="store_true", help="start detached and return")
+    s.add_argument("--stop", action="store_true", help="stop the running dashboard")
+    s.add_argument("--idle-minutes", type=float, help="stop after this many minutes without an open page")
     s.set_defaults(func=cmd_dashboard)
 
     s = sub.add_parser("config", help="show or set configuration (auto_start, dashboard_port, pricing)")

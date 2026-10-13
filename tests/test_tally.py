@@ -924,6 +924,66 @@ class DashboardProcess(unittest.TestCase):
         self.assertFalse(server.stop_outdated("127.0.0.1", port))
         self.assertIsNone(current.poll())                                         # still running
 
+    @staticmethod
+    def free_port():
+        import socket
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            return sk.getsockname()[1]
+
+    def test_stop_command_and_slash(self):
+        from tally import server, settings
+        settings.set_value("dashboard_port", self.free_port())     # never the real dashboard on 8765
+        old, port = self.fake_dashboard("0.7.2")
+        tally = [sys.executable, str(PLUGIN / "bin" / "tally")]
+        r = subprocess.run(tally + ["dashboard", "--stop", "--port", str(port)], capture_output=True, text=True,
+                           env=os.environ, timeout=30)
+        self.assertIn("■ Dashboard stopped", r.stdout)
+        self.assertIsNotNone(old.wait(timeout=5))
+        r = subprocess.run(tally + ["dashboard", "--stop", "--port", str(port)], capture_output=True, text=True,
+                           env=os.environ, timeout=30)
+        self.assertIn("No dashboard running", r.stdout)
+        reply = self.env.hook("UserPromptSubmit", prompt="/tally:dashboard stop")["reason"]
+        self.assertIn("No dashboard is running", reply)
+        self.assertFalse(server.is_running("127.0.0.1", port))
+
+    def test_idle_stop_heartbeat_and_shutdown_api(self):
+        import threading
+        import urllib.request
+        from tally import server
+        port = self.free_port()
+        t = threading.Thread(target=server.serve, args=("127.0.0.1", port), kwargs={"idle_minutes": 0.02}, daemon=True)
+        t.start()                                                    # idle limit 1.2 s
+        for _ in range(50):
+            if server.is_running("127.0.0.1", port):
+                break
+            time.sleep(0.05)
+        for _ in range(8):                                            # an open page: 2.4 s of pings
+            self.assertTrue(server.is_running("127.0.0.1", port))
+            time.sleep(0.3)
+        t.join(timeout=10)                                            # nobody left: it stops by itself
+        self.assertFalse(t.is_alive())
+        self.assertFalse(server.is_running("127.0.0.1", port))
+        port = self.free_port()
+        t = threading.Thread(target=server.serve, args=("127.0.0.1", port), daemon=True)
+        t.start()
+        for _ in range(50):
+            if server.is_running("127.0.0.1", port):
+                break
+            time.sleep(0.05)
+        base = "http://127.0.0.1:%d/api/shutdown" % port
+        req = urllib.request.Request(base, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:          # a foreign page cannot stop it
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(cm.exception.code, 403)
+        cm.exception.close()
+        req = urllib.request.Request(base, data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json", "X-Tally": "1"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            self.assertEqual(json.loads(resp.read()), {"stopping": True})
+        t.join(timeout=10)
+        self.assertFalse(t.is_alive())
+
     def test_outdated_dashboard_without_pid_is_found_by_its_command_line(self):
         from tally import server
         old, port = self.fake_dashboard("0.5.0", with_pid=False)                 # before 0.6: no pid in health

@@ -53,7 +53,7 @@ For scripts and the terminal, see the [CLI reference](cli.md).
 | other | |
 |---|---|
 | [`settings [key [value]]`](#tallysettings) | Show or change settings. |
-| [`dashboard`](#tallydashboard) | Open the local dashboard. |
+| [`dashboard [stop]`](#tallydashboard) | Open the local dashboard, or stop it. |
 | [`help`](#tallyhelp) | Show the help text. |
 
 ---
@@ -492,6 +492,7 @@ Show or change settings.
 | `auto_start` | `off` (default) or `session` |
 | `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
 | `dashboard_port` | a number (default 8765) |
+| `dashboard_idle_minutes` | a number (default 120; 0 = never) |
 
 What each key means: [Configuration](configuration.md). In a terminal, [`tally setup`](cli.md#tally-setup) asks about the main ones.
 
@@ -505,10 +506,21 @@ CLI: [`tally settings`](cli.md#tally-settings)
 
 ### `/tally:dashboard`
 
-Start the local dashboard if it is not running, and open it in the browser (http://127.0.0.1:8765 by default). See [Dashboard](usage.md#dashboard).
+Start the local dashboard if it is not running, and open it in the browser (http://127.0.0.1:8765 by default), or stop it. See [Dashboard](usage.md#dashboard).
+
+```
+/tally:dashboard [stop]
+```
+
+| argument | |
+|---|---|
+| `stop` | Stop the running dashboard. |
+
+Started this way, the dashboard runs in the background and stops by itself after [`dashboard_idle_minutes`](configuration.md) (default 120) without an open page.
 
 ```
 /tally:dashboard
+/tally:dashboard stop
 ```
 
 CLI: [`tally dashboard`](cli.md#tally-dashboard)

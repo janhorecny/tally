@@ -480,16 +480,18 @@ tally config pricing '{"my-proxy-model": {"input": 1.0, "output": 4.0}}'
 Local web dashboard. Alias: `tally serve`. In-agent: [`/tally:dashboard`](commands.md#tallydashboard).
 
 ```
-tally dashboard [--open] [--background] [--host HOST] [--port PORT]
+tally dashboard [--open] [--background] [--stop] [--idle-minutes N] [--host HOST] [--port PORT]
 ```
 
 | | |
 |---|---|
 | `--open` | Open the browser. |
-| `--background` | Start detached (or reuse a running dashboard) and return. Default: run in the foreground. |
+| `--background` | Start detached (or reuse a running dashboard) and return. Default: run in the foreground until Ctrl+C. |
+| `--stop` | Stop the running dashboard. |
+| `--idle-minutes N` | Stop after N minutes without an open page. A dashboard started in the background (`--background`, `/tally:dashboard`) uses `dashboard_idle_minutes`, 120 by default; in the foreground it runs until you stop it. |
 | `--host`, `--port` | Default: `dashboard_host` and `dashboard_port` from the configuration (127.0.0.1:8765). |
 
-If a dashboard of the same version is already running, it is reused; one of an older version is stopped and replaced. To stop a background dashboard: `pkill -f "tally dashboard"`.
+If a dashboard of the same version is already running, it is reused; one of an older version is stopped and replaced. An open page checks in every minute, so the idle stop only happens when nobody has it open. *Settings → Dashboard* in the page has a *Stop* button as well.
 
 ### `tally statusline`
 

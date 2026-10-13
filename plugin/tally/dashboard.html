@@ -482,7 +482,7 @@ function online(ok) {
 async function getJSON(url) {
   let r;
   try { r = await fetch(url, {cache: "no-store"}); }
-  catch (e) { online(false); throw new Error("The dashboard server is not reachable. Start it with tally dashboard."); }
+  catch (e) { online(false); throw new Error("The dashboard server is not running. Start it with /tally:dashboard or tally dashboard."); }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status + " " + url);
   online(true);
   return r.json();
@@ -1090,6 +1090,7 @@ function renderProjectDetail() {
   $("[data-psess]", el).onclick = () => setProject(st.project);
   $("[data-ptasks]", el).onclick = () => setProject(st.project);
 }
+let stopped = false;          // stopped from this page: no more polling
 let resizeTimer = null;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (view === "projects") renderProjectDetail(); }, 150); });
 
@@ -1174,6 +1175,7 @@ const SETTING_INFO = {
   "todos.reminder": ["Todos", "Reminder at session start"],
   "todos.reminder_limit": ["Todos", "Todos in the reminder"],
   "dashboard_port": ["Dashboard", "Port"],
+  "dashboard_idle_minutes": ["Dashboard", "Stop when unused (minutes)"],
 };
 async function loadSettings() {
   const d = await getJSON("/api/settings");
@@ -1185,8 +1187,20 @@ async function loadSettings() {
     else if (s.allowed === "number") ctl = `<input data-key="${s.key}" type="number" min="0" value="${esc(s.value)}">`;
     else ctl = `<select data-key="${s.key}">${s.allowed.split("|").map(v => `<option ${v === s.value ? "selected" : ""}>${v}</option>`).join("")}</select>`;
     const label = (SETTING_INFO[s.key] || [, s.key])[1];
-    return `<div class="setrow"><div class="name">${esc(label)}<code>${s.key}</code></div><div class="ctl">${ctl}</div><div class="d">${esc(s.description)}.${s.key === "dashboard_port" ? " Takes effect when the dashboard restarts." : ""}</div></div>`;
-  }).join("")}</div>`).join("");
+    return `<div class="setrow"><div class="name">${esc(label)}<code>${s.key}</code></div><div class="ctl">${ctl}</div><div class="d">${esc(s.description)}.${s.key === "dashboard_port" || s.key === "dashboard_idle_minutes" ? " Takes effect when the dashboard restarts." : ""}</div></div>`;
+  }).join("")}${g === "Dashboard" ? `<div class="setrow"><div class="name">Server<code>tally dashboard --stop</code></div><div class="ctl" id="stopbox"><button type="button" class="sm" data-stop>Stop the dashboard</button></div><div class="d">Stops this local server now; this page goes offline. <code>/tally:dashboard</code> starts it again.</div></div>` : ""}</div>`).join("");
+  const box = $("#stopbox");
+  const askStop = () => {
+    box.innerHTML = `<span class="confirm"><button type="button" class="sm danger primary" data-yes>Stop</button><button type="button" class="sm" data-no>Cancel</button></span>`;
+    $("[data-no]", box).onclick = () => { box.innerHTML = '<button type="button" class="sm" data-stop>Stop the dashboard</button>'; $("[data-stop]", box).onclick = askStop; };
+    $("[data-yes]", box).onclick = () => guard(postJSON("/api/shutdown", {}).then(() => {
+      stopped = true;
+      online(false);
+      $("#updated").textContent = "dashboard stopped";
+      toast("The dashboard is stopped. Start it again with /tally:dashboard or tally dashboard.");
+    }));
+  };
+  if (box) $("[data-stop]", box).onclick = askStop;
   $$("[data-key]", $("#settings")).forEach(el => el.onchange = () =>
     guard(postJSON("/api/settings", {key: el.dataset.key, value: el.value}).then(() => toast("Saved " + ((SETTING_INFO[el.dataset.key] || [, el.dataset.key])[1]) + ": " + el.value))
       .catch(e => { loadSettings(); throw e; })));
@@ -1218,8 +1232,10 @@ window.addEventListener("hashchange", () => {
 getJSON("/api/health").then(d => { $("#ver").textContent = "v" + d.version; }).catch(() => {});
 renderGlobalExport();
 loadProjects().catch(() => {}).then(() => setView(view));
+let ticks = 0;
 setInterval(() => {
-  if (document.hidden) return;
+  if (document.hidden || stopped) return;
+  if (++ticks % 12 === 0) getJSON("/api/health").catch(() => {});   // an open page keeps the server from its idle stop
   if (view === "todos") { if (editing === null) loadTodos().catch(() => {}); return; }
   if (view === "projects" || view === "settings") return;
   if (view === "sessions") { if (Date.now() - sessLoaded > 30000) loadSessions().catch(() => {}); return; }

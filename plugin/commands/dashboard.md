@@ -1,5 +1,6 @@
 ---
-description: Open the local tally web dashboard (tally)
+description: Open the local tally web dashboard, or stop it (tally)
+argument-hint: "[stop]"
 disable-model-invocation: true
 ---
 !`python3 "${CLAUDE_PLUGIN_ROOT}/bin/tally" slash --session "${CLAUDE_SESSION_ID}" dashboard -- "$ARGUMENTS" 2>&1 || true`

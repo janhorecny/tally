@@ -10,6 +10,8 @@ DEFAULT_CONFIG = {
     "auto_start": "off",
     "dashboard_host": "127.0.0.1",
     "dashboard_port": 8765,
+    # a background dashboard stops after this many minutes without an open page; 0 = never
+    "dashboard_idle_minutes": 120,
     # Per-model price overrides, $ per million tokens, e.g.
     # {"claude-opus-5-5": {"input": 4, "output": 20, "cache_read": 0.2,
     #                      "cache_write_5m": 5, "cache_write_1h": 8}}

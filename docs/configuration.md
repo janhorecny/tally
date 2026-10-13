@@ -32,6 +32,7 @@ Per-project tracking modes (`track`, `tasks`, `off`) are stored in the database,
 | `projects.default_mode` | `"ask"` | The mode of a project Tally sees for the first time. `"ask"`: show the setup question. `"track"` or `"tasks"`: use that mode and show a one-line notice instead. |
 | `dashboard_host` | `"127.0.0.1"` | Interface the dashboard binds to. Keep it on localhost, because the API has no authentication. |
 | `dashboard_port` | `8765` | Port of the dashboard. |
+| `dashboard_idle_minutes` | `120` | A dashboard started in the background (`/tally:dashboard`, `tally dashboard --background`) stops after this many minutes without an open page. `0`: never. |
 | `pricing` | `{}` | Per-model price overrides or additions, see below. |
 
 ### Pricing overrides

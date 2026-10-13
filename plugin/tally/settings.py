@@ -17,6 +17,8 @@ SCHEMA = {
     "projects.default_mode": (("ask", "track", "tasks"),
                               "New projects: ask how to track them, or track every session, or count only tasks"),
     "dashboard_port": (int, "Port of the local dashboard"),
+    "dashboard_idle_minutes": (int, "Stop a dashboard started in the background after this many minutes "
+                                    "without an open page (0 = never)"),
 }
 
 PREVIEW_CHARS = 300

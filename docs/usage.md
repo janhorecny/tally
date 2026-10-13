@@ -300,7 +300,7 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 The terminal has the same exports: [`tally export`](cli.md#tally-export).
 
-The dashboard keeps running in the background after you close the page. To stop it: `pkill -f "tally dashboard"`.
+**Stopping it:** `/tally:dashboard stop`, `tally dashboard --stop`, or *Settings → Dashboard → Stop the dashboard*. Started by `/tally:dashboard`, it also stops by itself after two hours without an open page (`dashboard_idle_minutes`, `0` keeps it running), and `/tally:dashboard` starts it again in a moment.
 
 ## Status line
 
