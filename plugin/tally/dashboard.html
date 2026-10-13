@@ -285,7 +285,13 @@ tbody tr:hover td { background: var(--hover); }
 .prog .bar { height: 100%; background: var(--seq); }
 
 /* ---------------------------------------------------------------- projects, sessions, settings */
-#projtable { max-height: 46vh; overflow: auto; }
+#projtable, #resttable { overflow: auto; }
+#projlist > .card + .card { margin-top: 20px; }
+.card.quiet { background: var(--surface-2); box-shadow: none; }
+#projlist > .card.nomatch { display: none; }
+.card.quiet .ptbl thead th { background: var(--surface-2); }
+.card.quiet .card-head h2 { color: var(--text-secondary); }
+.back { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin: 0 0 12px; }
 .ptbl th.pname { width: 30%; }
 .ptbl th.c-track, .ptbl td.c-track { text-align: left; width: 1%; }
 .ptbl th:last-child, .ptbl td:last-child { padding-right: 14px; }
@@ -406,8 +412,13 @@ button svg.i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4p
   </div>
 
   <div id="view-projects" class="view wrap">
-    <section class="card"><div class="card-head"><h2>Projects</h2><span class="count num" id="projcount"></span><span class="grow"></span><span id="pexport"></span></div>
-      <div class="section" style="padding-top:0"><div class="tscroll" id="projtable"></div></div></section>
+    <div id="projlist">
+      <div class="toolbar"><input type="search" id="psearch" placeholder="Search projects…  ( / )" aria-label="Search projects" style="flex:1;max-width:420px"><span class="muted" id="pmatch" style="font-size:12px"></span></div>
+      <section class="card"><div class="card-head"><h2>Tracked</h2><span class="count" id="projcount"></span><span class="grow"></span><span id="pexport"></span></div>
+        <div class="section" style="padding-top:0"><div class="tscroll" id="projtable"></div></div></section>
+      <section class="card quiet" id="projrest"><div class="card-head"><h2>Not tracked</h2><span class="count" id="restcount"></span></div>
+        <div class="section" style="padding-top:0"><div class="tscroll" id="resttable"></div></div></section>
+    </div>
     <section class="card" id="projdetail"></section>
   </div>
 
@@ -646,7 +657,11 @@ function setProject(name) {
   selected = null;
   renderGlobalExport();
 }
-$("#project").onchange = e => { setProject(e.target.value); setView(view); };
+$("#project").onchange = e => {
+  setProject(e.target.value);
+  if (view === "projects") location.hash = e.target.value ? "#projects/" + encodeURIComponent(e.target.value) : "#projects";
+  else setView(view);
+};
 // a visible heading whenever a view shows one project only
 function renderScope() {
   const show = project && ["tasks", "todos", "sessions"].includes(view);
@@ -1028,60 +1043,81 @@ async function setMode(name, mode) {
   if (view === "projects") await loadProjectsView();
   return r;
 }
+// #projects is the list, #projects/<name> one project on its own page
 async function loadProjectsView() {
   clearTimeout(projPoll);
+  const name = parseHash().pname;
+  $("#projlist").classList.toggle("hide", !!name);
+  $("#projdetail").classList.toggle("hide", !name);
+  if (name) return openProject(name);
   const d = await getJSON("/api/projects?full=1");
-  $("#projcount").textContent = d.projects.length ? plural(d.projects.length, "project") : "";
-  if (!d.projects.length) {
-    $("#projtable").innerHTML = '<div class="empty">No projects yet. Tally registers a git repository the first time an agent opens in it.</div>';
-    $("#projdetail").classList.add("hide");
-    return;
-  }
-  const names = d.projects.map(p => p.project);
-  const wanted = parseHash().pname;
-  if (wanted) projSel = wanted;
-  if (!names.includes(projSel)) projSel = names.includes(project) ? project : names[0];
+  const tracked = d.projects.filter(p => p.sessions_read), rest = d.projects.filter(p => !p.sessions_read);
+  const ix = d.indexing || {};
+  $("#projcount").textContent = tracked.length ? plural(tracked.length, "project") + " · every session read · last 30 days" : "";
+  $("#restcount").textContent = rest.length ? plural(rest.length, "project") + " · sessions only counted, not read" : "";
+  $("#projrest").classList.toggle("hide", !rest.length);
   $("#pexport").innerHTML = menu([
     [null, [["Projects (CSV)", {scope: "projects", format: "csv"}], ["Markdown table", {scope: "projects", format: "md"}], ["JSON", {scope: "projects", format: "json"}]]],
     ["Copy", [["Markdown table", {scope: "projects", format: "md"}, "copy"]]]]);
-  const max = Math.max(...d.projects.map(p => p.last_30d.total), 1);
-  const ix = d.indexing || {};
-  const row = p => {
-    const rest = p.not_tracked.sessions, read = p.sessions_read || p.last_30d.total > 0;
-    return `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td class="pname" title="${esc(p.project)}"><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
-      <td class="c-track"><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
-      <td class="num c-sess">${p.sessions || (rest ? "" : 0)}${rest ? `<span class="muted" title="${plural(rest, "session")} not read: the project is not tracked">${p.sessions ? " +" : ""}${rest} not read</span>` : ""}</td>
-      <td class="num c-ptok">${read ? fmtTok(p.last_30d.total) : '<span class="muted">–</span>'}</td><td class="c-share">${read ? `<div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div>` : ""}</td><td class="num">${read ? fmtCost(p.last_30d.cost) : '<span class="muted">–</span>'}</td>
-      <td class="num c-tasks">${p.tasks}</td><td class="num c-todos">${p.open_todos}</td><td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`;
-  };
-  const tracked = d.projects.filter(p => p.sessions_read), rest = d.projects.filter(p => !p.sessions_read);
-  const group = (title, hint) => `<tr class="grp"><td colspan="9"><b>${title}</b><span class="muted"> · ${hint}</span></td></tr>`;
-  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th class="pname">project</th><th class="c-track">tracking</th><th class="c-sess">sessions</th><th class="c-ptok">tokens</th><th class="c-share"></th><th>cost</th><th class="c-tasks">tasks</th><th class="c-todos">open todos</th><th class="c-last">last active</th></tr></thead><tbody>${
-    tracked.length && rest.length ? group("Tracked", plural(tracked.length, "project") + ", every session read") : ""}${tracked.map(row).join("")}${
-    rest.length ? group("Not tracked", plural(rest.length, "project") + ": sessions counted, not read. Choose track or tasks to read them" + (tracked.length ? "" : ", or off to hide the project")) : ""}${rest.map(row).join("")}</tbody></table>
-    <div class="note" style="padding:12px 10px 0">${ix.running ? `<b>Reading transcripts ${ix.done}/${ix.total || "…"}</b> · ` : ""}Sessions, tokens and cost: the last 30 days, from the agents' transcripts. Tally reads the sessions of projects set to <b>track</b> (and keeps every session for good) or <b>tasks</b> (keeps only the tasks you start), and sessions you add one by one in <a href="#sessions">Sessions</a>. Not tracked projects are only counted; <b>off</b> hides a project.</div>`;
+  const modeSel = p => `<select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select>`;
+  const nameCell = p => `<td class="pname" title="${esc(p.project)}"><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>`;
+  const max = Math.max(...tracked.map(p => p.last_30d.total), 1);
+  $("#projtable").innerHTML = tracked.length ? `<table class="ptbl"><thead><tr><th class="pname">Project</th><th class="c-track">Tracking</th><th class="c-sess">Sessions</th><th class="c-ptok">Tokens</th><th class="c-share"></th><th>Cost</th><th class="c-tasks">Tasks</th><th class="c-todos">Open todos</th><th class="c-last">Last active</th></tr></thead><tbody>${
+    tracked.map(p => `<tr data-p="${esc(p.project)}" tabindex="0" title="open ${esc(p.project)}">${nameCell(p)}<td class="c-track">${modeSel(p)}</td>
+      <td class="num c-sess">${p.sessions}</td><td class="num c-ptok">${fmtTok(p.last_30d.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
+      <td class="num c-tasks">${p.tasks}</td><td class="num c-todos">${p.open_todos}</td><td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">No tracked project yet. Choose <b>track</b> or <b>tasks</b> for one below, and Tally reads its sessions.</div>`;
+  $("#resttable").innerHTML = rest.length ? `<table class="ptbl"><thead><tr><th class="pname">Project</th><th class="c-sess">Sessions</th><th class="c-size">Transcripts</th><th class="c-last">Last active</th><th class="c-track">Set up</th></tr></thead><tbody>${
+    rest.map(p => `<tr data-p="${esc(p.project)}" tabindex="0" title="open ${esc(p.project)}">${nameCell(p)}
+      <td class="num c-sess muted">${p.not_tracked.sessions ? plural(p.not_tracked.sessions, "session") + " not read" : "–"}${p.sessions ? ` <span class="chip" title="sessions added one by one">+${p.sessions} added</span>` : ""}</td>
+      <td class="num c-size muted">${p.not_tracked.size ? fmtSize(p.not_tracked.size) : "–"}</td>
+      <td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td><td class="c-track">${modeSel(p)}</td></tr>`).join("")}</tbody></table>
+    <div class="note" style="padding:12px 10px 0">${ix.running ? `<b>Reading transcripts ${ix.done}/${ix.total || "…"}</b> · ` : ""}Choose <b>track</b> (every session read and kept for good) or <b>tasks</b> (sessions read, only the tasks you start kept) and Tally reads the project's sessions right away. <b>off</b> hides a project. Single sessions can be added in <a href="#sessions">Sessions</a>.</div>` : "";
   if (ix.running) projPoll = setTimeout(() => { if (view === "projects") loadProjectsView().catch(() => {}); }, 1500);
-  $$("select[data-mode]", $("#projtable")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
+  $$("select[data-mode]", $("#projlist")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
     guard(setMode(el.dataset.mode, el.value)); });
-  $$("tr[data-p]", $("#projtable")).forEach(tr => {
-    const go = () => selectProject(tr.dataset.p, false);
+  $$("tr[data-p]", $("#projlist")).forEach(tr => {
+    const go = () => { location.hash = "#projects/" + encodeURIComponent(tr.dataset.p); };
     tr.onclick = go; tr.onkeydown = e => { if (e.key === "Enter") go(); };
   });
-  await selectProject(projSel, !!wanted);
+  filterProjects();
+  const back = projSel && $$("tr[data-p]", $("#projlist")).find(x => x.dataset.p === projSel);
+  if (back) back.scrollIntoView({block: "nearest"});                  // back from a project: where you were
 }
-// every project has its own address: #projects/<name>
-async function selectProject(name, scroll) {
+// the search box: every word must appear in the project's name (or its mode)
+function filterProjects() {
+  const words = $("#psearch").value.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = 0, total = 0;
+  $$("tr[data-p]", $("#projlist")).forEach(tr => {
+    const sel = $("select", tr), text = (tr.dataset.p + " " + (sel ? sel.value : "")).toLowerCase();
+    const ok = words.every(w => text.includes(w));
+    tr.classList.toggle("hide", !ok);
+    total++; shown += ok ? 1 : 0;
+  });
+  $("#pmatch").textContent = words.length ? (shown ? shown + " of " + total + " projects" : "no project matches") : "";
+  // while searching, a card without a match steps aside
+  $$("#projlist > .card").forEach(card => {
+    const rows = $$("tr[data-p]", card);
+    card.classList.toggle("nomatch", !!words.length && rows.length > 0 && rows.every(tr => tr.classList.contains("hide")));
+  });
+}
+$("#psearch").oninput = filterProjects;
+$("#psearch").onkeydown = e => {                                   // Enter opens the only match, Esc clears
+  if (e.key === "Escape") { e.target.value = ""; filterProjects(); }
+  if (e.key === "Enter") { const vis = $$("tr[data-p]", $("#projlist")).filter(tr => !tr.classList.contains("hide"));
+    if (vis.length === 1) location.hash = "#projects/" + encodeURIComponent(vis[0].dataset.p); }
+};
+async function openProject(name) {
   projSel = name;
-  history.replaceState(null, "", "#projects/" + encodeURIComponent(name));
-  $$("tr[data-p]", $("#projtable")).forEach(x => x.classList.toggle("sel", x.dataset.p === name));
-  const row = $$("tr[data-p]", $("#projtable")).find(x => x.dataset.p === name);
-  if (row && scroll) row.scrollIntoView({block: "nearest"});
+  window.scrollTo(0, 0);
   await guard(loadProjectDetail(name));
-  if (scroll) $("#projdetail").scrollIntoView({behavior: "smooth", block: "start"});
 }
 async function loadProjectDetail(name) {
   projStats = await getJSON("/api/projects/" + encodeURIComponent(name) + "?days=&series=30");
   renderProjectDetail();
+  clearTimeout(projPoll);                                        // its sessions are being read: follow along
+  if ((projStats.indexing || {}).running)
+    projPoll = setTimeout(() => { if (view === "projects" && parseHash().pname === name) loadProjectDetail(name).catch(() => {}); }, 1500);
 }
 function chart(daily, W) {
   const H = 170, top = 18, base = H - 22, peak = Math.max(...daily.map(x => x.total), 1), bw = W / daily.length;
@@ -1105,7 +1141,7 @@ function renderProjectDetail() {
   const W = Math.max(280, (el.clientWidth || 900) - 40);
   const idle = !st.sessions_read && !st.last_30d.total;            // nothing read: no numbers to show
   const pq = (scope, f, extra) => Object.assign({scope, format: f}, scope === "project" ? {ref: st.project} : {project: st.project}, extra || {});
-  el.innerHTML = `<div class="dhead"><div class="top"><h2>${esc(st.project)}</h2><div class="actions">${menu([
+  el.innerHTML = `<div class="dhead"><a class="back" href="#projects">← All projects</a><div class="top"><h2>${esc(st.project)}</h2><div class="actions">${menu([
       ["This project", [["Report (Markdown)", pq("project", "md")], ["Tokens per day (CSV)", pq("project", "csv")], ["JSON", pq("project", "json")]]],
       ["Its data", [["Tasks · time sheet (CSV)", pq("tasks", "csv")], ["Sessions · last 30 days (CSV)", pq("sessions", "csv", {days: 30})]]],
       ["Copy", [["Report as Markdown", pq("project", "md"), "copy"], ["Tasks, one line each", pq("tasks", "text"), "copy"]]]])}</div></div>
@@ -1251,22 +1287,11 @@ async function selectSession(sid, scroll) {
 }
 
 // ---------------------------------------------------------------- settings
-const SETTING_INFO = {
-  "log.depth": ["Logging", "Logging detail"],
-  "log.prompts": ["Logging", "Prompt text"],
-  "projects.default_mode": ["Projects and tasks", "New projects"],
-  "sessions.scope": ["Projects and tasks", "Sessions overview reads"],
-  "auto_start": ["Projects and tasks", "Start tasks automatically"],
-  "todos.reminder": ["Todos", "Reminder at session start"],
-  "todos.reminder_limit": ["Todos", "Todos in the reminder"],
-  "updates.check": ["Updates", "Tell me about new versions"],
-  "dashboard_port": ["Dashboard", "Port"],
-  "dashboard_idle_minutes": ["Dashboard", "Stop when unused (minutes)"],
-};
+const SETTING_INFO = {};                 // group and label come from /api/settings (settings.LABELS)
 async function loadSettings() {
   const d = await getJSON("/api/settings");
   const groups = {};
-  d.settings.forEach(s => { const g = (SETTING_INFO[s.key] || ["Other"])[0]; (groups[g] = groups[g] || []).push(s); });
+  d.settings.forEach(s => { SETTING_INFO[s.key] = [s.group || "Other", s.label || s.key]; const g = SETTING_INFO[s.key][0]; (groups[g] = groups[g] || []).push(s); });
   $("#settings").innerHTML = Object.entries(groups).map(([g, items]) => `<div class="setgroup"><h3>${g}</h3>${items.map(s => {
     let ctl;
     if (s.allowed === "on/off") ctl = `<select data-key="${s.key}"><option value="on" ${s.value ? "selected" : ""}>on</option><option value="off" ${!s.value ? "selected" : ""}>off</option></select>`;
@@ -1307,13 +1332,14 @@ document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "r") $("#refresh").click();
   if (e.key === "/" && view === "tasks") { e.preventDefault(); $("#tsearch").focus(); }
+  if (e.key === "/" && view === "projects" && !parseHash().pname) { e.preventDefault(); $("#psearch").focus(); }
 });
 window.addEventListener("hashchange", () => {
   const h = parseHash();
-  if (h.view !== view) setView(h.view);
+  if (h.view !== view) { setView(h.view); return; }             // a new tab loads what the address says
   if (h.view === "tasks" && h.id && h.id !== selected) { selected = h.id; renderTasks(); guard(loadDetail()); }
   if (h.view === "sessions" && h.sid && h.sid !== sessSel) selectSession(h.sid, true);
-  if (h.view === "projects" && h.pname && h.pname !== projSel && view === "projects") selectProject(h.pname, true);
+  if (h.view === "projects") guard(loadProjectsView());          // the list, or one project
 });
 // a newer version: a chip next to the version; a click copies the command that updates it
 function showUpdate(d) {

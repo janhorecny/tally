@@ -364,15 +364,9 @@ def _settings_command(args: str) -> str:
         except ValueError as e:
             return fmt.error(str(e), "/tally:settings lists them")
         return fmt.head("%s = %s" % (parts[0], settings.show(v)), "✓")
-    rows = [r for r in settings.describe() if not parts or parts[0] == r[0]]
-    if not rows:
+    if parts and parts[0] not in settings.SCHEMA:
         return fmt.error("Unknown setting %s" % parts[0], "/tally:settings lists them")
-    lines = [fmt.head("Settings"), ""]
-    for key, value, desc, allowed in rows:
-        lines.append("  %-22s %-10s [%s]" % (key, settings.show(value), allowed))
-        lines.append("  %-22s %s" % ("", desc))
-    lines += ["", fmt.hints("/tally:settings <key> <value> change one", "tally setup in a terminal asks for all")]
-    return "\n".join(lines)
+    return fmt.render_settings(parts[:1] or None)
 
 
 def _sessions_command(args: str, cwd: Optional[str]) -> str:
@@ -394,33 +388,37 @@ def _sessions_command(args: str, cwd: Optional[str]) -> str:
     return fmt.render_sessions(sessions.overview(days, agent=agent, project=project), limit=20)
 
 
-def _project_command(conn, cmd: str, args: str, cwd: Optional[str]) -> str:
-    from . import db, projects
+def _project_command(conn, cmd: str, args: str, cwd: Optional[str], cli: bool = False) -> str:
+    """/tally:projects and /tally:project [name] [track|tasks|off] (the CLI uses the same views)."""
+    from . import db, projects, sessions
     if cmd == "projects":
-        names = projects.all_names(conn)
-        if not names:
-            return "\n".join([fmt.head("No projects yet"),
-                              fmt.hints("/tally:project track run it in a git repository to set one up")])
-        lines = [fmt.head("Projects (%d)" % len(names)), "",
-                 "  %-28s %-6s %9s %9s %9s %6s %6s" % ("project", "mode", "30d tok", "30d cost", "all tok", "tasks",
-                                                         "todos")]
-        for n in names:
-            st = projects.stats(conn, n, series_days=1)
-            open_todos = st["todos"]["todo"] + st["todos"]["doing"] + st["todos"]["blocked"]
-            lines.append("  %-28s %-6s %9s %9s %9s %6d %6d" % (
-                fmt._cut(n, 28), st["mode"], fmt.tokens(st["last_30d"]["total"]), fmt.money(st["last_30d"]),
-                fmt.tokens(st["totals"]["total"]), st["tasks"]["count"], open_todos))
-        return "\n".join(lines)
+        sessions.refresh(30)
+        return fmt.render_projects(projects.listing(conn, with_usage=True, refresh=False), cli=cli)
     parts = args.split()
     name = projects.detect(cwd)
     if parts and parts[0] not in projects.MODES:
         name, parts = parts[0], parts[1:]
     if not name:
-        return fmt.error("No project here", "run it inside a git repository, or name one: /tally:project <name>")
+        return fmt.error("No project here", "run it inside a project, or name one: /tally:project <name>")
     if parts:
         if parts[0] not in projects.MODES:
             return fmt.usage("/tally:project [name] [track|tasks|off]")
         with db.transaction(conn):
             row = projects.set_mode(conn, name, parts[0])
         return fmt.head("%s: %s (%s)" % (name, row["mode"], projects.MODE_HELP[row["mode"]]), "✓")
-    return fmt.render_project(projects.stats(conn, name, series_days=14))
+    st = project_view(conn, name)
+    if st is None:
+        return fmt.error("Project %s not found" % name, "/tally:projects lists them")
+    return fmt.render_project(st)
+
+
+def project_view(conn, name: str, days: Optional[int] = None) -> Optional[dict]:
+    """projects.detail after reading new transcript data; None for a project
+    nothing is known about."""
+    from . import projects, sessions
+    sessions.refresh(30)
+    st = projects.detail(conn, name, days=days)
+    if not (st["registered"] or st["sessions"] or st["not_tracked"]["sessions"] or st["tasks"]["count"]
+            or sum(st["todos"].values())):
+        return None
+    return st

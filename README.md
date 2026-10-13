@@ -26,20 +26,20 @@ When you end it, you get totals plus subtotals per agent, subagent, workflow, ag
 
 ```
 ▍Tally · ■ Task #3 ended: Fix login redirect loop
-  prompt   The login page loops back to /login after OAuth callback, find out why and fix it
+  prompt   The login page loops back to /login after OAuth callback, find out why
   time     44m 10s wall · 31m 02s active (12 turns) · 2026-10-12 14:03 → 14:47
   tokens   4.21M total · in 12.3k · out 85.1k · cache write 410.2k · cache read 3.70M
   cost     ≈ $3.12 at list price · 171 API calls
   models   opus-5-5 3.90M $2.80 · sonnet-5-5 310.0k $0.32
 
-  breakdown                                        tokens   output      cost      time  calls
-  main session (own)                                3.10M    60.2k     $2.10   31m 02s     42
-  ├─ general-purpose · Explore auth flow            410.0k     8.1k    $0.300    1m 10s      9
-  │  └─ fork · Write regression test                 92.0k     2.0k    $0.071       48s      3
-  └─ workflow · review-changes (25 agents)          700.0k    16.0k    $0.720    6m 30s    120
-     ├─ phase · Review (20)                         560.0k    12.1k    $0.580    4m 10s     96
-     └─ phase · Verify (5)                          140.0k     3.9k    $0.140    2m 20s     24
-  TOTAL                                             4.21M    85.1k     $3.12   44m 10s    171
+  breakdown                                  tokens   output      cost      time  calls
+  main session (own)                          3.10M    60.2k     $2.10   31m 02s     42
+  ├─ general-purpose · Explore auth flow      410.0k     8.1k    $0.300    1m 10s      9
+  │  └─ fork · Write regression test           92.0k     2.0k    $0.071       48s      3
+  └─ workflow · review-changes (25 agents)    700.0k    16.0k    $0.720    6m 30s    120
+     ├─ phase · Review (20)                   560.0k    12.1k    $0.580    4m 10s     96
+     └─ phase · Verify (5)                    140.0k     3.9k    $0.140    2m 20s     24
+  TOTAL                                       4.21M    85.1k     $3.12   44m 10s    171
 ```
 
 ## Features
@@ -60,42 +60,92 @@ When you end it, you get totals plus subtotals per agent, subagent, workflow, ag
 
 ## Install
 
-You need `python3` 3.8 or newer and `git`; on macOS both come with the Command Line Tools (`xcode-select --install`). And Claude Code 2.1+, Codex or pi. There are no packages to install.
+You need:
+
+- `python3` 3.8 or newer and `git`. On macOS both come with the Command Line Tools: `xcode-select --install`.
+- Claude Code 2.1+, Codex or pi.
+
+There are no packages to install.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh | bash
 ```
 
-The installer downloads Tally to `~/.local/share/tally`, detects **Claude Code, Codex and pi**, asks which ones to install into, and links the CLI as `~/.local/bin/tally`. The first time, it also asks a few setup questions; Enter keeps the default:
+The installer:
+
+- downloads Tally to `~/.local/share/tally`;
+- detects **Claude Code, Codex and pi** and asks which ones to install into;
+- links the CLI as `~/.local/bin/tally`;
+- the first time, asks a few setup questions: ← → choose, Enter confirms, and a line under each question explains the choices:
 
 ```
-▍Tally · Setup · Enter keeps the value in [brackets]
-  Store prompt text?          full / preview / off       [full]
-  Logging detail?             summary / prompts / calls  [prompts]
-  New projects:               ask / track / tasks        [ask]
-  Sessions overview reads:    enabled / all              [enabled]
-  Start a task automatically with each session? y/N
-  Show open todos at session start? Y/n
-  Tell me when a new version is out? Y/n
-  Add Tally to Claude Code's status line? Y/n
+▍Tally · Setup · ← → choose · Enter confirms · Esc skips setup
+  Store prompt text?              full
+  Logging detail?                 prompts
+  New projects?                   ○ ask   ● track   ○ tasks   ← →
+    When an agent opens in a project Tally has not seen. ask: ask you what to do ·
+    track: count every session there · tasks: count only the tasks you start.
 ```
 
-`tally setup` asks them again at any time. To skip all questions, add `-s -- --yes` after `bash` (every detected agent, default settings), or `-s -- --agents claude,pi`. Then:
+`tally setup` asks them again at any time, and offers the agents Tally is not installed in yet; `tally settings` changes any setting with the arrow keys. To answer up front instead:
 
-| agent | what gets installed | after installing |
+```bash
+# every detected agent, default settings, no questions
+curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh \
+  | bash -s -- --yes
+
+# choose the agents instead of being asked
+curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh \
+  | bash -s -- --agents claude,pi
+```
+
+What gets installed:
+
+| Agent | What gets installed | After installing |
 |---|---|---|
-| Claude Code | plugin `tally@tally` (local marketplace from this folder) | restart, or run `/reload-plugins` |
+| Claude Code | plugin `tally@tally`, from the Tally folder (`~/.local/share/tally` or your clone) | restart, or run `/reload-plugins` |
 | Codex | hooks merged into `~/.codex/hooks.json`, skill in `~/.agents/skills` | approve the hooks once in Codex: `/hooks` |
 | pi | extension `~/.pi/agent/extensions/tally.ts`, skill | restart pi, or run `/reload` |
 
 The first session in each newly installed agent shows a short welcome. `tally doctor` shows what is installed where.
 
-**Other ways in:**
+### Other ways to install
 
-- **Claude Code only, from its plugin manager:** `/plugin marketplace add janhorecny/tally`, then `/plugin install tally@tally`. Codex, pi, the `tally` command and the setup questions need the installer above.
-- **From a clone, to work on the code:** `git clone https://github.com/janhorecny/tally.git && cd tally && ./install.sh`. Claude Code then installs from that folder, and `tally update` updates it.
+#### Claude Code only, from its plugin manager
 
-**Uninstall:** `~/.local/share/tally/uninstall.sh` (or `./uninstall.sh` in a clone) removes Tally from every agent and keeps your history; `--agents codex` removes it from one agent only, `--purge` deletes the history too.
+In Claude Code:
+
+```
+/plugin marketplace add janhorecny/tally
+/plugin install tally@tally
+```
+
+Codex, pi, the `tally` command and the setup questions need the installer above.
+
+#### From a clone, to work on the code
+
+```bash
+git clone https://github.com/janhorecny/tally.git
+cd tally
+./install.sh
+```
+
+Claude Code then installs from that folder, and `tally update` updates it.
+
+### Uninstall
+
+The uninstaller removes Tally from every agent and keeps your history. In a clone, run `./uninstall.sh` instead.
+
+```bash
+# from every agent
+~/.local/share/tally/uninstall.sh
+
+# from one agent only
+~/.local/share/tally/uninstall.sh --agents codex
+
+# also delete your history
+~/.local/share/tally/uninstall.sh --purge
+```
 
 ## Updating
 
@@ -103,17 +153,43 @@ The first session in each newly installed agent shows a short welcome. `tally do
 tally update
 ```
 
-It pulls the latest version, installs it into every agent Tally is in, restarts a running dashboard and lists what changed. Then run `/reload-plugins` in Claude Code (or restart it), `/reload` in pi, and restart Codex.
+It pulls the latest version, installs it into every agent Tally is in, restarts a running dashboard and lists what changed. Then:
 
-**You hear about new versions** at most once a day: in the session start message of your agents, below CLI commands on a terminal, and as a ⬆ chip next to the version in the dashboard (a click copies `tally update`). To know, Tally asks GitHub for the latest release once a day, in the background. Nothing about you or your usage is sent. `tally update --check` checks right now; `tally settings updates.check off` turns the check off.
+- Claude Code: run `/reload-plugins`, or restart it;
+- pi: run `/reload`;
+- Codex: restart it.
 
-Installed from Claude Code's plugin manager: `claude plugin marketplace update tally && claude plugin update tally@tally`. Release notes: [CHANGELOG](CHANGELOG.md) and [GitHub releases](https://github.com/janhorecny/tally/releases).
+Release notes: [CHANGELOG](CHANGELOG.md) and [GitHub releases](https://github.com/janhorecny/tally/releases).
+
+### New-version notices
+
+You hear about a new version at most once a day:
+
+- in the session start message of your agents;
+- below CLI commands on a terminal;
+- as a ⬆ chip next to the version in the dashboard (a click copies `tally update`).
+
+To know, Tally asks GitHub for the latest release once a day, in the background. Nothing about you or your usage is sent.
+
+```bash
+# check right now
+tally update --check
+
+# turn the check off
+tally settings updates.check off
+```
+
+### Installed from Claude Code's plugin manager
+
+```bash
+claude plugin marketplace update tally && claude plugin update tally@tally
+```
 
 ## Commands
 
 Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in **pi** use `/tally start …`. Every command with its arguments and examples: [command reference](docs/commands.md).
 
-| tasks | |
+| Tasks | What it does |
 |---|---|
 | `/tally:start [name]` | Start a task in this session. The next prompt is stored as its initial prompt. |
 | `/tally:new <prompt>` | Start a task and send `<prompt>` to Claude. |
@@ -121,25 +197,25 @@ Shown in Claude Code syntax. In **Codex** type `tally:start …` as a prompt; in
 | `/tally:end [id] [note]` | End the task and show the final report. |
 | `/tally:list` · `/tally:show [id]` · `/tally:resume <id>` · `/tally:rename [id] <name>` | History, any report, continue elsewhere, rename. |
 
-| todos | |
+| Todos | What it does |
 |---|---|
 | `/tally:todo <text>` | Add one: `@project`, `!`/`!!`/`!!!`, `due:fri\|zajtra\|+3d\|20.10.`, ` -- notes`. |
 | `/tally:todos [project\|all\|done]` | Open todos of this project. |
 | `/tally:take <id>` · `/tally:do <id>` | Pick up (measuring starts) · pick up and let Claude work on it. |
 | `/tally:done [id]` · `/tally:mark <id> <status>` | Finish it (ends its task) · `todo`, `doing`, `blocked`, `done` or `dropped`. |
 
-| projects and more | |
+| Projects and more | What it does |
 |---|---|
 | `/tally:project [name] [track\|tasks\|off]` · `/tally:projects` | Overall statistics of this project, or set its mode · all projects. |
 | `/tally:sessions [days\|all] [agent] [here]` | Every session of every agent with tokens, cost, models and time (default: 7 days). |
 | `/tally:settings [key value]` | `log.depth`, `log.prompts`, `sessions.scope`, `updates.check`, `auto_start` … |
 | `/tally:dashboard [stop]` · `/tally:help` | Local dashboard (http://127.0.0.1:8765), or stop it · help. |
 
-The CLI has the same features: `tally list | status | stats | show | todo … | project | projects | sessions | session <id> | settings | setup | export | dashboard | statusline | update | doctor`. `tally` alone shows the most used ones. See the [CLI reference](docs/cli.md).
+The CLI, `tally <command>`, has the same features: `list`, `status`, `stats`, `show`, `todo …`, `project`, `projects`, `sessions`, `session <id>`, `settings`, `setup`, `export`, `dashboard`, `statusline`, `update` and `doctor`. `tally` alone shows the most used ones. See the [CLI reference](docs/cli.md).
 
 ## Documentation
 
-| | |
+| Document | What's in it |
 |---|---|
 | [Usage guide](docs/usage.md) | Scenarios, todos, projects, sessions, detailed stats, settings, agents, reading the report, dashboard, status line, recipes. |
 | [Command reference](docs/commands.md) | Every `/tally:*` command: syntax, arguments, examples. |
@@ -154,25 +230,47 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-scripts/check.sh                               # 78 end-to-end tests, lint, byte-compile, manifests, doc links (~15 s)
-scripts/check.sh --all                         # also Python 3.8, 3.11, 3.13 (uv) and Linux (Docker), ~1 min
-git config core.hooksPath .githooks            # run scripts/check.sh before every push
-python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
-claude --plugin-dir ./plugin                   # try the plugin without installing it
-python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg
-scripts/release.sh                             # publish the version in __init__.py: checks, push, tag, GitHub release
-```
+# 81 end-to-end tests, lint, byte-compile, manifests, doc links (~15 s)
+scripts/check.sh
 
-**Releasing:** bump the version in `plugin/tally/__init__.py`, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, add its section on top of `CHANGELOG.md`, commit, then `scripts/release.sh`. Installed copies hear about the new release within a day, and `tally update` pulls `main`, so push only finished versions there.
+# also Python 3.8, 3.11, 3.13 (uv) and Linux (Docker), ~1 min
+scripts/check.sh --all
+
+# run scripts/check.sh before every push
+git config core.hooksPath .githooks
+
+# compare with Claude Code's own totals (reads files only)
+python3 scripts/validate_against_claude.py
+
+# try the plugin without installing it
+claude --plugin-dir ./plugin
+
+# regenerate docs/assets/banner-{light,dark}.svg
+python3 scripts/make_banner.py
+
+# publish the version in __init__.py: checks, push, tag, GitHub release
+scripts/release.sh
+```
 
 Checks run locally. The GitHub Actions workflow is disabled and only runs when started by hand, on Linux, because macOS runners are billed at ten times the minutes.
 
-Layout:
+### Releasing
 
-- `plugin/`: the Claude Code plugin (manifest, hooks, commands, `bin/tally`, and the `tally` Python package);
-- `tests/`;
-- `scripts/`;
-- `docs/`.
+1. Bump the version in `plugin/tally/__init__.py`, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
+2. Add its section on top of `CHANGELOG.md`.
+3. Commit.
+4. Run `scripts/release.sh`.
+
+Installed copies hear about the new release within a day, and `tally update` pulls `main`, so push only finished versions there.
+
+### Layout
+
+| Folder | Contents |
+|---|---|
+| `plugin/` | The Claude Code plugin: manifest, hooks, commands, `bin/tally` and the `tally` Python package. |
+| `tests/` | The end-to-end tests. |
+| `scripts/` | Checks, release and maintenance scripts. |
+| `docs/` | The documentation. |
 
 ## License
 

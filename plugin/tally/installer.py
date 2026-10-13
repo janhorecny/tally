@@ -209,26 +209,45 @@ INSTALL = {"claude": install_claude, "codex": install_codex, "pi": install_pi}
 UNINSTALL = {"claude": uninstall_claude, "codex": uninstall_codex, "pi": uninstall_pi}
 
 
+def check(agents: List[str]) -> None:
+    """Exit with a clear message for an agent name Tally does not know."""
+    unknown = [a for a in agents if a not in AGENTS]
+    if unknown:
+        from . import fmt
+        msg = fmt.error("Unknown agent %s" % ", ".join(unknown), "choose from %s" % ", ".join(AGENTS))
+        raise SystemExit(fmt.paint(msg) if fmt.use_color(sys.stderr) else msg)
+
+
 def choose(requested: Optional[List[str]], assume_yes: bool) -> List[str]:
     found = detect()
     if requested:
-        unknown = [a for a in requested if a not in AGENTS]
-        if unknown:
-            raise SystemExit("unknown agent(s): %s (choose from %s)" % (", ".join(unknown), ", ".join(AGENTS)))
+        check(requested)
         return requested
     detected = [a for a in AGENTS if found[a]]
     if not detected:
-        raise SystemExit("No supported agent found (Claude Code, Codex, pi). Use --agents to force one.")
+        from . import fmt
+        msg = fmt.error("No supported agent found (Claude Code, Codex, pi)", "--agents claude,codex,pi forces one")
+        raise SystemExit(fmt.paint(msg) if fmt.use_color(sys.stderr) else msg)
     if assume_yes or not sys.stdin.isatty():
         return detected
-    _say("Which agents should Tally be installed into?")
+    from . import fmt, prompt
+    picker = prompt.interactive()
+    color = fmt.use_color(sys.stdout)
+    _say("Which agents should Tally be installed into?" + ("  ← → choose · Enter confirms" if picker else ""))
     picked = []
     for a in AGENTS:
         if not found[a]:
             _say("  %-12s not found" % NAMES[a])
             continue
-        ans = input("  %-12s install? [Y/n] " % NAMES[a]).strip().lower()
-        if ans in ("", "y", "yes", "a", "ano", "j", "ja"):
+        if picker:
+            try:
+                yes = prompt.yes_no(NAMES[a], True, color, label_width=12)
+            except prompt.Cancelled:
+                return []
+        else:
+            ans = input("  %-12s install? [Y/n] " % NAMES[a]).strip().lower()
+            yes = ans in ("", "y", "yes", "a", "ano", "j", "ja")
+        if yes:
             picked.append(a)
     return picked
 
@@ -262,6 +281,8 @@ def install(requested: Optional[List[str]] = None, assume_yes: bool = False) -> 
 
 
 def uninstall(requested: Optional[List[str]] = None) -> int:
+    if requested:
+        check(requested)
     agents = requested or [a for a, on in installed().items() if on] or list(AGENTS)
     for a in agents:
         try:

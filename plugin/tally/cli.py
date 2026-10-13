@@ -1,6 +1,7 @@
 """Command line interface: `tally <command>`."""
 
 import argparse
+import re
 import json
 import os
 import sys
@@ -74,7 +75,19 @@ def cmd_start(args):
     conn = db.connect()
     name = " ".join(args.name).strip()
     res = commands.run(conn, _session(args), "start", name, cwd=os.getcwd())
-    _out(res.text)
+    return _result(res.text)
+
+
+def _cap(msg: str) -> str:
+    """Capitalise a message, but not one that starts with a setting key or a command."""
+    first = msg.split(" ", 1)[0]
+    return msg if any(c in first for c in "._-/") or not msg else msg[0].upper() + msg[1:]
+
+
+def _result(text: str) -> int:
+    """Print an answer of a /tally:* command; 1 if it is an error."""
+    _out(text)
+    return 1 if text.startswith(fmt.head("", "✗").rstrip()) else 0
 
 
 def cmd_end(args):
@@ -128,7 +141,7 @@ def cmd_list(args):
 def cmd_resume(args):
     conn = db.connect()
     res = commands.run(conn, _session(args), "resume", str(args.id))
-    _out(res.text)
+    return _result(res.text.replace("/tally:list shows", "tally list shows"))
 
 
 def cmd_rename(args):
@@ -160,7 +173,7 @@ def cmd_export(args):
         content, name = export.export(args.scope, f, ref=args.ref, project=args.project,
                                       days=None if args.all else args.days, agent=args.agent)
     except export.ExportError as e:
-        _die(str(e), "tally export -h shows the scopes and formats")
+        _die(_cap(str(e)), "tally export -h shows the scopes and formats")
     if args.copy:
         _copy(content)
         _out(fmt.head("Copied %s (%s) to the clipboard" % (args.scope + (" " + args.ref if args.ref else ""), f), "✓"))
@@ -361,6 +374,8 @@ def cmd_todo(args):
             _out(fmt.head("Todo #%d is now %s: %s" % (t["id"], t["status"], t["title"]),
                           fmt.STATUS_MARKS.get(t["status"], "")))
         elif a == "edit":
+            if todos.get(conn, args.id) is None:
+                _die("Todo #%s not found" % args.id, "tally todo list shows them")
             fields = {}
             for k in ("title", "notes", "project", "priority"):
                 if getattr(args, k) is not None:
@@ -386,19 +401,30 @@ def cmd_todo(args):
                     r["plan_id"], r["title"], r["project"], r["created"], r["updated"],
                     r["progress_done"], r["progress_total"]), "✓"))
     except ValueError as e:
-        _die(str(e))
+        _die(_cap(str(e)), "tally todo list shows them" if "not found" in str(e) else "tally todo %s -h shows the options" % a)
+    except OSError as e:
+        _die("Cannot read %s: %s" % (getattr(e, "filename", None) or "the file", e.strerror or e))
 
 
 def cmd_settings(args):
-    from . import settings
+    """tally settings [key [value]]: change one; in a terminal without arguments, the editor."""
+    from . import prompt, settings
+    if args.key and args.key not in settings.SCHEMA:
+        _die("Unknown setting %s" % args.key, "tally settings --list shows them all")
     if args.key and args.value is not None:
         try:
-            _out(fmt.head("%s = %s" % (args.key, settings.show(settings.set_value(args.key, args.value))), "✓"))
+            value = settings.set_value(args.key, args.value)
         except ValueError as e:
-            _die(str(e), "tally settings lists them")
-        return
-    _out(commands._settings_command(args.key or "").replace("/tally:settings <key> <value>",
-                                                            "tally settings <key> <value>"))
+            _die(_cap(str(e)), "tally settings %s shows what it does" % args.key)
+        _out(fmt.head("%s = %s" % (args.key, settings.show(value)), "✓"))
+        return 0
+    if not args.key and not args.list and prompt.interactive():
+        changed = prompt.settings_editor(color=fmt.use_color(sys.stdout))
+        _out(fmt.head("Saved: " + ", ".join("%s = %s" % (k, settings.show(v)) for k, v in changed), "✓")
+             if changed else fmt.head("Settings · nothing changed"))
+        return 0
+    _out(fmt.render_settings([args.key] if args.key else None, cli=True, width=prompt.width()))
+    return 0
 
 
 def cmd_project(args):
@@ -406,9 +432,11 @@ def cmd_project(args):
     conn = db.connect()
     if args.cmd == "projects":
         if args.json:
-            print(json.dumps([projects.stats(conn, n, series_days=1) for n in projects.all_names(conn)], indent=2))
+            from . import sessions
+            sessions.refresh(30)
+            print(json.dumps(projects.listing(conn, with_usage=True, refresh=False), indent=2))
         else:
-            _out(commands._project_command(conn, "projects", "", os.getcwd()))
+            _out(commands._project_command(conn, "projects", "", os.getcwd(), cli=True))
         return
     name = args.name or projects.detect(os.getcwd())
     if not name:
@@ -418,11 +446,14 @@ def cmd_project(args):
             row = projects.set_mode(conn, name, args.set)
         _out(fmt.head("%s: %s (%s)" % (name, row["mode"], projects.MODE_HELP[row["mode"]]), "✓"))
         return
-    st = projects.stats(conn, name, days=args.days, series_days=args.series)
+    st = commands.project_view(conn, name, days=args.days)
+    if st is None:
+        _die("Project %s not found" % name, "tally projects lists them" if args.name else
+             "no agent session here yet; tally projects lists the projects Tally knows")
     if args.json:
         print(json.dumps(st, indent=2))
     else:
-        _out(fmt.render_project(st))
+        _out(fmt.render_project(st, cli=True, series=args.series))
 
 
 def cmd_statusline(args):
@@ -469,7 +500,9 @@ def cmd_config(args):
         print("\nfile: %s" % paths.config_path())
         return
     if args.value is None:
-        print(json.dumps(cfg.get(args.key)))
+        if args.key not in cfg:
+            _die("Unknown key %s" % args.key, "tally config lists them; tally settings has the validated ones")
+        print(json.dumps(cfg.get(args.key), indent=2))
         return
     try:
         value = json.loads(args.value)
@@ -498,7 +531,7 @@ def cmd_setup(args):
     from . import onboarding
     if not sys.stdin.isatty():
         _die("tally setup asks questions and needs a terminal", "tally settings <key> <value> sets one without")
-    return 0 if onboarding.run(True, color=fmt.use_color(sys.stdout)) else 1
+    return 0 if onboarding.run(True, color=fmt.use_color(sys.stdout), offer_agents=True) else 1
 
 
 OVERVIEW = (
@@ -524,12 +557,49 @@ def overview() -> str:
 
 
 class Parser(argparse.ArgumentParser):
-    """The root parser shows the banner above its help on a terminal, like `tally` alone."""
+    """Help and errors in Tally's style: the root help groups the commands,
+    a usage error says what is wrong and where to look."""
 
     def print_help(self, file=None):
         if file is None and self.prog == "tally" and sys.stdout.isatty():
             print(fmt.banner(__version__, fmt.use_color(sys.stdout), not fmt.can_draw(sys.stdout)))
         super().print_help(file)
+
+    def format_help(self):
+        if self.prog != "tally":
+            return super().format_help()
+        names = {}
+        for action in self._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for choice in action._choices_actions:
+                    names[choice.dest] = (choice.help, [k for k, v in action.choices.items()
+                                                        if v is action.choices[choice.dest] and k != choice.dest])
+        lines = ["%s · per-task token and time tracking for Claude Code, Codex and pi" % fmt.BRAND, "",
+                 "usage: tally <command> [options]     tally <command> -h shows the options of one"]
+        for group, cmds in GROUPS:
+            lines += ["", group]
+            for c in cmds:
+                summary, aliases = names.get(c, ("", []))
+                label = ", ".join([c] + aliases)
+                lines.append("  %-17s %s" % (label, summary))
+        lines += ["", "Options", "  %-17s %s" % ("-h, --help", "this help"), "  %-17s %s" % ("--version", "the version"),
+                  "", "Examples"] + ["  %-44s %s" % (cmd, what) for cmd, what in EXAMPLES]
+        lines += ["", "Docs: https://github.com/janhorecny/tally/blob/main/docs/cli.md"]
+        return "\n".join(lines) + "\n"
+
+    def error(self, message):
+        m = re.match(r"argument <command>: invalid choice: '([^']*)'", message)
+        if m:                                       # an unknown command: say so, and offer the closest one
+            import difflib
+            known = [c for _, cmds in GROUPS for c in cmds] + ["ls", "serve"]
+            close = difflib.get_close_matches(m.group(1), known, 1, 0.6)
+            text = fmt.error("Unknown command %s" % m.group(1), ("did you mean tally %s?" % close[0]) if close else "",
+                             "tally --help lists them")
+            self.exit(2, (fmt.paint(text) if fmt.use_color(sys.stderr) else text) + "\n")
+        hint = "%s -h shows the options" % self.prog
+        usage = " ".join(self.format_usage().split())
+        text = "\n".join([fmt.error(message[0].upper() + message[1:], hint), "  " + usage])
+        self.exit(2, (fmt.paint(text) if fmt.use_color(sys.stderr) else text) + "\n")
 
 
 def cmd_update(args):
@@ -573,7 +643,8 @@ def cmd_doctor(args):
     found, inst = installer.detect(), installer.installed()
     for a in installer.AGENTS:
         state = ("installed" if inst[a] else
-                 ("found, not installed (./install.sh --agents %s)" % a if found[a] else "not found"))
+                 ("found, not installed (tally install --agents %s, or tally setup)" % a if found[a] else
+                  "not found"))
         print("%-13s %s" % (installer.NAMES[a], state))
     from . import onboarding
     setup = db.kv_get(conn, "setup")
@@ -600,218 +671,259 @@ def cmd_doctor(args):
         print("errors        none")
 
 
+SESSION_HELP = "the agent's session id (default: $CLAUDE_CODE_SESSION_ID, set inside Claude Code)"
+AGENTS = ["claude", "codex", "pi"]
+
+# the root help: groups of commands, in this order (internal commands are left out)
+GROUPS = (
+    ("Tasks", ("status", "list", "show", "stats", "end", "start", "resume", "rename", "delete")),
+    ("Todos", ("todo",)),
+    ("Projects and sessions", ("projects", "project", "sessions", "session", "export", "dashboard")),
+    ("Settings and maintenance", ("settings", "setup", "update", "doctor", "install", "uninstall", "statusline",
+                                  "config")),
+)
+EXAMPLES = (
+    ("tally status", "live totals of the active task"),
+    ("tally sessions --days 7", "what every tracked session cost this week"),
+    ('tally todo add "Fix login" @web !! due:fri', "a todo with project, priority and due date"),
+    ("tally export tasks -f csv -o timesheet.csv", "a time sheet"),
+    ("tally settings", "change settings (arrow keys in a terminal)"),
+)
+
+
+def _examples(*lines: str) -> str:
+    return "examples:\n" + "\n".join("  " + x for x in lines)
+
+
 def build_parser():
     p = Parser(prog="tally", description="%s · per-task token and time tracking for Claude Code, "
-                                                          "Codex and pi." % fmt.BRAND)
+                                         "Codex and pi." % fmt.BRAND)
     p.add_argument("--version", action="version", version="tally " + __version__)
-    sub = p.add_subparsers(dest="cmd")
+    sub = p.add_subparsers(dest="cmd", metavar="<command>", parser_class=Parser)
 
-    s = sub.add_parser("hook", help="(internal) run an agent hook; JSON payload on stdin or --payload")
+    def add(name, summary, func=None, aliases=(), examples=(), details=""):
+        s = sub.add_parser(name, aliases=list(aliases), help=summary,
+                           description=summary[0].upper() + summary[1:] + "." + ("\n\n" + details if details else ""),
+                           epilog=_examples(*examples) if examples else None,
+                           formatter_class=argparse.RawDescriptionHelpFormatter)
+        if func:
+            s.set_defaults(func=func)
+        return s
+
+    def session_opt(s):
+        s.add_argument("--session", metavar="ID", help=SESSION_HELP)
+
+    def json_opt(s, what="the same data as JSON"):
+        s.add_argument("--json", action="store_true", help=what)
+
+    # ---- internal: run by the agent integrations
+    s = add("hook", "(internal) run an agent hook; JSON payload on stdin or --payload", cmd_hook)
     s.add_argument("event")
-    s.add_argument("--agent", choices=["claude", "codex", "pi"])
+    s.add_argument("--agent", choices=AGENTS)
     s.add_argument("--payload")
-    s.set_defaults(func=cmd_hook)
-
-    s = sub.add_parser("slash", help="(internal) run a /tally:<command> for a session")
-    s.add_argument("--session")
-    s.add_argument("--agent", choices=["claude", "codex", "pi"])
+    s = add("slash", "(internal) run a /tally:<command> for a session", cmd_slash)
+    session_opt(s)
+    s.add_argument("--agent", choices=AGENTS)
     s.add_argument("--transcript")
     s.add_argument("--cwd")
     s.add_argument("--prompt-id")
     s.add_argument("--json", action="store_true")
     s.add_argument("command")
     s.add_argument("args", nargs=argparse.REMAINDER)
-    s.set_defaults(func=cmd_slash)
 
-    s = sub.add_parser("start", help="start a task in a session")
-    s.add_argument("name", nargs="*")
-    s.add_argument("--session")
-    s.set_defaults(func=cmd_start)
-
-    s = sub.add_parser("end", help="end a task (default: the active one)")
-    s.add_argument("id", nargs="?", type=int)
-    s.add_argument("--note")
-    s.add_argument("--session")
-    s.set_defaults(func=cmd_end)
-
-    s = sub.add_parser("status", help="live report of a task (default: the active one)")
-    s.add_argument("id", nargs="?", type=int)
-    s.add_argument("--session")
-    s.add_argument("--json", action="store_true")
-    s.add_argument("--brief", action="store_true")
-    s.set_defaults(func=cmd_status)
-
-    s = sub.add_parser("show", help="report of a task")
-    s.add_argument("id", type=int)
-    s.add_argument("--json", action="store_true")
+    # ---- tasks
+    s = add("start", "start a task in an agent session", cmd_start,
+            examples=['tally start "Fix login bug" --session 3f9c2a1b-…'],
+            details="In an agent, /tally:start is simpler; from a terminal you need the session id.")
+    s.add_argument("name", nargs="*", help="the task name (default: the next prompt)")
+    session_opt(s)
+    s = add("end", "end a task and print its report", cmd_end,
+            examples=["tally end", "tally end 12 --note shipped"])
+    s.add_argument("id", nargs="?", type=int, help="the task number (default: the active task)")
+    s.add_argument("--note", help="a note kept with the task, e.g. what was done")
+    session_opt(s)
+    s = add("status", "live report of a task", cmd_status, examples=["tally status", "tally status 12 --brief"])
+    s.add_argument("id", nargs="?", type=int, help="the task number (default: the active task)")
+    session_opt(s)
+    json_opt(s)
+    s.add_argument("--brief", action="store_true", help="totals only, no breakdown")
+    s = add("show", "the report of any task", cmd_show, examples=["tally show 12", "tally show 12 --prompts"])
+    s.add_argument("id", type=int, help="the task number (tally list shows them)")
+    json_opt(s)
     s.add_argument("--prompts", action="store_true", help="also list the prompts of the task")
-    s.set_defaults(func=cmd_show)
+    s = add("list", "list tasks, newest first", cmd_list, aliases=["ls"], examples=["tally list", "tally ls -n 50"])
+    s.add_argument("-n", "--limit", type=int, default=20, metavar="N", help="how many (default 20)")
+    s.add_argument("--all", action="store_true", help="every task")
+    json_opt(s)
+    s = add("resume", "continue a task in a session (reopens an ended task)", cmd_resume,
+            examples=["tally resume 12 --session 3f9c2a1b-…"])
+    s.add_argument("id", type=int, help="the task number")
+    session_opt(s)
+    s = add("rename", "rename a task", cmd_rename, examples=['tally rename 12 "Fix login redirect"'])
+    s.add_argument("id", type=int, help="the task number")
+    s.add_argument("name", nargs="+", help="the new name")
+    s = add("delete", "delete a task and what it counted", cmd_delete, examples=["tally delete 12"])
+    s.add_argument("id", type=int, help="the task number")
+    s.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
+    s = add("stats", "detailed statistics of a task: per prompt, tools, averages", cmd_stats,
+            examples=["tally stats", "tally stats 12"])
+    s.add_argument("id", nargs="?", type=int, help="the task number (default: the active or last task)")
+    session_opt(s)
+    json_opt(s)
 
-    s = sub.add_parser("list", aliases=["ls"], help="list tasks")
-    s.add_argument("-n", "--limit", type=int, default=20)
-    s.add_argument("--all", action="store_true")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_list)
+    # ---- todos
+    s = add("todo", "the todo list: add, list, next, show, take, done, mark, edit, rm, import",
+            examples=['tally todo add "Fix login" @web !! due:fri', "tally todo list", "tally todo done 3"])
+    tsub = s.add_subparsers(dest="todo_cmd", metavar="<action>", parser_class=Parser)
+    s.set_defaults(func=lambda a, parser=s: (cmd_todo(a) if a.todo_cmd else parser.print_help()))
 
-    s = sub.add_parser("resume", help="continue a task in a session (reopens ended tasks)")
-    s.add_argument("id", type=int)
-    s.add_argument("--session")
-    s.set_defaults(func=cmd_resume)
-
-    s = sub.add_parser("rename", help="rename a task")
-    s.add_argument("id", type=int)
-    s.add_argument("name", nargs="+")
-    s.set_defaults(func=cmd_rename)
-
-    s = sub.add_parser("delete", help="delete a task")
-    s.add_argument("id", type=int)
-    s.add_argument("-y", "--yes", action="store_true")
-    s.set_defaults(func=cmd_delete)
-
-    s = sub.add_parser("export", help="export a summary, tasks, a task, projects, a project, sessions or a session",
-                       description="Scopes and formats (the first is the default): summary md|json|csv · "
-                                   "tasks csv|json|md|text · task <id> md|text|json|csv · projects csv|json|md · "
-                                   "project <name> md|json|csv · sessions csv|json|md · session <id> md|text|json")
-    s.add_argument("scope", nargs="?", default="tasks",
-                   choices=["summary", "tasks", "task", "projects", "project", "sessions", "session"])
-    s.add_argument("ref", nargs="?", help="task id, project name or session id (prefix)")
-    s.add_argument("-f", "--format", choices=["csv", "json", "md", "text"])
-    s.add_argument("-o", "--output", help="write to a file")
-    s.add_argument("--copy", action="store_true", help="copy to the clipboard")
-    s.add_argument("-p", "--project", help="tasks or sessions of this project")
-    s.add_argument("--days", type=float, default=30, help="sessions and summary: the last N days (default 30)")
-    s.add_argument("--all", action="store_true", help="sessions and summary: all history")
-    s.add_argument("--agent", choices=["claude", "codex", "pi"], help="sessions of this agent")
-    s.set_defaults(func=cmd_export)
-
-    s = sub.add_parser("session", help="report of one whole session (id or transcript path), any agent")
-    s.add_argument("session_id")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_session)
-
-    s = sub.add_parser("sessions", help="all sessions across agents: tokens, cost, models, time")
-    s.add_argument("--days", type=float, default=30, help="sessions active in the last N days (default 30)")
-    s.add_argument("--all", action="store_true", help="all history")
-    s.add_argument("--agent", choices=["claude", "codex", "pi"])
-    s.add_argument("-p", "--project")
-    s.add_argument("--limit", type=int, default=40, help="rows to show (0 = all)")
-    s.add_argument("--no-refresh", action="store_true", help="show the index as is, without reading transcripts")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_sessions)
-
-    s = sub.add_parser("dashboard", aliases=["serve"], help="local web dashboard")
-    s.add_argument("--host")
-    s.add_argument("--port", type=int)
-    s.add_argument("--open", action="store_true", help="open the browser")
-    s.add_argument("--background", action="store_true", help="start detached and return")
-    s.add_argument("--stop", action="store_true", help="stop the running dashboard")
-    s.add_argument("--idle-minutes", type=float, help="stop after this many minutes without an open page")
-    s.set_defaults(func=cmd_dashboard)
-
-    s = sub.add_parser("config", help="show or set configuration (auto_start, dashboard_port, pricing)")
-    s.add_argument("key", nargs="?")
-    s.add_argument("value", nargs="?")
-    s.set_defaults(func=cmd_config)
-
-    s = sub.add_parser("stats", help="detailed stats of a task: per-prompt breakdown, tools, averages")
-    s.add_argument("id", nargs="?", type=int)
-    s.add_argument("--session")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_stats)
-
-    s = sub.add_parser("todo", help="todo list: add, list, next, show, take, done, mark, edit, rm, import")
-    tsub = s.add_subparsers(dest="todo_cmd")
-    s.set_defaults(func=lambda a: (cmd_todo(a) if a.todo_cmd else s.print_help()))
-    t = tsub.add_parser("add", help="add a todo (quick syntax: @project ! !! !!! due:fri -- notes)")
-    t.add_argument("text", nargs="+", help="title; @project, ! !! !!!, due:<when> are recognised")
-    t.add_argument("-p", "--project")
-    t.add_argument("--priority", type=int, choices=[0, 1, 2, 3])
-    t.add_argument("--due", help="today, tomorrow, fri, +3d, 2026-10-20, 20.10.")
-    t.add_argument("--notes")
-    t.add_argument("--parent", type=int, help="make it a step of another todo")
-    t.add_argument("--source", default="user", help="user | claude | import")
-    t.add_argument("--json", action="store_true")
-    t = tsub.add_parser("list", aliases=["ls"], help="list todos (default: open, this project)")
-    t.add_argument("-p", "--project")
-    t.add_argument("--all", action="store_true", help="all projects")
-    t.add_argument("--status", default="open", help="open | done | all | todo | doing | blocked | dropped")
+    def tadd(name, summary, aliases=(), examples=()):
+        return tsub.add_parser(name, aliases=list(aliases), help=summary,
+                               description=summary[0].upper() + summary[1:] + ".",
+                               epilog=_examples(*examples) if examples else None,
+                               formatter_class=argparse.RawDescriptionHelpFormatter)
+    t = tadd("add", "add a todo", examples=['tally todo add "Fix login" @web !! due:fri -- check Safari',
+                                            "tally todo add Write tests --priority 2 --due +3d"])
+    t.add_argument("text", nargs="+", help="the title; @project, ! !! !!!, due:<when> and -- notes are recognised")
+    t.add_argument("-p", "--project", help="the project (default: the one of the current directory)")
+    t.add_argument("--priority", type=int, choices=[0, 1, 2, 3], help="0 none, 1 low, 2 medium, 3 high")
+    t.add_argument("--due", metavar="WHEN", help="today, tomorrow, fri, +3d, 2026-10-20, 20.10.")
+    t.add_argument("--notes", help="longer notes")
+    t.add_argument("--parent", type=int, metavar="ID", help="make it a step of another todo")
+    t.add_argument("--source", default="user", help="user, claude or import (default user)")
+    json_opt(t)
+    t = tadd("list", "list todos (default: the open ones of this project)", aliases=["ls"],
+             examples=["tally todo list", "tally todo list --all --status done"])
+    t.add_argument("-p", "--project", help="this project instead of the current one")
+    t.add_argument("--all", action="store_true", help="every project")
+    t.add_argument("--status", default="open", help="open, done, all, todo, doing, blocked or dropped (default open)")
     t.add_argument("--tree", action="store_true", help="show plan steps under their todos")
-    t.add_argument("--json", action="store_true")
-    t = tsub.add_parser("next", help="the next todo to work on (doing first, then by priority/due)")
-    t.add_argument("-p", "--project")
-    t.add_argument("--all", action="store_true")
-    t.add_argument("--json", action="store_true")
-    t = tsub.add_parser("show", help="a todo with its steps and measured work")
-    t.add_argument("id", type=int)
-    t.add_argument("--json", action="store_true")
-    t = tsub.add_parser("take", help="pick up a todo in a Claude Code session (starts measuring)")
-    t.add_argument("id", type=int)
-    t.add_argument("--session")
-    t = tsub.add_parser("done", help="mark done (ends its active task)")
-    t.add_argument("id", type=int)
-    t.add_argument("--note")
-    t = tsub.add_parser("mark", help="set status")
-    t.add_argument("id", type=int)
-    t.add_argument("status", choices=["todo", "doing", "blocked", "done", "dropped"])
-    t.add_argument("--note")
-    t = tsub.add_parser("edit", help="change title, notes, project, priority or due date")
-    t.add_argument("id", type=int)
-    t.add_argument("--title")
-    t.add_argument("--notes")
-    t.add_argument("--project")
-    t.add_argument("--priority", type=int, choices=[0, 1, 2, 3])
-    t.add_argument("--due", help="new due date, or '' to clear")
-    t = tsub.add_parser("rm", help="delete a todo (and its steps)")
-    t.add_argument("id", type=int)
-    t.add_argument("-y", "--yes", action="store_true")
-    t = tsub.add_parser("import", help="create/update todos from a markdown plan (superpowers, checklists)")
-    t.add_argument("file")
-    t.add_argument("-p", "--project")
-    t.add_argument("--source", default="import")
-    t.add_argument("--json", action="store_true")
+    json_opt(t)
+    t = tadd("next", "the next todo to work on: doing first, then by priority and due date")
+    t.add_argument("-p", "--project", help="this project instead of the current one")
+    t.add_argument("--all", action="store_true", help="every project")
+    json_opt(t)
+    t = tadd("show", "a todo with its steps and the work measured on it", examples=["tally todo show 3"])
+    t.add_argument("id", type=int, help="the todo number")
+    json_opt(t)
+    t = tadd("take", "pick up a todo in an agent session: it becomes doing and a task measures it")
+    t.add_argument("id", type=int, help="the todo number")
+    session_opt(t)
+    t = tadd("done", "mark a todo done (ends its active task)", examples=["tally todo done 3"])
+    t.add_argument("id", type=int, help="the todo number")
+    t.add_argument("--note", help="a note for the task it ends")
+    t = tadd("mark", "set the status of a todo", examples=["tally todo mark 3 blocked"])
+    t.add_argument("id", type=int, help="the todo number")
+    t.add_argument("status", choices=["todo", "doing", "blocked", "done", "dropped"], help="the new status")
+    t.add_argument("--note", help="a note for the task it ends (done, dropped)")
+    t = tadd("edit", "change the title, notes, project, priority or due date of a todo",
+             examples=["tally todo edit 3 --due fri --priority 3"])
+    t.add_argument("id", type=int, help="the todo number")
+    t.add_argument("--title", help="the new title")
+    t.add_argument("--notes", help="the new notes")
+    t.add_argument("--project", help="move it to this project")
+    t.add_argument("--priority", type=int, choices=[0, 1, 2, 3], help="0 none, 1 low, 2 medium, 3 high")
+    t.add_argument("--due", metavar="WHEN", help="the new due date, or '' to clear it")
+    t = tadd("rm", "delete a todo and its steps", examples=["tally todo rm 3"])
+    t.add_argument("id", type=int, help="the todo number")
+    t.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
+    t = tadd("import", "create or update todos from a markdown plan (superpowers, checklists)",
+             examples=["tally todo import docs/plan.md"])
+    t.add_argument("file", help="the markdown file")
+    t.add_argument("-p", "--project", help="the project (default: the one of the current directory)")
+    t.add_argument("--source", default="import", help="recorded as the source (default import)")
+    json_opt(t)
 
-    s = sub.add_parser("project", help="overall stats of a project; --set track|tasks|off")
-    s.add_argument("name", nargs="?", help="default: the project of the current directory")
-    s.add_argument("--set", choices=["track", "tasks", "off"])
-    s.add_argument("--days", type=int, help="only the last N days")
-    s.add_argument("--series", type=int, default=14, help="days in the daily series")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_project)
+    # ---- projects and sessions
+    s = add("project", "a project's numbers, or set how it is tracked", cmd_project,
+            examples=["tally project", "tally project web-app", "tally project --set track"],
+            details="Modes: track (every session is read and kept), tasks (only the tasks you start are kept),\n"
+                    "off (ignored). Track and tasks also read the project's sessions into the sessions overview.")
+    s.add_argument("name", nargs="?", help="the project (default: the one of the current directory)")
+    s.add_argument("--set", choices=["track", "tasks", "off"], metavar="MODE", help="track, tasks or off")
+    s.add_argument("--days", type=int, metavar="N", help="what Tally kept: only the last N days")
+    s.add_argument("--series", type=int, default=14, metavar="N", help="days in the daily chart (default 14)")
+    json_opt(s)
+    s = add("projects", "every project: tracking, sessions, tokens and cost of the last 30 days", cmd_project,
+            examples=["tally projects"])
+    json_opt(s)
+    s = add("sessions", "the tracked sessions of every agent: tokens, cost, models, time", cmd_sessions,
+            examples=["tally sessions", "tally sessions --days 7 --agent codex", "tally sessions --all -p web-app"],
+            details="Tracked: projects set to track or tasks, sessions a task counted, sessions added in the\n"
+                    "dashboard (setting sessions.scope). The last line says how many are not tracked.")
+    s.add_argument("--days", type=float, default=30, metavar="N", help="sessions active in the last N days (default 30)")
+    s.add_argument("--all", action="store_true", help="all history")
+    s.add_argument("--agent", choices=AGENTS, help="only this agent")
+    s.add_argument("-p", "--project", help="only this project")
+    s.add_argument("--limit", type=int, default=40, metavar="N", help="rows to show (default 40, 0 = all)")
+    s.add_argument("--no-refresh", action="store_true", help="show the index as it is, without reading transcripts")
+    json_opt(s)
+    s = add("session", "the full report of one session, any agent", cmd_session,
+            examples=["tally session 3f9c2a1b", "tally session ~/.codex/sessions/2026/10/12/rollout-….jsonl"])
+    s.add_argument("session_id", metavar="session", help="a session id, its first characters, or a transcript path")
+    json_opt(s)
+    s = add("export", "export a summary, tasks, a task, projects, a project, sessions or a session", cmd_export,
+            examples=["tally export tasks -f csv -o timesheet.csv", "tally export task 12 --copy",
+                      "tally export summary --days 7", "tally export sessions -p web-app -f md"],
+            details="Scopes and their formats (the first is the default):\n"
+                    "  summary         md, json, csv\n"
+                    "  tasks           csv, json, md, text\n"
+                    "  task <id>       md, text, json, csv\n"
+                    "  projects        csv, json, md\n"
+                    "  project <name>  md, json, csv\n"
+                    "  sessions        csv, json, md\n"
+                    "  session <id>    md, text, json")
+    s.add_argument("scope", nargs="?", default="tasks",
+                   choices=["summary", "tasks", "task", "projects", "project", "sessions", "session"],
+                   metavar="scope", help="summary, tasks (default), task, projects, project, sessions or session")
+    s.add_argument("ref", nargs="?", help="task, project or session: its number, name or id")
+    s.add_argument("-f", "--format", choices=["csv", "json", "md", "text"], help="csv, json, md or text")
+    s.add_argument("-o", "--output", metavar="FILE", help="write to a file instead of the screen")
+    s.add_argument("--copy", action="store_true", help="copy to the clipboard instead")
+    s.add_argument("-p", "--project", help="tasks or sessions of this project")
+    s.add_argument("--days", type=float, default=30, metavar="N", help="sessions and summary: the last N days (default 30)")
+    s.add_argument("--all", action="store_true", help="sessions and summary: all history")
+    s.add_argument("--agent", choices=AGENTS, help="sessions of this agent")
+    s = add("dashboard", "the local web dashboard", cmd_dashboard, aliases=["serve"],
+            examples=["tally dashboard --open", "tally dashboard --background", "tally dashboard --stop"])
+    s.add_argument("--open", action="store_true", help="open it in the browser")
+    s.add_argument("--background", action="store_true", help="start it in the background and return")
+    s.add_argument("--stop", action="store_true", help="stop the running dashboard")
+    s.add_argument("--host", help="the address to listen on (default 127.0.0.1; keep it local)")
+    s.add_argument("--port", type=int, help="the port (default: setting dashboard_port, 8765)")
+    s.add_argument("--idle-minutes", type=float, metavar="N", help="stop after N minutes without an open page")
 
-    s = sub.add_parser("projects", help="all projects with mode and totals")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_project)
-
-    s = sub.add_parser("settings", help="show or change settings (validated)")
-    s.add_argument("key", nargs="?")
-    s.add_argument("value", nargs="?")
-    s.set_defaults(func=cmd_settings)
-
-    s = sub.add_parser("statusline", help="one-line active-task segment for a status line (reads statusLine JSON)")
-    s.add_argument("--session")
-    s.add_argument("--width", type=int, default=28, help="max task name length")
-    s.set_defaults(func=cmd_statusline)
-
-    s = sub.add_parser("install", help="install into agents: Claude Code, Codex, pi (asks which)")
-    s.add_argument("--agents", help="comma separated: claude,codex,pi")
-    s.add_argument("--all", action="store_true", help="every supported agent")
-    s.add_argument("-y", "--yes", action="store_true", help="no questions: every detected agent")
-    s.set_defaults(func=cmd_install)
-
-    s = sub.add_parser("uninstall", help="remove from agents (default: wherever it is installed)")
-    s.add_argument("--agents")
-    s.set_defaults(func=cmd_uninstall)
-
-    s = sub.add_parser("setup", help="the onboarding questions: prompt storage, logging, new projects, status line")
-    s.set_defaults(func=cmd_setup)
-
-    s = sub.add_parser("doctor", help="check installation")
-    s.set_defaults(func=cmd_doctor)
-
-    s = sub.add_parser("update", help="update to the latest version (git pull, reinstall into the agents)")
+    # ---- settings and maintenance
+    s = add("settings", "show or change settings", cmd_settings,
+            examples=["tally settings", "tally settings log.prompts preview", "tally settings sessions.scope"],
+            details="In a terminal, tally settings alone lets you change them with the arrow keys.")
+    s.add_argument("key", nargs="?", help="one setting, e.g. log.prompts")
+    s.add_argument("value", nargs="?", help="its new value")
+    s.add_argument("--list", action="store_true", help="only list them, also in a terminal")
+    s = add("setup", "the setup questions: prompts, logging, new projects, sessions, updates, status line",
+            cmd_setup)
+    s = add("update", "update Tally to the latest version", cmd_update, examples=["tally update", "tally update --check"],
+            details="Pulls the latest version, installs it into the agents Tally is in, restarts a running\n"
+                    "dashboard and lists what changed.")
     s.add_argument("--check", action="store_true", help="only say whether a new version is out")
     s.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
-    s.set_defaults(func=cmd_update)
+    s = add("doctor", "check the installation: version, data, agents, hooks, updates", cmd_doctor)
+    s = add("install", "install into agents: Claude Code, Codex, pi", cmd_install,
+            examples=["tally install", "tally install --agents claude,pi"])
+    s.add_argument("--agents", metavar="LIST", help="comma separated: claude,codex,pi")
+    s.add_argument("--all", action="store_true", help="every supported agent")
+    s.add_argument("-y", "--yes", action="store_true", help="no questions: every detected agent")
+    s = add("uninstall", "remove Tally from agents (your history stays)", cmd_uninstall,
+            examples=["tally uninstall", "tally uninstall --agents codex"])
+    s.add_argument("--agents", metavar="LIST", help="comma separated (default: every agent it is installed in)")
+    s = add("statusline", "the one-line segment for a status line (reads the statusLine JSON on stdin)",
+            cmd_statusline)
+    session_opt(s)
+    s.add_argument("--width", type=int, default=28, metavar="N", help="longest task name shown (default 28)")
+    s = add("config", "raw configuration keys (advanced; tally settings is validated)", cmd_config,
+            examples=["tally config", 'tally config pricing \'{"claude-opus-5-5": {"input": 4}}\''])
+    s.add_argument("key", nargs="?", help="a top-level key of config.json")
+    s.add_argument("value", nargs="?", help="its new value (JSON, or plain text)")
     return p
 
 
@@ -821,7 +933,11 @@ def main(argv=None) -> int:
     if not getattr(args, "func", None):
         print(overview())
         return 0
-    rc = args.func(args)
+    try:
+        rc = args.func(args)
+    except KeyboardInterrupt:                  # Ctrl-C: stop quietly, the shell's convention for the exit code
+        sys.stderr.write("\n")
+        return 130
     if args.cmd in NOTIFY:
         _update_notice()
     return rc or 0

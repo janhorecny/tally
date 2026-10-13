@@ -11,19 +11,33 @@ SCHEMA = {
                   "breakdown; calls = + tool-call statistics"),
     "log.prompts": (("full", "preview", "off"),
                     "How prompt text is stored: full, preview (first 300 characters) or off (never stored)"),
-    "todos.reminder": ((True, False), "Show the project's open todos when a session starts"),
-    "todos.reminder_limit": (int, "How many todos the reminder lists"),
-    "auto_start": (("off", "session"), "Start a task automatically with the first prompt of every session"),
     "projects.default_mode": (("ask", "track", "tasks"),
                               "New projects: ask how to track them, or track every session, or count only tasks"),
     "sessions.scope": (("enabled", "all"),
                        "Sessions overview: only projects set to track or tasks and sessions added one by one "
                        "(enabled), or every session in the agents' transcripts (all)"),
+    "auto_start": (("off", "session"), "Start a task automatically with the first prompt of every session"),
+    "todos.reminder": ((True, False), "Show the project's open todos when a session starts"),
+    "todos.reminder_limit": (int, "How many todos the reminder lists"),
     "updates.check": ((True, False), "Check once a day whether a new version is out and say so "
                                      "(one request to GitHub; nothing about you is sent)"),
     "dashboard_port": (int, "Port of the local dashboard"),
     "dashboard_idle_minutes": (int, "Stop a dashboard started in the background after this many minutes "
                                     "without an open page (0 = never)"),
+}
+
+# (group, label): how the dashboard and `tally settings` show each key, in SCHEMA order
+LABELS = {
+    "log.depth": ("Logging", "Logging detail"),
+    "log.prompts": ("Logging", "Prompt text"),
+    "projects.default_mode": ("Projects and tasks", "New projects"),
+    "sessions.scope": ("Projects and tasks", "Sessions overview reads"),
+    "auto_start": ("Projects and tasks", "Start tasks automatically"),
+    "todos.reminder": ("Todos", "Reminder at session start"),
+    "todos.reminder_limit": ("Todos", "Todos in the reminder"),
+    "updates.check": ("Updates", "Tell me about new versions"),
+    "dashboard_port": ("Dashboard", "Port"),
+    "dashboard_idle_minutes": ("Dashboard", "Stop when unused (minutes)"),
 }
 
 PREVIEW_CHARS = 300
@@ -91,6 +105,14 @@ def show(value: Any) -> str:
     if isinstance(value, bool):
         return "on" if value else "off"
     return str(value)
+
+
+def choices(key: str) -> List[str]:
+    """The values to choose from, as typed (on/off for switches); [] for numbers."""
+    allowed = SCHEMA[key][0]
+    if allowed is int:
+        return []
+    return ["on", "off"] if allowed == (True, False) else list(allowed)
 
 
 def describe() -> List[Tuple[str, Any, str, Any]]:

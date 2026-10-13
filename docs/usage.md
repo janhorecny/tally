@@ -68,10 +68,10 @@ A quick todo list per project. Each todo can be picked up as a measured task, so
 ```
 /tally:todo Fix login redirect loop !! due:fri -- Safari only
 /tally:todo Write release notes @website due:zajtra
-/tally:todos                       ← open todos of this project
-/tally:take 3                      ← status doing, Tally measures from now; you write the prompt
-/tally:do 3                        ← the same, and Claude starts working on it immediately
-/tally:done                        ← todo done, its task ends, report shown
+/tally:todos       ← open todos of this project
+/tally:take 3      ← status doing, Tally measures from now; you write the prompt
+/tally:do 3        ← the same, and Claude starts working on it immediately
+/tally:done        ← todo done, its task ends, report shown
 ```
 
 ### Quick syntax
@@ -113,7 +113,7 @@ The first time an agent opens in a git repository Tally does not know yet, it as
 
 To skip the question, set a default for new projects with `tally setup` or `/tally:settings projects.default_mode track` (or `tasks`). A new project then gets that mode, with a one-line notice instead of the question.
 
-| mode | what is counted |
+| Mode | What is counted |
 |---|---|
 | `track` | Every session in the project, with or without a task. This gives the project's overall usage and the share that went through tasks. |
 | `tasks` | Only explicit tasks (`/tally:start`, `/tally:new`, `/tally:take`). |
@@ -136,22 +136,33 @@ The mode also decides what the [sessions overview](#sessions) reads: the session
 Tasks measure what you choose to measure. The sessions overview answers a different question: what did every session cost, with or without a task?
 
 ```
-/tally:sessions                 # last 7 days, every agent
-/tally:sessions 30 codex        # last 30 days, Codex only
-/tally:sessions all here        # all history of this project
-tally sessions --days 30        # the same in the terminal
-tally session <id or id prefix> # the full report of one session
+# last 7 days, every agent
+/tally:sessions
+
+# last 30 days, Codex only
+/tally:sessions 30 codex
+
+# all history of this project
+/tally:sessions all here
+
+# the same in the terminal
+tally sessions --days 30
+
+# the full report of one session
+tally session <id or id prefix>
 ```
 
 ```
-▍Tally · Sessions, last 7 days: 42 · 1.12B tokens · $512.40 · 318 prompts · active 21h 05m
+▍Tally · Sessions, last 7 days: 42 · 1.12B tokens · $512.40 · 318 prompts
   Claude Code 37 · 1.09B · $498.10   Codex 3 · 24.1M · $13.90   pi 2 · 310.2k · $0.40
 
-  id       last activity    agent  project      span   active  prm   tokens      cost  models                   title / tasks
-  3f9c2a1b 2026-10-12 14:47 claude web-app    44m 10s  31m 02s   12    4.21M     $3.12  opus-5-5, sonnet-5-5     #3 Fix login redirect loop
-  9b81e0d4 2026-10-12 11:20 codex  api        1h 05m   22m 40s    6    8.40M     $4.75  gpt-6.1-sol, gpt-6-luna  add pagination to /orders
-  c2d7f6a0 2026-10-11 17:02 pi     docs       12m 30s        -    3   180.4k     $0.21  zai/glm-5.2              write the API changelog
+  id       last activity    agent  project  active tokens  cost  title / tasks
+  3f9c2a1b 2026-10-12 14:47 claude web-app 31m 02s  4.21M $3.12  #3 Fix login redirect…
+  9b81e0d4 2026-10-12 11:20 codex  api     22m 40s  8.40M $4.75  add pagination to /ord…
+  c2d7f6a0 2026-10-11 17:02 pi     docs          - 180.4k $0.21  write the API changelog
 ```
+
+The `span`, `prm` (prompts) and `models` columns and the active time in the first line are left out here.
 
 - **What is listed:** every tracked session with at least one API call, newest first. That covers Claude Code, Codex and pi, with or without a task, including sessions from before Tally was installed.
 - **Which sessions are tracked** (setting `sessions.scope`):
@@ -182,14 +193,20 @@ The same appears in the dashboard's task detail: summary tiles, a per-prompt tab
 
 ## Settings
 
+In an agent:
+
 ```
-/tally:settings                         ← show everything
-/tally:settings log.depth calls         ← logging depth: summary | prompts | calls
-/tally:settings log.prompts preview     ← logging type: full | preview | off
-/tally:settings todos.reminder off
+# every setting by group, with what it does
+/tally:settings
+
+# logging depth: summary | prompts | calls
+/tally:settings log.depth calls
+
+# prompt text: full | preview | off
+/tally:settings log.prompts preview
 ```
 
-The dashboard's *Settings* tab offers the same controls, and `tally setup` asks about the main ones in a terminal. See [configuration](configuration.md) for every key.
+In a terminal, `tally settings` opens an editor: ↑ ↓ choose a setting, ← → change it (saved at once), q quits. `tally setup` asks about the main ones, with a line under each question that explains the choices. The dashboard's *Settings* tab offers the same controls. See [configuration](configuration.md) for every key.
 
 ## Messages
 
@@ -243,21 +260,21 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 ```
 ▍Tally · Task #3 · Fix login redirect loop   [■ ended]
-  prompt   The login page loops back to /login after OAuth callback, find out why and fix it
+  prompt   The login page loops back to /login after OAuth callback, find out why
   time     44m 10s wall · 31m 02s active (12 turns) · 2026-10-12 14:03 → 14:47
   tokens   4.21M total · in 12.3k · out 85.1k · cache write 410.2k · cache read 3.70M
   cost     ≈ $3.12 at list price · 171 API calls
-  unlogged ≈ +120.4k tokens · +$0.084  Claude Code's own calls (…), estimated from the session cost record
+  unlogged ≈ +120.4k tokens · +$0.084  Claude Code's own calls, from its cost record
   models   opus-5-5 3.90M $2.80 · sonnet-5-5 310.0k $0.32
 
-  breakdown                                        tokens   output      cost      time  calls
-  main session (own)                                3.10M    60.2k     $2.10   31m 02s     42
-  ├─ general-purpose · Explore auth flow            410.0k     8.1k    $0.300    1m 10s      9
-  │  └─ fork · Write regression test                 92.0k     2.0k    $0.071       48s      3
-  └─ workflow · review-changes (25 agents)          700.0k    16.0k    $0.720    6m 30s    120
-     ├─ phase · Review (20)                         560.0k    12.1k    $0.580    4m 10s     96
-     └─ phase · Verify (5)                          140.0k     3.9k    $0.140    2m 20s     24
-  TOTAL                                             4.21M    85.1k     $3.12   44m 10s    171
+  breakdown                                  tokens   output      cost      time  calls
+  main session (own)                          3.10M    60.2k     $2.10   31m 02s     42
+  ├─ general-purpose · Explore auth flow      410.0k     8.1k    $0.300    1m 10s      9
+  │  └─ fork · Write regression test           92.0k     2.0k    $0.071       48s      3
+  └─ workflow · review-changes (25 agents)    700.0k    16.0k    $0.720    6m 30s    120
+     ├─ phase · Review (20)                   560.0k    12.1k    $0.580    4m 10s     96
+     └─ phase · Verify (5)                    140.0k     3.9k    $0.140    2m 20s     24
+  TOTAL                                       4.21M    85.1k     $3.12   44m 10s    171
 
   by agent type
     general-purpose               1 agents    410.0k    $0.300
@@ -283,16 +300,16 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 `/tally:dashboard` or `tally dashboard --open` serves http://127.0.0.1:8765.
 
-| tab | what you can do |
+| Tab | What you can do |
 |---|---|
 | *Tasks* | Before the first task: how to start one in each agent, and what your agents used in the last 30 days (or, before any project is tracked, how many sessions they ran). Then: filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
 | *Todos* | A board with Doing, Todo, Blocked and Done. Add todos with the quick syntax, change the status, tick plan steps, **edit** title, priority, due date, project and notes, or **delete** a todo. *Copy /tally:do* copies the command that hands a todo to your agent. |
-| *Projects* | Every project with sessions in the last 30 days, in two groups. *Tracked*, most used first: sessions, tokens and cost from the [sessions index](#sessions). *Not tracked*: how many sessions each has, not read; choose `track` or `tasks` right in the table, or in the project's detail, and its sessions are read at once. The detail adds what Tally keeps for good, a daily chart, models and tasks; for a project that is not tracked, its sessions with an **Add** button each. |
+| *Projects* | Every project with sessions in the last 30 days, in two cards. *Tracked*, most used first: sessions, tokens and cost from the [sessions index](#sessions). *Not tracked*: how many sessions each has and how large their transcripts are, not read; choose `track` or `tasks` right in the table and its sessions are read at once. A search box above both filters them by name (`/` jumps to it, Enter opens the only match). A click opens the project on its own page (`#projects/<name>`, with *← All projects* back): what Tally keeps for good, a daily chart, models and tasks; for a project that is not tracked, its sessions with an **Add** button each. |
 | *Sessions* | The tracked sessions of every agent, and the ones not tracked with an **Add** button; see [Sessions](#sessions). |
 | *Settings* | The same settings as `/tally:settings`, grouped and described. |
 
 - **Live:** an active task refreshes every 5 seconds. The header shows when the data was last loaded, or that the dashboard server is not reachable.
-- **Project filter:** the selector in the header limits Tasks, Todos and Sessions to one project.
+- **Project filter:** the selector in the header limits Tasks, Todos and Sessions to one project; on *Projects* it opens that project's page.
 - **Keyboard:** `R` reloads the data (as does the ↻ button), `/` jumps to the task filter, `Enter` opens the focused row.
 - **Small screens:** tables keep the columns that identify a row and its cost; the rest is in the detail.
 - **Themes:** the button with the monitor, sun or moon icon switches between following the system, light and dark.
@@ -302,7 +319,7 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 ### Export and copy
 
-| where | what |
+| Where | What |
 |---|---|
 | The ⤓ button in the header | The summary of the last 30 days (Markdown, CSV, JSON), all tasks as a time sheet, all projects, the sessions of the last 30 days, and the chosen project. |
 | Tasks list | Every task (of the chosen project): time sheet CSV, Markdown table, JSON; or copy one line per task. |
@@ -313,7 +330,11 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 The terminal has the same exports: [`tally export`](cli.md#tally-export).
 
-**Stopping it:** `/tally:dashboard stop`, `tally dashboard --stop`, or *Settings → Dashboard → Stop the dashboard*. Started by `/tally:dashboard`, it also stops by itself after two hours without an open page (`dashboard_idle_minutes`, `0` keeps it running), and `/tally:dashboard` starts it again in a moment.
+### Stopping the dashboard
+
+- `/tally:dashboard stop`, `tally dashboard --stop`, or *Settings → Dashboard → Stop the dashboard*.
+- Started by `/tally:dashboard`, it also stops by itself after two hours without an open page (`dashboard_idle_minutes`; `0` keeps it running).
+- `/tally:dashboard` starts it again in a moment.
 
 ## Status line
 
@@ -350,14 +371,23 @@ tally export task 12 -f text --copy
 tally export project web-app -f md -o web-app.md
 
 # what did a past session cost, including subagents? (no task needed)
-tally sessions --days 7           # find it (first column: id prefix)
-tally session 3f9c2a1b            # its full report
+# find it: the first column is an id prefix
+tally sessions --days 7
+# its full report
+tally session 3f9c2a1b
 
 # the ten most expensive sessions of the last 30 days
-tally sessions --json --limit 0 | python3 -c "import json,sys; r=json.load(sys.stdin)['sessions']; [print(s['session_id'][:8], s['agent'], round(s['totals']['cost'],2), s['title']) for s in sorted(r, key=lambda s: -s['totals']['cost'])[:10]]"
+tally sessions --json --limit 0 | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)['sessions']
+for s in sorted(rows, key=lambda s: -s['totals']['cost'])[:10]:
+    print(s['session_id'][:8], s['agent'], round(s['totals']['cost'], 2), s['title'])"
 
 # the five most expensive tasks
-tally list --all --json | python3 -c "import json,sys; r=json.load(sys.stdin); [print(t['id'], round(t['cost'],2), t['name']) for t in sorted(r, key=lambda t: -t['cost'])[:5]]"
+tally list --all --json | python3 -c "
+import json, sys
+for t in sorted(json.load(sys.stdin), key=lambda t: -t['cost'])[:5]:
+    print(t['id'], round(t['cost'], 2), t['name'])"
 
 # per-agent output tokens of task 12
 tally show 12 --json | python3 -c "

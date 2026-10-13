@@ -12,10 +12,10 @@ The Claude Code integration end to end. Codex and pi follow the same pattern; se
             │        │ every API response is appended to a transcript     │
             └────────┼─────────────────────────────────────────────────────┘
                      ▼
-  ~/.claude/projects/<project>/<session>.jsonl                      main session
+  ~/.claude/projects/<project>/<session>.jsonl                    main session
   ~/.claude/projects/<project>/<session>/subagents/agent-<id>.jsonl (+ .meta.json)
   ~/.claude/projects/<project>/<session>/subagents/workflows/<run>/agent-<id>.jsonl
-  ~/.claude/projects/<project>/<session>/workflows/<run>.json         workflow run record
+  ~/.claude/projects/<project>/<session>/workflows/<run>.json       workflow run record
                      │
    Stop / SubagentStop / PreCompact / SessionEnd hooks: read new bytes
                      ▼
@@ -28,7 +28,7 @@ Tally is a Claude Code **plugin**, a set of **Codex hooks** and a **pi extension
 
 The data model, the reports, the todos and the projects are the same for every agent. Each agent has its own way in (events) and its own transcript reader:
 
-| | Claude Code | Codex | pi |
+| Part | Claude Code | Codex | Pi |
 |---|---|---|---|
 | integration | plugin: `hooks/hooks.json`, `commands/`, skill | `~/.codex/hooks.json` (merged) and skill in `~/.agents/skills` | extension `~/.pi/agent/extensions/tally.ts` and skill |
 | commands | `/tally:<cmd>`, blocked by `UserPromptSubmit` | `tally:<cmd>` prompt, blocked by `UserPromptSubmit` | `pi.registerCommand("tally")` and an `input` handler for `tally:<cmd>` |
@@ -63,7 +63,7 @@ The task database holds what tasks (and projects in `track` mode) count. History
 
 Paths starting with `tally/` are in `plugin/tally/`.
 
-| path | role |
+| Path | Role |
 |---|---|
 | `plugin/.claude-plugin/plugin.json` | Claude Code plugin manifest (name `tally`, so commands are `/tally:*`). |
 | `plugin/agents/pi/tally.ts` | pi extension: events → `tally hook --agent pi`, the `/tally` command, the footer status. |
@@ -93,7 +93,7 @@ Paths starting with `tally/` are in `plugin/tally/`.
 
 Claude Code's events are below. Codex gets the same six events through `~/.codex/hooks.json`; the pi extension calls `tally hook --agent pi` from its own events.
 
-| event | what Tally does | typical time |
+| Event | What Tally does | Typical time |
 |---|---|---|
 | `UserPromptSubmit` | `/tally:*`: runs the command and returns `{"decision":"block","reason":…}`, so the reason is shown to you and the model is never called. A normal prompt while a task is active is stored, and a turn timer starts. | ~35 ms |
 | `Stop` | Reads new transcript bytes of the session (only while a task is active) and closes the turn timer. | ~35 ms plus the new bytes |
@@ -212,7 +212,7 @@ The result is the separate `unlogged ≈ +…` line. Its status is `estimated`, 
 
 Validation: `python3 scripts/validate_against_claude.py`. It reads files only. On the 40 most recent sessions of the development machine:
 
-| | within 2% of Claude Code's own session cost |
+| Estimate from | Sessions within 2% of Claude Code's own cost |
 |---|---|
 | transcripts only | 12 / 40 |
 | transcripts + unlogged estimate | **40 / 40** |
@@ -221,7 +221,7 @@ Validation: `python3 scripts/validate_against_claude.py`. It reads files only. O
 
 The heaviest session on the development machine had 527 transcript files, 298 MB, 10.6k API calls and a 465-agent workflow:
 
-| operation | time |
+| Operation | Time |
 |---|---|
 | hook with nothing to do | ~33 ms (Python startup ~18 ms) |
 | incremental read with no new bytes | 8 ms |

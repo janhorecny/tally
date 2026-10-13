@@ -7,14 +7,23 @@ projects ──< sessions (project)            todos ──< todos (parent_id: p
     │                                         │
 tasks (project, todo_id) ──< task_sessions >── sessions
   │                                              │
-  ├──< prompts (prompt_id)                       ├──< usage       (one row per API response, with prompt_id)
-  └──  task_snapshots                            ├──< tool_calls  (log.depth = calls)
-                                                 ├──< agents      (subagents, forks, workflow agents)
-                                                 ├──< workflows   (workflow runs)
-                                                 ├──< turns       (turn intervals, with prompt_id)
-                                                 └──  session_costs (Claude Code's exit-time totals)
+  ├──< prompts (prompt_id)                       ├──< usage
+  └──  task_snapshots                            ├──< tool_calls
+                                                 ├──< agents
+                                                 ├──< workflows
+                                                 ├──< turns
+                                                 └──  session_costs
 files  (ingest offsets, last prompt id)   kv  (internal state)
 ```
+
+Per session:
+
+- `usage`: one row per API response, with `prompt_id`;
+- `tool_calls`: only with `log.depth = calls`;
+- `agents`: subagents, forks and workflow agents;
+- `workflows`: workflow runs;
+- `turns`: turn intervals, with `prompt_id`;
+- `session_costs`: Claude Code's exit-time totals.
 
 ## Tables
 
@@ -22,7 +31,7 @@ files  (ingest offsets, last prompt id)   kv  (internal state)
 
 One row per task.
 
-| column | |
+| Column | Meaning |
 |---|---|
 | `id` | Task number, the `#id` shown everywhere. |
 | `name`, `initial_prompt` | The name comes from `/tally:start <name>`, or from the first prompt when no name is given. |
@@ -39,7 +48,7 @@ Two further columns on `tasks`:
 
 ### `todos`
 
-| column | |
+| Column | Meaning |
 |---|---|
 | `project`, `title`, `notes` | |
 | `status` | `todo`, `doing`, `blocked`, `done` or `dropped`. |
@@ -53,7 +62,7 @@ A todo's measured work is the sum over `tasks WHERE todo_id = id`.
 
 ### `projects`
 
-| column | |
+| Column | Meaning |
 |---|---|
 | `name`, `path` | The git repository (the main one for worktrees) and its path. |
 | `mode` | `ask` (not decided yet), `track` (every session counts), `tasks` or `off`. |
@@ -69,7 +78,7 @@ Which sessions count towards a task, and when. A task can span several sessions:
 
 One row per API response, deduplicated by `msg_key = message.id:requestId`. The last transcript line of a response wins, because earlier lines can carry partial output counts.
 
-| column | |
+| Column | Meaning |
 |---|---|
 | `session_id`, `agent_id` | `agent_id` is `''` for the main session, otherwise the subagent or workflow agent ID. |
 | `ts` | Timestamp of the response. |
@@ -125,19 +134,24 @@ Internal state: per-file ingest byte offsets, open turn markers, and the last ho
 
 ```sql
 -- tasks per day with tokens and output
-SELECT date(t.started_at, 'unixepoch', 'localtime') AS day, COUNT(DISTINCT t.id) AS tasks,
-       SUM(u.input + u.output + u.cache_read + u.cache_write_5m + u.cache_write_1h) AS tokens,
+SELECT date(t.started_at, 'unixepoch', 'localtime') AS day,
+       COUNT(DISTINCT t.id) AS tasks,
+       SUM(u.input + u.output + u.cache_read
+           + u.cache_write_5m + u.cache_write_1h) AS tokens,
        SUM(u.output) AS output
 FROM tasks t
 JOIN task_sessions s ON s.task_id = t.id
 JOIN usage u ON u.session_id = s.session_id
- AND u.ts BETWEEN MAX(t.started_at, s.attached_at) AND MIN(COALESCE(t.ended_at, 1e12), COALESCE(s.detached_at, 1e12))
+ AND u.ts BETWEEN MAX(t.started_at, s.attached_at)
+              AND MIN(COALESCE(t.ended_at, 1e12), COALESCE(s.detached_at, 1e12))
 GROUP BY day ORDER BY day DESC;
 
 -- most expensive agent types across all tasks (tokens)
 SELECT COALESCE(a.agent_type, 'main') AS type, COUNT(DISTINCT u.agent_id) AS agents,
-       SUM(u.input + u.output + u.cache_read + u.cache_write_5m + u.cache_write_1h) AS tokens
-FROM usage u LEFT JOIN agents a ON a.session_id = u.session_id AND a.agent_id = u.agent_id
+       SUM(u.input + u.output + u.cache_read
+           + u.cache_write_5m + u.cache_write_1h) AS tokens
+FROM usage u
+LEFT JOIN agents a ON a.session_id = u.session_id AND a.agent_id = u.agent_id
 GROUP BY type ORDER BY tokens DESC;
 
 -- open todos per project with the tokens spent on them so far
@@ -172,8 +186,10 @@ It is a cache. Delete it whenever you like; `tally sessions` rebuilds it. Which 
 
 ```sql
 -- sessions.db: cost per agent and day, last 14 days
-SELECT agent, date(json_extract(summary_json, '$.last_ts'), 'unixepoch', 'localtime') AS day,
-       COUNT(*) AS sessions, ROUND(SUM(json_extract(summary_json, '$.totals.cost')), 2) AS cost
+SELECT agent,
+       date(json_extract(summary_json, '$.last_ts'), 'unixepoch', 'localtime') AS day,
+       COUNT(*) AS sessions,
+       ROUND(SUM(json_extract(summary_json, '$.totals.cost')), 2) AS cost
 FROM indexed WHERE summary_json IS NOT NULL
   AND json_extract(summary_json, '$.last_ts') > strftime('%s', 'now') - 14 * 86400
 GROUP BY agent, day ORDER BY day DESC;

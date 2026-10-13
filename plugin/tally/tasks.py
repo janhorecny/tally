@@ -141,7 +141,7 @@ def attach(conn, task_id: int, session_id: str, transcript_path: Optional[str] =
     now = now or time.time()
     task = get(conn, task_id)
     if task is None:
-        raise ValueError("task #%s does not exist" % task_id)
+        raise ValueError("Task #%s not found" % task_id)
     if task["status"] != "active":
         raise ValueError("task #%s has already ended" % task_id)
     counting = conn.execute(
@@ -187,7 +187,7 @@ def end(conn, task_id: int, note: Optional[str] = None, now: Optional[float] = N
 
     task = get(conn, task_id)
     if task is None:
-        raise ValueError("task #%s does not exist" % task_id)
+        raise ValueError("Task #%s not found" % task_id)
     if task["status"] != "active":
         return task
     now = now or time.time()
@@ -218,7 +218,7 @@ def reopen(conn, task_id: int, session_id: str):
     """Undo an end: the task counts again from now in the given session."""
     task = get(conn, task_id)
     if task is None:
-        raise ValueError("task #%s does not exist" % task_id)
+        raise ValueError("Task #%s not found" % task_id)
     with db.transaction(conn):
         conn.execute("UPDATE tasks SET status = 'active', ended_at = NULL WHERE id = ?", (task_id,))
         conn.execute("DELETE FROM task_snapshots WHERE task_id = ?", (task_id,))

@@ -156,7 +156,7 @@ def _propagate(conn, todo_id: int, now: float) -> None:
 def set_status(conn, todo_id: int, status: str, note: Optional[str] = None):
     todo = get(conn, todo_id)
     if todo is None:
-        raise ValueError("todo #%s does not exist" % todo_id)
+        raise ValueError("Todo #%s not found" % todo_id)
     fields = {"status": status}
     if note:
         fields["notes"] = (todo["notes"] + "\n" if todo["notes"] else "") + note
@@ -272,7 +272,7 @@ def take(conn, todo_id: int, session_id: str, cwd: Optional[str] = None, transcr
     from . import tasks
     todo = get(conn, todo_id)
     if todo is None:
-        raise ValueError("todo #%s does not exist" % todo_id)
+        raise ValueError("Todo #%s not found" % todo_id)
     if todo["status"] in ("done", "dropped"):
         update(conn, todo_id, status="todo")
     running = conn.execute(

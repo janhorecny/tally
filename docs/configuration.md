@@ -14,15 +14,20 @@ Change settings in any of these ways. All of them validate the value:
 `dashboard_host` and `pricing` have no validation; set them with `tally config`, which shows or sets raw keys.
 
 ```bash
-tally settings                          # every setting, its value and allowed values
+# every setting, its value and allowed values
+tally settings
+
+# change one
 tally settings log.depth calls
 tally settings log.prompts off
-tally config pricing                    # raw access
+
+# raw access
+tally config pricing
 ```
 
 Per-project tracking modes (`track`, `tasks`, `off`) are stored in the database, not in this file. Set them with `/tally:project <mode>`, `tally project --set <mode>`, or the dashboard's *Projects* tab.
 
-| key | default | meaning |
+| Key | Default | Meaning |
 |---|---|---|
 | `log.depth` | `"prompts"` | **Logging depth.** `summary`: task totals and the agent tree. `prompts`: adds the per-prompt breakdown. `calls`: adds tool-call statistics (each tool, how often, errors). |
 | `log.prompts` | `"full"` | **Logging type for prompt text.** `full`, `preview` (first 300 characters) or `off` (never stored; prompts are still counted). |
@@ -65,7 +70,7 @@ Models with no known price show the cost with a `+` suffix (for example `$1.20+`
 
 ## Environment variables
 
-| variable | default | meaning |
+| Variable | Default | Meaning |
 |---|---|---|
 | `TALLY_HOME` | `~/.claude/tally` | Data directory: `tally.db`, `sessions.db`, `config.json`, `errors.log` and `dashboard.log`. |
 | `TALLY_PROJECTS_DIR` | `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects` | Where Claude Code transcripts are read from. |
@@ -84,10 +89,17 @@ Hooks inherit the agent's environment. Any of these variables must therefore be 
 `./install.sh` (or `tally install`) detects Claude Code, Codex and pi and asks which ones to install into. You can also choose non-interactively:
 
 ```bash
-./install.sh --agents claude,pi     # just these
-./install.sh --yes                  # every detected agent, no questions
-./uninstall.sh --agents codex       # remove from one agent only
-tally doctor                        # what is installed where
+# just these
+./install.sh --agents claude,pi
+
+# every detected agent, no questions
+./install.sh --yes
+
+# remove from one agent only
+./uninstall.sh --agents codex
+
+# what is installed where
+tally doctor
 ```
 
 ## Plugin installation scope (Claude Code)
@@ -97,7 +109,8 @@ tally doctor                        # what is installed where
 ```bash
 ./uninstall.sh
 claude plugin marketplace add /path/to/tally
-claude plugin install tally@tally --scope project     # writes .claude/settings.json of the current project
+# writes .claude/settings.json of the current project
+claude plugin install tally@tally --scope project
 ```
 
 To try it for a single session without installing:

@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 
 MODES = ("track", "tasks", "off")
 MODE_HELP = {
-    "track": "every session in the project is counted (overall project stats)",
+    "track": "every session in the project is counted",
     "tasks": "only tasks you start are counted",
     "off": "Tally ignores the project and does not ask again",
     "ask": "not decided yet",
@@ -222,7 +222,7 @@ def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30, us
 
 # ------------------------------------------------------------------ dashboard and exports
 
-def listing(conn, with_usage: bool = False) -> list:
+def listing(conn, with_usage: bool = False, refresh: bool = True) -> list:
     """Projects Tally knows; with_usage: also every project with sessions in the
     last 30 days: the usage of the sessions the overview reads (`sessions_read`:
     every session of the project is read), and the sessions it does not read
@@ -230,7 +230,8 @@ def listing(conn, with_usage: bool = False) -> list:
     usage, rest, wanted = {}, {}, None
     if with_usage:
         from . import sessions
-        sessions.refresh_async(30)                 # keep the index current; returns at once
+        if refresh:
+            sessions.refresh_async(30)             # the dashboard: keep the index current; returns at once
         usage = sessions.project_usage(30)
         rest = sessions.not_tracked_projects(30)
         wanted = sessions.Scope(conn)
@@ -257,12 +258,12 @@ def listing(conn, with_usage: bool = False) -> list:
     return out
 
 
-def detail(conn, name: str) -> dict:
+def detail(conn, name: str, days: Optional[int] = None) -> dict:
     """What Tally counted for the project (tasks, todos, tracked totals) plus the
     last 30 days of the sessions the overview reads, and the sessions it does
     not read yet (not_tracked)."""
     from . import sessions
-    st = stats(conn, name, series_days=30)
+    st = stats(conn, name, days=days, series_days=30)
     wanted = sessions.Scope(conn)
     ix = sessions.connect()
     try:

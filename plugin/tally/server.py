@@ -158,8 +158,8 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.match(r"^/api/projects/([^/]+)$", url.path)
                 if m:
                     from urllib.parse import unquote
-                    from . import projects
-                    self._json(projects.detail(conn, unquote(m.group(1))))
+                    from . import projects, sessions
+                    self._json(dict(projects.detail(conn, unquote(m.group(1))), indexing=sessions.progress()))
                     return
                 if url.path == "/api/todos":
                     self._json({"todos": _todos(conn, arg("project") or None, arg("status", "board")),
@@ -176,7 +176,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if url.path == "/api/settings":
                     from . import settings
-                    self._json({"settings": [{"key": k, "value": v, "description": d, "allowed": a}
+                    self._json({"settings": [{"key": k, "value": v, "description": d, "allowed": a,
+                                              "group": settings.LABELS[k][0], "label": settings.LABELS[k][1]}
                                              for k, v, d, a in settings.describe()]})
                     return
             finally:

@@ -370,38 +370,129 @@ def render_todos(conn, rows: list, project: Optional[str], show_project: bool = 
     return "\n".join(out)
 
 
-def render_project(st: dict) -> str:
+def _size(b: int) -> str:
+    return "%d kB" % max(1, round(b / 1e3)) if b < 1e6 else ("%.1f MB" % (b / 1e6) if b < 1e9 else "%.2f GB" % (b / 1e9))
+
+
+def _ago(ts: Optional[float]) -> str:
+    """'today 11:13', 'yesterday 09:20' or '11 Oct'."""
+    if not ts:
+        return "-"
+    day = time.strftime("%Y-%m-%d", time.localtime(ts))
+    if day == time.strftime("%Y-%m-%d"):
+        return "today " + when(ts, "%H:%M")
+    if day == time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400)):
+        return "yesterday " + when(ts, "%H:%M")
+    return when(ts, "%d %b").lstrip("0")
+
+
+def render_settings(keys=None, cli: bool = False, width: int = 100) -> str:
+    """Every setting by group: its key, value, the other values and what it does."""
+    import textwrap
+    from . import paths, settings
+    cfg = paths.load_config()
+    keys = [k for k in settings.SCHEMA if not keys or k in keys]
+    out, group = [head("Settings")], None
+    for k in keys:
+        g, label = settings.LABELS[k]
+        if g != group:
+            out += ["", "  " + g]
+            group = g
+        value = settings.show(settings.get(k, cfg))
+        others = settings.choices(k)
+        out.append("    %-27s %-9s %s" % (label, value, " · ".join(others) if others else "a number"))
+        desc = "%s · %s" % (k, settings.SCHEMA[k][1])
+        out += textwrap.wrap(desc, max(40, width - 6), initial_indent="      ", subsequent_indent="      ")
+    cmd = "tally settings" if cli else "/tally:settings"
+    out += ["", hints("%s <key> <value> changes one, e.g. %s log.prompts preview" % (cmd, cmd),
+                      "tally settings in a terminal: arrow keys" if not cli else "")]
+    return "\n".join(out)
+
+
+def render_projects(rows: list, cli: bool = False) -> str:
+    """Every project of the last 30 days: the tracked ones with their numbers,
+    then the ones whose sessions are only counted (projects.listing)."""
+    if not rows:
+        return "\n".join([head("No projects yet"),
+                          hints("Tally sees a project the first time an agent opens in it")])
+    p = "tally project" if cli else "/tally:project"
+    tracked = [r for r in rows if r["sessions_read"]]
+    rest = [r for r in rows if not r["sessions_read"]]
+    out = [head("Projects · last 30 days")]
+    if tracked:
+        out += ["", "  %-26s %-6s %8s %9s %9s %5s %5s  %s" % ("tracked", "mode", "sessions", "tokens", "cost", "tasks",
+                                                             "todos", "last active")]
+        for r in tracked:
+            u = r["last_30d"]
+            out.append("  %-26s %-6s %8d %9s %9s %5d %5d  %s" % (
+                _cut(r["project"], 26), r["mode"], r["sessions"], tokens(u["total"]), money(u), r["tasks"],
+                r["open_todos"], _ago(r["last_activity"])))
+    if rest:
+        out += ["", "  %-26s %-6s %8s   %s" % ("not tracked", "mode", "sessions", "only counted, not read; last active")]
+        for r in rest:
+            n = r["not_tracked"]
+            mode = {"ask": "-"}.get(r["mode"], r["mode"])
+            out.append("  %-26s %-6s %8d   %s · %s of transcripts" % (
+                _cut(r["project"], 26), mode, n["sessions"], _ago(r["last_activity"]), _size(n["size"])))
+    out += ["", hints("%s <name> details" % p, "%s <name> %s track|tasks|off set it up" % (p, "--set" if cli else ""))
+            .replace("  ", " ").replace(" → ", "  → ", 1)]
+    return "\n".join(out)
+
+
+def render_project(st: dict, cli: bool = False, series: int = 14) -> str:
+    """One project (projects.detail): the last 30 days of its tracked sessions,
+    what Tally keeps for good, tasks, todos; or what is not read yet."""
     from .projects import MODE_HELP
-    t, w, m = st["totals"], st["last_7d"], st["last_30d"]
-    out = [head("Project %s   [%s: %s]" % (st["project"], st["mode"], MODE_HELP.get(st["mode"], "")))]
-    if st["mode"] == "ask":
-        out.append(hints("/tally:project track | tasks | off  set it up"))
-    out.append("  all time %s tokens · %s · %d API calls · %d sessions" % (
-        tokens(t["total"]), money(t), t["calls"], st["sessions"]))
-    out.append("  last 7d  %s tokens · %s      last 30d %s tokens · %s" % (
-        tokens(w["total"]), money(w), tokens(m["total"]), money(m)))
+    name = st["project"]
+    p = "tally project %s" % name if cli else "/tally:project %s" % name
+    nt = st.get("not_tracked") or {"sessions": 0, "size": 0, "last_activity": None}
+    read = st.get("sessions_read", st["mode"] in ("track", "tasks"))
+    mode = "%s: %s" % (st["mode"], MODE_HELP.get(st["mode"], "")) if st["mode"] != "ask" else "not set up"
+    out = [head("Project %s · %s" % (name, mode if read or st["mode"] != "ask" else "not tracked"))]
+    if st.get("path"):
+        out.append("  %s" % st["path"])
+    m, w, k = st["last_30d"], st["last_7d"], st.get("tracked") or st["totals"]
+    if read or m["total"]:
+        out.append("  last 30d  %s tokens · %s · %s API calls · %d session%s%s" % (
+            tokens(m["total"]), money(m), "{:,}".format(m.get("calls", 0)), st["sessions"],
+            "" if st["sessions"] == 1 else "s", "" if read else " added one by one"))
+        out.append("  last 7d   %s tokens · %s" % (tokens(w["total"]), money(w)))
+    if st["mode"] in ("track", "tasks"):
+        out.append("  kept      %s tokens · %s  (%s)" % (
+            tokens(k["total"]), money(k), "every session, for good" if st["mode"] == "track" else "its tasks, for good"))
+    if nt["sessions"]:
+        out.append("  not read  %d session%s · %s of transcripts · last %s" % (
+            nt["sessions"], "" if nt["sessions"] == 1 else "s", _size(nt["size"]), _ago(nt["last_activity"])))
     if st["by_model"]:
-        out.append("  models   " + " · ".join("%s %s %s" % (x["model"].replace("claude-", ""), tokens(x["total"]),
-                                                            money(x)) for x in st["by_model"][:4]))
-    tk = st["tasks"]
-    share = (" · %s of project tokens" % pct(tk["share"])) if tk["share"] is not None else ""
-    out.append("  tasks    %d (%d active) · %s tokens%s" % (tk["count"], tk["active"], tokens(tk["tokens"]), share))
-    td = st["todos"]
-    out.append("  todos    %d open (%d doing, %d blocked) · %d done" % (
-        td["todo"] + td["doing"] + td["blocked"], td["doing"], td["blocked"], td["done"]))
-    days = st["daily"]
+        out.append("  models    " + " · ".join("%s %s %s" % (_short_model(x["model"]), tokens(x["total"]), money(x))
+                                            for x in st["by_model"][:4]))
+    tk, td = st["tasks"], st["todos"]
+    if tk["count"]:
+        share = (" · %s of the tokens" % pct(tk["share"])) if tk.get("share") is not None else ""
+        out.append("  tasks     %d (%d active) · %s tokens%s" % (tk["count"], tk["active"], tokens(tk["tokens"]), share))
+    if sum(td.values()):
+        out.append("  todos     %d open (%d doing, %d blocked) · %d done" % (
+            td["todo"] + td["doing"] + td["blocked"], td["doing"], td["blocked"], td["done"]))
+    days = st["daily"][-series:] if series else []
     if any(d["total"] for d in days):
         peak = max(d["total"] for d in days)
         blocks = " ▁▂▃▄▅▆▇█"
         spark = "".join(blocks[0 if not d["total"] else max(1, int(round(8 * d["total"] / float(peak))))]
                         for d in days)
-        out.append("  %d days %s  (peak %s)" % (len(days), spark, tokens(peak)))
+        out.append("  %-9s %s  (peak %s)" % ("%d days" % len(days), spark, tokens(peak)))
     if tk["recent"]:
         out.append("")
         for x in tk["recent"][:5]:
             out.append("    #%-4d %-40s %9s %8s %s" % (x["id"], _cut(x["name"], 40), tokens(x["total"]),
                                                     money(x), "● active" if x["status"] == "active" else ""))
-    return "\n".join(out)
+    out.append("")
+    if read:
+        sessions = "tally sessions -p %s" % name if cli else "/tally:sessions here"
+        out.append(hints("%s its sessions" % sessions, "%s %s tasks|off change the mode" % (p, "--set" if cli else "")))
+    else:
+        out.append(hints("%s %s track read its sessions and keep them" % (p, "--set" if cli else ""),
+                         "tasks only tasks", "off ignore it"))
+    return "\n".join(x.replace("  --set", " --set").replace("%s  " % p, "%s " % p) for x in out)
 
 
 

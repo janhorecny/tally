@@ -2,7 +2,7 @@
 
 These commands run inside an agent session. The same commands exist in every agent; only the way you type them differs:
 
-| | Claude Code | Codex | pi |
+| Command | Claude Code | Codex | Pi |
 |---|---|---|---|
 | form | `/tally:<cmd> [args]` | `tally:<cmd> [args]`, typed as a prompt | `/tally <cmd> [args]`, or `tally:<cmd> [args]` as a prompt |
 | example | `/tally:start Fix login` | `tally:start Fix login` | `/tally start Fix login` |
@@ -12,9 +12,9 @@ Tally answers every command locally, so **they cost no tokens**. The exceptions 
 Every answer has the same shape:
 
 ```
-▍Tally · ▶ Task #3 started: Fix login redirect loop      ← what happened (✗ for an error)
-  Counting tokens and time for this session, …           ← details
-  → /tally:status live totals · /tally:end finish        ← what you can do next
+▍Tally · ▶ Task #3 started: Fix login redirect loop   ← what happened (✗ for an error)
+  Counting tokens and time for this session, …        ← details
+  → /tally:status live totals · /tally:end finish     ← what you can do next
 ```
 
 For scripts and the terminal, see the [CLI reference](cli.md).
@@ -23,7 +23,7 @@ For scripts and the terminal, see the [CLI reference](cli.md).
 
 ## Contents
 
-| tasks | |
+| Tasks | What it does |
 |---|---|
 | [`start [name]`](#tallystart) | Start a task in this session. |
 | [`new <prompt>`](#tallynew) | Start a task and send the prompt to the model. |
@@ -35,7 +35,7 @@ For scripts and the terminal, see the [CLI reference](cli.md).
 | [`resume <id>`](#tallyresume) | Count a task in this session too; reopens an ended task. |
 | [`rename [id] <name>`](#tallyrename) | Rename a task. |
 
-| todos | |
+| Todos | What it does |
 |---|---|
 | [`todo <text>`](#tallytodo) | Add a todo. |
 | [`todos [project\|all\|done]`](#tallytodos) | List todos. |
@@ -44,13 +44,13 @@ For scripts and the terminal, see the [CLI reference](cli.md).
 | [`done [id] [note]`](#tallydone) | Finish a todo and end its task. |
 | [`mark <id> <status> [note]`](#tallymark) | Set a todo's status. |
 
-| projects and sessions | |
+| Projects and sessions | What it does |
 |---|---|
 | [`project [name] [track\|tasks\|off]`](#tallyproject) | A project's overall statistics, or set its tracking mode. |
 | [`projects`](#tallyprojects) | All projects. |
 | [`sessions [days\|all] [agent] [here]`](#tallysessions) | Every session of every agent. |
 
-| other | |
+| Other | What it does |
 |---|---|
 | [`settings [key [value]]`](#tallysettings) | Show or change settings. |
 | [`dashboard [stop]`](#tallydashboard) | Open the local dashboard, or stop it. |
@@ -68,7 +68,7 @@ Start a task in this session.
 /tally:start [name]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `name` | Task name. Without it, your next prompt becomes the name. |
 
@@ -92,7 +92,7 @@ Start a task and send the prompt to the model as its first instruction.
 /tally:new <prompt>
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `prompt` | Required. Stored as the initial prompt; the task name is derived from it. |
 
@@ -112,7 +112,7 @@ Live totals of a task.
 /tally:status [id]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Task to show. Default: the active task of this session. |
 
@@ -134,7 +134,7 @@ Detailed statistics of a task.
 /tally:stats [id]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Task to show. Default: the active task of this session, otherwise the latest task. |
 
@@ -159,7 +159,7 @@ End a task and show its final report.
 /tally:end [id] [note]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Task to end. Default: the active task of this session. A first word that is a number is taken as the id. |
 | `note` | Free text stored with the task, for example a PR number. |
@@ -183,7 +183,7 @@ Recent tasks with their status, start, wall time, active time, tokens and cost.
 /tally:list [n|all]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `n` | Number of tasks. Default: 15. |
 | `all` | Every task. |
@@ -203,7 +203,7 @@ Full report of any task.
 /tally:show [id]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Task to show. Default: the active task of this session, otherwise the latest task. |
 
@@ -221,7 +221,7 @@ Count a task in this session too.
 /tally:resume <id>
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Required. The task to continue. |
 
@@ -245,7 +245,7 @@ Rename a task.
 /tally:rename [id] <name>
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Task to rename. Default: the active task of this session. A first word that is a number is taken as the id. |
 | `name` | Required. The new name. |
@@ -269,7 +269,7 @@ Add a todo.
 
 `text` is the title. These markers anywhere in it are recognised and removed from the title:
 
-| marker | example | meaning |
+| Marker | Example | Meaning |
 |---|---|---|
 | `@name` | `@website` | Project. Default: the git repository you are in. |
 | `!`, `!!`, `!!!` | `!!` | Priority: low, medium or high. |
@@ -298,7 +298,7 @@ List todos.
 /tally:todos [project|all|done]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | (none) | Open todos of this project: `todo`, `doing` and `blocked`. |
 | `project` | Open todos of another project (`website` or `@website`). |
@@ -322,7 +322,7 @@ Pick up a todo and start measuring it. You write the prompt.
 /tally:take <id>
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Required. The todo. |
 
@@ -345,7 +345,7 @@ Pick up a todo and let the model start on it right away.
 /tally:do <id>
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Required. The todo. |
 
@@ -365,7 +365,7 @@ Finish a todo and end its task.
 /tally:done [id] [note]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | The todo. Default: the todo of this session's active task. |
 | `note` | Appended to the todo's notes, and stored as the end note of its task. |
@@ -388,7 +388,7 @@ Set a todo's status.
 /tally:mark <id> <status> [note]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `id` | Required. The todo. |
 | `status` | Required. `todo`, `doing`, `blocked`, `done` or `dropped`. |
@@ -413,14 +413,14 @@ A project's overall statistics, or set how it is tracked.
 /tally:project [name] [track|tasks|off]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `name` | Project. Default: the git repository you are in. |
 | `track` | Count every session in the project, with or without a task. |
 | `tasks` | Count only explicit tasks (`start`, `new`, `take`, `do`). |
 | `off` | Count nothing here, and ask nothing. |
 
-Without a mode it shows the statistics: all time, the last 7 and 30 days, a daily sparkline, usage by model, tasks and their share of the usage, and todos.
+Without a mode it shows the project's numbers, the same as the dashboard: the last 30 and 7 days of its tracked sessions, what Tally keeps for good, usage by model, tasks, todos and a daily sparkline. For a project that is not tracked, it says how many sessions are not read yet and how to track it. A track or tasks mode also reads the project's sessions into the [sessions overview](usage.md#sessions).
 
 Tally asks for the mode the first time an agent opens in a new repository, unless `projects.default_mode` is `track` or `tasks`. See [Projects](usage.md#projects).
 
@@ -434,7 +434,7 @@ CLI: [`tally project`](cli.md#tally-project)
 
 ### `/tally:projects`
 
-All projects with their mode, tokens and cost in the last 30 days, all-time tokens, number of tasks and open todos.
+Every project of the last 30 days, in two groups: the tracked ones with mode, sessions, tokens, cost, tasks, open todos and last activity, then the ones that are not tracked with how many sessions they have (only counted, not read).
 
 ```
 /tally:projects
@@ -450,7 +450,7 @@ The tracked sessions of every agent, with or without a task: projects set to `tr
 /tally:sessions [days|all] [claude|codex|pi] [here]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `days` | Sessions active in the last N days: `30` or `30d`. Default: 7. |
 | `all` | All history. |
@@ -477,26 +477,26 @@ Show or change settings.
 /tally:settings [key [value]]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
-| (none) | Every setting with its value and allowed values. |
+| (none) | Every setting by group: its value, the other values and what it does. |
 | `key` | One setting. |
 | `key value` | Change it. The value is validated. |
 
-| key | values |
-|---|---|
-| `log.depth` | `summary`, `prompts` (default) or `calls` |
-| `log.prompts` | `full` (default), `preview` or `off` |
-| `todos.reminder` | `on` (default) or `off` |
-| `todos.reminder_limit` | a number (default 5) |
-| `auto_start` | `off` (default) or `session` |
-| `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
-| `sessions.scope` | `enabled` (default) or `all`: which sessions the sessions overview reads |
-| `updates.check` | `on` (default) or `off`: say when a new version is out (one request to GitHub a day) |
-| `dashboard_port` | a number (default 8765) |
-| `dashboard_idle_minutes` | a number (default 120; 0 = never) |
+| Group | Key | Values |
+|---|---|---|
+| Logging | `log.depth` | `summary`, `prompts` (default) or `calls` |
+| Logging | `log.prompts` | `full` (default), `preview` or `off` |
+| Projects and tasks | `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
+| Projects and tasks | `sessions.scope` | `enabled` (default) or `all`: which sessions the sessions overview reads |
+| Projects and tasks | `auto_start` | `off` (default) or `session` |
+| Todos | `todos.reminder` | `on` (default) or `off` |
+| Todos | `todos.reminder_limit` | a number (default 5) |
+| Updates | `updates.check` | `on` (default) or `off`: say when a new version is out (one request to GitHub a day) |
+| Dashboard | `dashboard_port` | a number (default 8765) |
+| Dashboard | `dashboard_idle_minutes` | a number (default 120; 0 = never) |
 
-What each key means: [Configuration](configuration.md). In a terminal, [`tally setup`](cli.md#tally-setup) asks about the main ones.
+What each key means: [Configuration](configuration.md). In a terminal, [`tally settings`](cli.md#tally-settings) changes them with the arrow keys, and [`tally setup`](cli.md#tally-setup) asks about the main ones.
 
 ```
 /tally:settings
@@ -514,7 +514,7 @@ Start the local dashboard if it is not running, and open it in the browser (http
 /tally:dashboard [stop]
 ```
 
-| argument | |
+| Argument | Meaning |
 |---|---|
 | `stop` | Stop the running dashboard. |
 

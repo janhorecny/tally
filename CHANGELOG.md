@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.0 (2026-10-13)
+
+### Terminal
+
+- **Arrow keys in `tally setup`:** each question is a choice on one line (← → or ↑ ↓, Enter confirms, Esc skips setup). A line under the open question explains what the choices mean. Typing still works: first letters, the number of a choice, `y` / `n`. Typed answers no longer break on an arrow key pressed by habit.
+- **Setup offers the agents:** `tally setup` lists Claude Code, Codex and pi and asks about each one that is found but not installed; the installer's own agent question uses the arrow keys too.
+- **`tally settings` in a terminal** is an editor: ↑ ↓ choose a setting, ← → change it (saved at once), type a number, q quits with a summary. Without a terminal, or with `--list`, a list by group with each setting's label, value, other values and what it does; `/tally:settings` shows the same list.
+- **Help:** `tally --help` groups the commands (tasks, todos, projects and sessions, settings and maintenance) and leaves the internal ones out; every command has a description, every option an explanation, and the main ones have examples.
+- **Errors:** wrong arguments are explained in Tally's style with a hint (`tally sessions -h shows the options`); an unknown command suggests the closest one (`did you mean tally sessions?`); Ctrl-C stops any command quietly (exit 130) instead of a traceback.
+- **Fixed:** `tally todo` alone printed the help of `tally update`; `tally uninstall --agents <unknown>`, `tally todo edit` of a missing todo and `tally todo import` of a missing file ended with a traceback; `tally resume`, `tally settings <unknown>` and `tally config <unknown>` exited 0 on errors; `tally export task` without a number said "task None not found"; `tally doctor` pointed at `./install.sh` for an agent that is found but not installed.
+- **`tally project` and `tally projects`** (and `/tally:project`, `/tally:projects`) show the dashboard's numbers: the last 30 days of the tracked sessions, what Tally keeps, and the projects that are not tracked with how many sessions they have. A project Tally knows nothing about is an error. `--json` gives the dashboard's data.
+
+### Dashboard
+
+- **Projects:** *Tracked* and *Not tracked* are two separate cards; the second shows how many sessions and how much transcript each project has, and its mode. A search box above them filters by name (`/` jumps to it, Enter opens the only match).
+- **A project has its own page** (`#projects/<name>`, with *← All projects* back) instead of a detail under the list; the project selector in the header opens it on the *Projects* tab.
+- **Settings** take their groups and labels from the server, the same as `tally settings`.
+
+### Docs
+
+- **Every table has a header**, no code block scrolls sideways, commands to copy are in code blocks, and the long sections of the README are split into steps and subsections.
+- **Exports:** the Markdown key-value tables of a task, a project and the summary have a header (`Item | Value`).
+
 ## 0.9.3 (2026-10-13)
 
 - **`tally update` in a checkout that is already current** (one you pulled or committed to by hand) installs its version into the agents when Claude Code still runs an older copy, instead of only saying it is up to date.

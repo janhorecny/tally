@@ -12,7 +12,7 @@ Start with `tally doctor`. It shows:
 - whether any errors were logged.
 
 ```
-▍Tally 0.9.3 · doctor · python 3.9.6
+▍Tally 0.10.0 · doctor · python 3.9.6
 data dir      /Users/me/.claude/tally
 database      /Users/me/.claude/tally/tally.db
 tasks         12 (1 active)
@@ -124,8 +124,18 @@ tally update
 Then run `/reload-plugins` in Claude Code (or restart it), `/reload` in pi, and restart Codex. New `/tally:*` commands appear only after this.
 
 - **"has local changes":** `tally update` only fast-forwards a clean checkout. Commit or stash your changes in the folder it names, or `git pull` there yourself and run `./install.sh`.
-- **"not a git checkout":** install again with the one-line installer (`curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh | bash`); your history is kept.
-- **Installed from Claude Code's plugin manager:** `claude plugin marketplace update tally && claude plugin update tally@tally`.
+- **"not a git checkout":** install again with the one-line installer; your history is kept.
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh | bash
+  ```
+
+- **Installed from Claude Code's plugin manager:**
+
+  ```bash
+  claude plugin marketplace update tally && claude plugin update tally@tally
+  ```
+
 - **No notice about new versions:** the check runs once a day in the background; `tally update --check` checks now and `tally doctor` shows the last result. It is off with `updates.check off` or `TALLY_NO_UPDATE_CHECK`.
 
 ## Upgrading from `task-counter`
@@ -137,7 +147,12 @@ Then run `/reload-plugins` in Claude Code (or restart it), `/reload` in pi, and 
 In `~/.local/share/tally` (the one-line installer) or your clone:
 
 ```bash
-./uninstall.sh                  # from every agent; removes the CLI symlink; keeps ~/.claude/tally
-./uninstall.sh --agents codex   # from one agent only
-./uninstall.sh --purge          # also deletes the data directory
+# from every agent; removes the CLI symlink; keeps ~/.claude/tally
+./uninstall.sh
+
+# from one agent only
+./uninstall.sh --agents codex
+
+# also deletes the data directory
+./uninstall.sh --purge
 ```

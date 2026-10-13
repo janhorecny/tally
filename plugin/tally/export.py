@@ -56,6 +56,10 @@ def export(scope: str, fmt_name: str, ref: Optional[str] = None, project: Option
         raise ExportError("unknown export %r; choose from %s" % (scope, ", ".join(FORMATS)))
     if fmt_name not in FORMATS[scope]:
         raise ExportError("%s can be exported as %s" % (scope, ", ".join(FORMATS[scope])))
+    if scope in ("task", "project", "session") and not ref:
+        raise ExportError("which %s? give its %s, e.g. tally export %s %s" % (
+            scope, {"task": "number", "project": "name", "session": "id"}[scope], scope,
+            {"task": "12", "project": "web-app", "session": "3f9c2a1b"}[scope]))
     conn = conn or db.connect()
     content, label = globals()["_" + scope](conn, fmt_name, ref=ref, project=project, days=days, agent=agent)
     name = "tally-%s%s-%s.%s" % (scope, ("-" + _slug(label)) if label else "", time.strftime("%Y-%m-%d"),
@@ -239,7 +243,7 @@ def report_md(rep) -> str:
         facts.append(("Prompt", t["initial_prompt"]))
     if t.get("end_note"):
         facts.append(("Note", t["end_note"]))
-    out = ["## " + _cell(title), "", "| | |", "|---|---|"] + ["| %s | %s |" % (k, _cell(v)) for k, v in facts]
+    out = ["## " + _cell(title), "", "| Item | Value |", "|---|---|"] + ["| %s | %s |" % (k, _cell(v)) for k, v in facts]
 
     agents = []
     for n in rep.get("tree", []):
@@ -314,7 +318,7 @@ def _project(conn, f, ref=None, **_):
                          % _num(st["not_tracked"]["sessions"])))
     if st.get("path"):
         facts.insert(0, ("Path", st["path"]))
-    out = ["# %s" % _cell(st["project"]), "", "| | |", "|---|---|"] + ["| %s | %s |" % (k, _cell(v)) for k, v in facts]
+    out = ["# %s" % _cell(st["project"]), "", "| Item | Value |", "|---|---|"] + ["| %s | %s |" % (k, _cell(v)) for k, v in facts]
     if st["by_model"]:
         out += ["", "## Models · last 30 days", "", _md_table(["Model", "Tokens", "Output", "Cost"], [
             [x["model"], fmt.tokens(x["total"]), fmt.tokens(x["output"]), fmt.money(x)] for x in st["by_model"]])]
@@ -434,7 +438,7 @@ def _summary(conn, f, days=30, **_):
     tk = data["tasks"]
     rest = ov["not_tracked"]
     out = ["# Tally summary · %s" % span, "", "Exported %s. Cost is an estimate at API list price." % _when(time.time()), "",
-           "| | |", "|---|---|",
+           "| Item | Value |", "|---|---|",
            "| Sessions | %s |" % _num(t["sessions"]),
            "| Tokens | %s (%s output) |" % (fmt.tokens(t["total"]), fmt.tokens(t["output"])),
            "| Cost | %s |" % fmt.money(t),

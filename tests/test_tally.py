@@ -1706,7 +1706,7 @@ class Exports(unittest.TestCase):
         self.assertTrue(out.read_text().startswith("# Tally projects"))
         r = run("export", "task", "42")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("task 42 not found", r.stderr)
+        self.assertIn("Task 42 not found", r.stderr)
         # --copy goes through the platform's clipboard tool
         fakebin = self.env.tmp / "bin"
         fakebin.mkdir()
@@ -1790,7 +1790,7 @@ def run_in_pty(argv, answers=(), env=None, timeout=20.0):
         os.environ.update(env or {})
         os.environ["TERM"] = "xterm-256color"
         os.execv(argv[0], argv)
-    out, sent, idle = b"", 0, time.time()
+    out, sent, idle, mark = b"", 0, time.time(), 0
     deadline = time.time() + timeout
     try:
         while time.time() < deadline:
@@ -1804,11 +1804,14 @@ def run_in_pty(argv, answers=(), env=None, timeout=20.0):
                     break
                 out += chunk
                 idle = time.time()
-            plain = re.sub(r"\x1b\[[0-9;]*m", "", out.decode("utf-8", "replace"))
-            if sent < len(answers) and re.search(r"(\] |Y/n |y/N )$", plain):
+            plain = re.sub(r"\x1b\[[0-9;]*m", "", out[mark:].decode("utf-8", "replace"))
+            # a new question: an arrow-key choice opens (it hides the cursor; redrawing one does not),
+            # or a typed prompt ends the output after the previous question finished
+            opened = b"\x1b[?25l" in out[mark:]
+            if sent < len(answers) and (opened or "\n" in plain and re.search(r"(\] |Y/n |y/N )$", plain)):
                 os.write(fd, (answers[sent] + "\r").encode())
                 sent += 1
-                out += b"\n"
+                mark = len(out)
             elif sent >= len(answers) and time.time() - idle > 3:
                 break
     finally:
@@ -1928,8 +1931,41 @@ class Branding(unittest.TestCase):
         r = self.run_cli("settings", "log.depth", "calls")
         self.assertEqual(r.stdout.strip(), "▍Tally · ✓ log.depth = calls")
         r = self.run_cli("settings", "todos.reminder")
-        self.assertIn("todos.reminder         on", r.stdout)
-        self.assertIn("→ tally settings <key> <value> change one", r.stdout)
+        self.assertIn("    Reminder at session start   on        on · off", r.stdout)
+        self.assertIn("      todos.reminder · Show the project's open todos", r.stdout)
+        self.assertIn("→ tally settings <key> <value> changes one", r.stdout)
+        r = self.run_cli("settings")                                          # piped: the whole list, by group
+        self.assertEqual([x.strip() for x in r.stdout.splitlines() if x.startswith("  ") and not x.startswith("   ")],
+                         ["Logging", "Projects and tasks", "Todos", "Updates", "Dashboard",
+                          "→ tally settings <key> <value> changes one, e.g. tally settings log.prompts preview"])
+
+    def test_cli_help_and_errors(self):
+        r = self.run_cli("--help")
+        for line in ("usage: tally <command> [options]", "Tasks", "Todos", "Projects and sessions",
+                     "  list, ls          list tasks, newest first", "  update            update Tally"):
+            self.assertIn(line, r.stdout)
+        self.assertNotIn("\n  hook ", r.stdout)                                # internal commands stay out
+        self.assertNotIn("\n  slash ", r.stdout)
+        r = self.run_cli("sessions", "-h")
+        self.assertIn("Tracked: projects set to track or tasks", r.stdout)
+        self.assertIn("--agent {claude,codex,pi}\n                        only this agent", r.stdout)
+        self.assertIn("examples:\n  tally sessions", r.stdout)
+        r = self.run_cli("sessions", "--days", "abc")                         # a usage error in Tally's words
+        self.assertEqual(r.returncode, 2)
+        self.assertTrue(r.stderr.startswith("▍Tally · ✗ Argument --days: invalid float value: 'abc'\n"
+                                            "  → tally sessions -h shows the options\n  usage: tally sessions"),
+                        r.stderr)
+        r = self.run_cli("todo")                                              # its own help, not another's
+        self.assertIn("usage: tally todo", r.stdout)
+        self.assertIn("add", r.stdout)
+        for args, text in ((("settings", "nope"), "Unknown setting nope"), (("config", "nope"), "Unknown key nope"),
+                           (("uninstall", "--agents", "bogus"), "Unknown agent bogus"),
+                           (("export", "task"), "Which task? give its number"), (("project", "nope"),
+                                                                                 "Project nope not found")):
+            r = self.run_cli(*args)
+            self.assertEqual(r.returncode, 1, (args, r.stdout, r.stderr))
+            self.assertIn("▍Tally · ✗ " + text, r.stderr, args)
+            self.assertNotIn("Traceback", r.stderr)
 
     @unittest.skipUnless(hasattr(os, "fork"), "needs a pseudo-terminal")
     def test_cli_in_a_terminal(self):
@@ -2070,15 +2106,32 @@ class Onboarding(unittest.TestCase):
         (fakebin / "claude").write_text("#!/bin/sh\nexit 0\n")
         (fakebin / "claude").chmod(0o755)
         out = run_in_pty([sys.executable, str(PLUGIN / "bin" / "tally"), "setup"],
-                         answers=["preview", "", "tasks", "", "", "n", "", "y"],
-                         env={"NO_COLOR": "1", "PATH": "%s:%s" % (fakebin, os.environ.get("PATH", ""))})
-        self.assertIn("Add Tally to Claude Code's status line? Y/n", out)
-        self.assertIn("▍Tally · Setup · Enter keeps the value in [brackets]", out)
+                         answers=["preview", "", "tasks", "", "", "n", "", "n", "y"],    # typed: first letters
+                         env={"NO_COLOR": "1", "PATH": "%s:/usr/bin:/bin" % fakebin})    # only the fake claude
+        self.assertIn("  Agents      Claude Code found · Codex not found · pi not found", out)
+        self.assertIn("Install into Claude Code?       ○ yes   ● no", out.replace("\x1b[2m", "").replace("\x1b[0m", ""))
+        self.assertIn("Add to Claude Code status line? ● yes   ○ no", out)
+        self.assertIn("▍Tally · Setup · ← → choose · Enter confirms · Esc skips setup", out)
         self.assertIn("▍Tally · ✓ Saved", out)
         self.assertEqual(settings.get("log.prompts"), "preview")
         self.assertEqual(settings.get("projects.default_mode"), "tasks")
         self.assertIs(settings.get("todos.reminder"), False)
         self.assertIn("statusLine", self.settings_json.read_text())
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs a pseudo-terminal")
+    def test_arrow_keys_and_ctrl_c(self):
+        from tally import settings
+        tally = [sys.executable, str(PLUGIN / "bin" / "tally"), "setup"]
+        right, left = "\x1b[C", "\x1b[D"
+        run_in_pty(tally, answers=[right + right + left, right, "3", "", "", "", ""],
+                   env={"NO_COLOR": "1", "PATH": "/usr/bin:/bin"})              # no agent: no more questions
+        self.assertEqual(settings.get("log.prompts"), "preview")             # full → off → preview
+        self.assertEqual(settings.get("log.depth"), "calls")                 # prompts → calls
+        self.assertEqual(settings.get("projects.default_mode"), "tasks")     # its number
+        out = run_in_pty(tally, answers=["\x03"], env={"NO_COLOR": "1"})      # Ctrl-C: nothing saved, no traceback
+        self.assertIn("Setup skipped; nothing changed", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(settings.get("log.prompts"), "preview")
 
 
 class Updates(unittest.TestCase):
@@ -2175,6 +2228,7 @@ class Updates(unittest.TestCase):
         self.assertEqual(updates.changes(root, "0.9.0", "0.10.0"),
                          ["  0.10.0 (x)", "    · New thing", "  0.9.1 (x)", "    · Fix"])
 
+    @unittest.skipUnless(shutil.which("git"), "needs git")
     def test_tally_update_pulls_reinstalls_and_says_what_changed(self):
         import socket
         git = lambda cwd, *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(cwd)]  # noqa: E731
