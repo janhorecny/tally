@@ -1562,8 +1562,14 @@ class Onboarding(unittest.TestCase):
     @unittest.skipUnless(hasattr(os, "fork"), "needs a pseudo-terminal")
     def test_tally_setup_in_a_terminal(self):
         from tally import settings
+        fakebin = self.env.tmp / "bin"                     # Claude Code "installed", so the status line is asked
+        fakebin.mkdir()
+        (fakebin / "claude").write_text("#!/bin/sh\nexit 0\n")
+        (fakebin / "claude").chmod(0o755)
         out = run_in_pty([sys.executable, str(PLUGIN / "bin" / "tally"), "setup"],
-                         answers=["preview", "", "tasks", "", "n", "y"], env={"NO_COLOR": "1"})
+                         answers=["preview", "", "tasks", "", "n", "y"],
+                         env={"NO_COLOR": "1", "PATH": "%s:%s" % (fakebin, os.environ.get("PATH", ""))})
+        self.assertIn("Add Tally to Claude Code's status line? Y/n", out)
         self.assertIn("▍Tally · Setup · Enter keeps the value in [brackets]", out)
         self.assertIn("▍Tally · ✓ Saved", out)
         self.assertEqual(settings.get("log.prompts"), "preview")
