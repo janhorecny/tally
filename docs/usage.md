@@ -203,6 +203,13 @@ Every answer from Tally has the same shape, in every agent and in the terminal:
 
 Errors start with `▍Tally · ✗`. In a terminal the CLI adds colours; set `NO_COLOR=1` to turn them off.
 
+When a new version is out, the session start message of every agent and the CLI say so, at most once a day each:
+
+```
+▍Tally · ⬆ Tally 0.9.1 is out (you have 0.9.0)
+  → tally update to update · what's new: https://github.com/janhorecny/tally/releases
+```
+
 ## Agents
 
 ### Claude Code
@@ -289,7 +296,7 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 - **Keyboard:** `R` reloads the data (as does the ↻ button), `/` jumps to the task filter, `Enter` opens the focused row.
 - **Small screens:** tables keep the columns that identify a row and its cost; the rest is in the detail.
 - **Themes:** the button with the monitor, sun or moon icon switches between following the system, light and dark.
-- **Updates:** a dashboard left running by an older Tally version is replaced automatically by `/tally:dashboard` or `tally dashboard`.
+- **Updates:** a dashboard left running by an older Tally version is replaced automatically by `/tally:dashboard`, `tally dashboard` and `tally update`. When a new version is out, a ⬆ chip appears next to the version in the header; a click copies `tally update`.
 - **Addresses:** every task, project and session has its own URL, for example `#tasks/12`, `#projects/web-app` and `#sessions/3f9c2a1b-…`, so you can bookmark or share them on your machine.
 - **One project:** with a project chosen in the header (or after *Sessions of this project*), Tasks, Todos and Sessions show a bar with the project's name, a link to its details and *All projects*.
 

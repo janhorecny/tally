@@ -31,6 +31,7 @@ Per-project tracking modes (`track`, `tasks`, `off`) are stored in the database,
 | `auto_start` | `"off"` | `"off"`: tasks start only with `/tally:start` or `/tally:new`. `"session"`: the first prompt of every new session starts a task named after that prompt. |
 | `projects.default_mode` | `"ask"` | The mode of a project Tally sees for the first time. `"ask"`: show the setup question. `"track"` or `"tasks"`: use that mode and show a one-line notice instead. |
 | `sessions.scope` | `"enabled"` | What the sessions overview reads from the agents' transcripts. `"enabled"`: projects set to `track` or `tasks`, sessions a task counted, and sessions added one by one in the dashboard; the rest is only counted. `"all"`: every session, except projects set to `off`. |
+| `updates.check` | `true` | Once a day, fetch the latest version number from GitHub in the background and say when a new version is out (session start, CLI, dashboard). Nothing about you is sent. `false`: never. |
 | `dashboard_host` | `"127.0.0.1"` | Interface the dashboard binds to. Keep it on localhost, because the API has no authentication. |
 | `dashboard_port` | `8765` | Port of the dashboard. |
 | `dashboard_idle_minutes` | `120` | A dashboard started in the background (`/tally:dashboard`, `tally dashboard --background`) stops after this many minutes without an open page. `0`: never. |
@@ -72,6 +73,8 @@ Models with no known price show the cost with a `+` suffix (for example `$1.20+`
 | `CODEX_HOME` | `~/.codex` | Where Codex keeps `hooks.json` and its rollouts (`sessions/`). Used by the installer, the Codex reader and the sessions overview. |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | pi's config directory. The installer puts the extension and the skill there; the sessions overview reads `sessions/`. |
 | `TALLY_BIN`, `TALLY_PYTHON` | (path baked in at install), `python3` | Overrides for the pi extension: which `tally` launcher and which Python to run. |
+| `TALLY_NO_UPDATE_CHECK` | (unset) | Any value turns the daily version check off, whatever `updates.check` says. |
+| `TALLY_DIR`, `TALLY_REPO` | `~/.local/share/tally`, the GitHub repository | Where the one-line installer puts Tally, and what it clones. |
 | `NO_COLOR` | (unset) | Any value turns off the CLI's colours. They are also off when the output is not a terminal. |
 
 Hooks inherit the agent's environment. Any of these variables must therefore be set before the agent starts, for example in your shell profile or, for Claude Code, in the `env` block of `~/.claude/settings.json`.

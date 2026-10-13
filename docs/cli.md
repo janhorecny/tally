@@ -61,6 +61,7 @@ Inside an agent session, the [in-agent commands](commands.md) are usually quicke
 | [`statusline`](#tally-statusline) | Status line segment. |
 | [`install`](#tally-install) | Install into agents. |
 | [`uninstall`](#tally-uninstall) | Remove from agents. |
+| [`update`](#tally-update) | Update to the latest version. |
 | [`doctor`](#tally-doctor) | Check the installation. |
 
 ---
@@ -429,8 +430,10 @@ tally setup
   Store prompt text?          full / preview / off       [full]
   Logging detail?             summary / prompts / calls  [prompts]
   New projects:               ask / track / tasks        [ask]
+  Sessions overview reads:    enabled / all              [enabled]
   Start a task automatically with each session? y/N
   Show open todos at session start? Y/n
+  Tell me when a new version is out? Y/n
   Add Tally to Claude Code's status line? Y/n
 ```
 
@@ -442,6 +445,7 @@ tally setup
 | Sessions overview reads | `sessions.scope` |
 | Start a task automatically … | `auto_start` (`session` or `off`) |
 | Show open todos … | `todos.reminder` |
+| Tell me when a new version is out? | `updates.check` |
 | Add Tally to Claude Code's status line? | `statusLine` in `~/.claude/settings.json` |
 
 - **Answers:** the value in brackets is the current one, so Enter keeps it. A unique prefix is enough (`pr` for `prompts`), and a wrong answer is asked again. Everything is saved at the end; Ctrl-D quits without saving.
@@ -515,7 +519,7 @@ It prints, depending on the state:
 
 ### `tally install`
 
-Install into agents. `./install.sh` runs this and also links the CLI to `~/.local/bin/tally`. The first install also asks the [setup](#tally-setup) questions (not with `--yes` or without a terminal), and each newly installed agent shows a one-time welcome at its next session start.
+Install into agents. `install.sh` (and the one-line installer) runs this and also links the CLI to `~/.local/bin/tally`. The first install also asks the [setup](#tally-setup) questions (not with `--yes` or without a terminal), and each newly installed agent shows a one-time welcome at its next session start.
 
 ```
 tally install [--agents claude,codex,pi | --all] [-y]
@@ -539,9 +543,26 @@ tally uninstall [--agents LIST]
 
 Without `--agents` it removes Tally from every agent it is installed in, and from Claude Code's status line if setup added it. `./uninstall.sh` also removes the CLI link and stops the dashboard; `./uninstall.sh --purge` also deletes the data directory.
 
+### `tally update`
+
+Update to the latest version.
+
+```
+tally update [--check]
+```
+
+| | |
+|---|---|
+| (none) | Pull the latest version into the git checkout Tally runs from (fast-forward only), install it into every agent Tally is in, restart a running dashboard, and list what changed since your version. |
+| `--check` | Only say whether a new version is out (asks GitHub now). |
+
+A checkout with local changes is left alone. Installed from Claude Code's plugin manager, it runs `claude plugin marketplace update tally` and `claude plugin update tally@tally` instead. Afterwards run `/reload-plugins` in Claude Code, `/reload` in pi, and restart Codex.
+
+Tally also checks on its own once a day (setting `updates.check`) and mentions a new version at session start, below CLI commands and in the dashboard.
+
 ### `tally doctor`
 
-Check the installation: version, data directory, tasks, the last hook that fired, sessions per agent, the transcripts directory, the state per agent, whether setup has run, Claude Code's status line, and logged errors. See [Troubleshooting](troubleshooting.md).
+Check the installation: version, data directory, tasks, the last hook that fired, sessions per agent, the transcripts directory, the state per agent, whether setup has run, Claude Code's status line, where Tally is installed and whether an update is out, and logged errors. See [Troubleshooting](troubleshooting.md).
 
 ```
 tally doctor

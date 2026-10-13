@@ -100,6 +100,7 @@ header { display: flex; align-items: center; gap: 12px 18px; padding: 10px 24px;
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -.01em; margin: 0; }
 .brand .logo { flex: none; border-radius: 7px; }
 .brand .ver { font-size: 11px; font-weight: 500; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; letter-spacing: 0; }
+.brand #upd { font: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: 0; cursor: pointer; padding: 1px 8px; }
 nav.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 nav.tabs a { color: var(--text-secondary); text-decoration: none; padding: 6px 12px; border-radius: 7px; font-weight: 550; white-space: nowrap; }
 nav.tabs a:hover { background: var(--hover); color: var(--text-primary); }
@@ -364,7 +365,7 @@ button svg.i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4p
       <path d="M21 16v32M28.5 16v32M36 16v32M43.5 16v32" stroke="#f3f2ee" stroke-width="4.6" stroke-linecap="round"/>
       <path d="M13.5 43.5L51 21.5" stroke="#141413" stroke-width="11" stroke-linecap="round"/>
       <path d="M13.5 43.5L51 21.5" stroke="#eb6834" stroke-width="4.6" stroke-linecap="round"/>
-    </svg>Tally<span class="ver num" id="ver"></span></h1>
+    </svg>Tally<span class="ver num" id="ver"></span><button type="button" class="chip accent hide" id="upd"></button></h1>
     <nav class="tabs" aria-label="Views">
       <a href="#tasks" data-view="tasks">Tasks</a><a href="#todos" data-view="todos">Todos</a><a href="#projects" data-view="projects">Projects</a><a href="#sessions" data-view="sessions">Sessions</a><a href="#settings" data-view="settings">Settings</a>
     </nav>
@@ -1258,6 +1259,7 @@ const SETTING_INFO = {
   "auto_start": ["Projects and tasks", "Start tasks automatically"],
   "todos.reminder": ["Todos", "Reminder at session start"],
   "todos.reminder_limit": ["Todos", "Todos in the reminder"],
+  "updates.check": ["Updates", "Tell me about new versions"],
   "dashboard_port": ["Dashboard", "Port"],
   "dashboard_idle_minutes": ["Dashboard", "Stop when unused (minutes)"],
 };
@@ -1313,13 +1315,23 @@ window.addEventListener("hashchange", () => {
   if (h.view === "sessions" && h.sid && h.sid !== sessSel) selectSession(h.sid, true);
   if (h.view === "projects" && h.pname && h.pname !== projSel && view === "projects") selectProject(h.pname, true);
 });
-getJSON("/api/health").then(d => { $("#ver").textContent = "v" + d.version; }).catch(() => {});
+// a newer version: a chip next to the version; a click copies the command that updates it
+function showUpdate(d) {
+  $("#ver").textContent = "v" + d.version;
+  const u = d.update || {}, b = $("#upd");
+  b.classList.toggle("hide", !u.available);
+  if (!u.available) return;
+  b.textContent = "⬆ " + u.available;
+  b.title = `Tally ${u.available} is out (you have ${u.current}). Click to copy: ${u.command}`;
+  b.onclick = () => copyText(u.command).then(() => toast(`Copied “${u.command}”: run it in a terminal`), () => toast(u.command));
+}
+getJSON("/api/health").then(showUpdate).catch(() => {});
 renderGlobalExport();
 loadProjects().catch(() => {}).then(() => setView(view));
 let ticks = 0;
 setInterval(() => {
   if (document.hidden || stopped) return;
-  if (++ticks % 12 === 0) getJSON("/api/health").catch(() => {});   // an open page keeps the server from its idle stop
+  if (++ticks % 12 === 0) getJSON("/api/health").then(showUpdate).catch(() => {});   // also keeps the server from its idle stop
   if (view === "todos") { if (editing === null) loadTodos().catch(() => {}); return; }
   if (view === "projects" || view === "settings") return;
   if (view === "sessions") { if (Date.now() - sessLoaded > 30000) loadSessions().catch(() => {}); return; }

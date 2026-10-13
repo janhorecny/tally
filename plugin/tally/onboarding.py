@@ -31,8 +31,10 @@ QUESTIONS = (
     ("sessions.scope", "Sessions overview reads:", ("enabled", "all")),
     ("auto_start", "Start a task automatically with each session?", None),
     ("todos.reminder", "Show open todos at session start?", None),
+    ("updates.check", "Tell me when a new version is out?", None),
 )
-YES_NO = {"auto_start": ("session", "off"), "todos.reminder": (True, False)}   # setting value for yes, no
+YES_NO = {"auto_start": ("session", "off"), "todos.reminder": (True, False),     # setting value for yes, no
+          "updates.check": (True, False)}
 
 
 class Skipped(Exception):

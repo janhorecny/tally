@@ -7,6 +7,7 @@ import atexit
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,8 @@ atexit.register(shutil.rmtree, _SAFE, True)
 for _var, _sub in (("TALLY_HOME", "home"), ("TALLY_PROJECTS_DIR", "projects"), ("CLAUDE_CONFIG_DIR", "claude"),
                    ("CODEX_HOME", "codex"), ("PI_CODING_AGENT_DIR", "pi")):
     os.environ[_var] = str(_SAFE / _sub)
+os.environ["TALLY_NO_UPDATE_CHECK"] = "1"       # no test asks GitHub; Updates turns it on with a local URL
+os.environ.pop("TALLY_UPDATE_URL", None)
 
 SID = "11111111-2222-3333-4444-555555555555"
 SID2 = "99999999-8888-7777-6666-555555555555"
@@ -1970,11 +1973,12 @@ class Onboarding(unittest.TestCase):
     def test_answers_are_saved_and_offered_next_time(self):
         from tally import onboarding, settings
         # 't' fits track and tasks, so the question comes again
-        self.assertTrue(self.run_setup("off", "ca", "t", "track", "a", "y", "", ""))
+        self.assertTrue(self.run_setup("off", "ca", "t", "track", "a", "y", "", "n", ""))
         self.assertEqual(settings.get("log.prompts"), "off")
         self.assertEqual(settings.get("log.depth"), "calls")
         self.assertEqual(settings.get("projects.default_mode"), "track")
         self.assertEqual(settings.get("sessions.scope"), "all")
+        self.assertIs(settings.get("updates.check"), False)
         self.assertEqual(settings.get("auto_start"), "session")
         self.assertIs(settings.get("todos.reminder"), True)
         self.assertIn("    choose one of: ask, track, tasks", self.said)
@@ -1984,7 +1988,7 @@ class Onboarding(unittest.TestCase):
         self.assertIn('python3 "%s" statusline' % (PLUGIN / "bin" / "tally"), onboarding.statusline_command())
         self.assertTrue(any("status line added" in line for line in self.said[-1].split("\n")))
         # again: the current values are offered, Enter keeps them
-        self.assertTrue(self.run_setup("", "", "", "", "", ""))
+        self.assertTrue(self.run_setup("", "", "", "", "", "", ""))
         self.assertIn("[off]", self.prompts[0])
         self.assertIn("[track]", self.prompts[2])
         self.assertIn("[all]", self.prompts[3])
@@ -2003,7 +2007,7 @@ class Onboarding(unittest.TestCase):
 
     def test_three_wrong_answers_keep_the_value(self):
         from tally import settings
-        self.assertTrue(self.run_setup("x", "y", "z", "", "", "", "maybe", "", "", "n"))
+        self.assertTrue(self.run_setup("x", "y", "z", "", "", "", "maybe", "", "", "", "n"))
         self.assertEqual(settings.get("log.prompts"), "full")
         self.assertIn("    keeping full", self.said)
         self.assertIn("    answer y or n", self.said)
@@ -2013,13 +2017,13 @@ class Onboarding(unittest.TestCase):
         self.claude.mkdir(parents=True)
         mine = {"statusLine": {"type": "command", "command": "npx ccstatusline"}, "model": "opus"}
         self.settings_json.write_text(json.dumps(mine))
-        self.run_setup("", "", "", "", "", "")
-        self.assertEqual(len(self.prompts), 6)                                # no status line question
+        self.run_setup("", "", "", "", "", "", "")
+        self.assertEqual(len(self.prompts), 7)                                # no status line question
         self.assertEqual(json.loads(self.settings_json.read_text()), mine)
         self.assertTrue(any("ccstatusline: a Custom Command widget" in line for line in self.said))
         self.settings_json.write_text("{not json")
-        self.run_setup("", "", "", "", "", "")
-        self.assertEqual(len(self.prompts), 6)
+        self.run_setup("", "", "", "", "", "", "")
+        self.assertEqual(len(self.prompts), 7)
         self.assertEqual(self.settings_json.read_text(), "{not json")
         self.assertTrue(any("is not valid JSON" in line for line in self.said))
 
@@ -2029,7 +2033,7 @@ class Onboarding(unittest.TestCase):
         self.claude.mkdir(parents=True)
         mine = {"model": "opus", "env": {"A": "1"}}
         self.settings_json.write_text(json.dumps(mine))
-        self.run_setup("", "", "", "", "", "", "y")
+        self.run_setup("", "", "", "", "", "", "", "y")
         data = json.loads(self.settings_json.read_text())
         self.assertEqual({k: v for k, v in data.items() if k != "statusLine"}, mine)
         self.assertEqual(json.loads((self.claude / "settings.json.bak-tally").read_text()), mine)
@@ -2044,8 +2048,8 @@ class Onboarding(unittest.TestCase):
         self.assertIn("lolcat", self.settings_json.read_text())
 
     def test_no_status_line_question_without_claude_code(self):
-        self.run_setup("", "", "", "", "", "", agents=("codex", "pi"))
-        self.assertEqual(len(self.prompts), 6)
+        self.run_setup("", "", "", "", "", "", "", agents=("codex", "pi"))
+        self.assertEqual(len(self.prompts), 7)
         self.assertFalse(self.settings_json.exists())
 
     def test_non_interactive_asks_nothing(self):
@@ -2066,7 +2070,7 @@ class Onboarding(unittest.TestCase):
         (fakebin / "claude").write_text("#!/bin/sh\nexit 0\n")
         (fakebin / "claude").chmod(0o755)
         out = run_in_pty([sys.executable, str(PLUGIN / "bin" / "tally"), "setup"],
-                         answers=["preview", "", "tasks", "", "", "n", "y"],
+                         answers=["preview", "", "tasks", "", "", "n", "", "y"],
                          env={"NO_COLOR": "1", "PATH": "%s:%s" % (fakebin, os.environ.get("PATH", ""))})
         self.assertIn("Add Tally to Claude Code's status line? Y/n", out)
         self.assertIn("▍Tally · Setup · Enter keeps the value in [brackets]", out)
@@ -2075,6 +2079,125 @@ class Onboarding(unittest.TestCase):
         self.assertEqual(settings.get("projects.default_mode"), "tasks")
         self.assertIs(settings.get("todos.reminder"), False)
         self.assertIn("statusLine", self.settings_json.read_text())
+
+
+class Updates(unittest.TestCase):
+    """The daily version check, the notices and tally update (never GitHub: a local URL and git repos)."""
+
+    def setUp(self):
+        self.env = Env()
+        self.manifest = self.env.tmp / "plugin.json"
+        self.patch = unittest.mock.patch.dict(os.environ, {"TALLY_UPDATE_URL": self.manifest.as_uri()})
+        self.patch.start()
+        os.environ.pop("TALLY_NO_UPDATE_CHECK", None)
+
+    def tearDown(self):
+        self.patch.stop()
+        self.env.cleanup()
+
+    def publish(self, version):
+        self.manifest.write_text(json.dumps({"name": "tally", "version": version}))
+
+    def test_check_and_notices(self):
+        from tally import __version__, settings, updates
+        self.assertTrue(updates.newer("1.10.0", "1.9.3") and not updates.newer("0.8.0", "0.8.0"))
+        self.assertTrue(updates.due())
+        self.publish(__version__)
+        self.assertEqual(updates.check_now()["latest"], __version__)
+        self.assertFalse(updates.due())                                    # once a day
+        self.assertIsNone(updates.available())
+        self.assertIsNone(updates.notice("cli"))
+        self.publish("99.0.0")
+        updates.check_now()
+        self.assertEqual(updates.available(), "99.0.0")
+        text = updates.notice("cli")
+        self.assertIn("Tally 99.0.0 is out (you have %s)" % __version__, text)
+        self.assertIn("tally update to update", text)                       # tests run from a git checkout
+        self.assertIsNone(updates.notice("cli"))                            # not again today
+        self.assertIsNotNone(updates.notice("session"))                     # each place once
+        settings.set_value("updates.check", "off")
+        self.assertIsNone(updates.available())
+        settings.set_value("updates.check", "on")
+        self.manifest.unlink()                                              # offline: kept, retried sooner
+        st = updates.check_now()
+        self.assertEqual((st["latest"], bool(st["error"])), ("99.0.0", True))
+        self.assertFalse(updates.due())
+        self.assertTrue(updates.due(time.time() + updates.RETRY_S + 1))
+
+    def test_session_start_and_doctor_mention_it(self):
+        from tally import hooks, updates
+        self.publish("99.0.0")
+        updates.check_now()
+        out = io.StringIO()
+        hooks.main("SessionStart", stdin=io.StringIO(json.dumps(
+            {"session_id": SID, "cwd": str(self.env.tmp), "source": "startup"})), stdout=out)
+        self.assertIn("▍Tally · ⬆ Tally 99.0.0 is out", json.loads(out.getvalue())["systemMessage"])
+        r = subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally"), "doctor"], capture_output=True,
+                           text=True, env=os.environ, timeout=60)
+        self.assertIn("updates       99.0.0 is out: tally update", r.stdout)
+
+    def test_background_check(self):
+        from tally import updates
+        self.publish("99.0.0")
+        updates.check_in_background()
+        deadline = time.time() + 20
+        while time.time() < deadline and not updates.state().get("latest"):
+            time.sleep(0.1)
+        self.assertEqual(updates.state()["latest"], "99.0.0")
+        os.environ["TALLY_NO_UPDATE_CHECK"] = "1"
+        self.assertFalse(updates.enabled())
+
+    def test_changelog_between_versions(self):
+        from tally import updates
+        root = self.env.tmp / "r"
+        root.mkdir()
+        (root / "CHANGELOG.md").write_text("# Changelog\n\n## 0.10.0 (x)\n\n### Big\n\n- **New thing:** yes\n"
+                                           "\n## 0.9.1 (x)\n\n- **Fix:** a\n\n## 0.9.0 (x)\n\n- **Old:** b\n")
+        self.assertEqual(updates.changes(root, "0.9.0", "0.10.0"),
+                         ["  0.10.0 (x)", "    · New thing", "  0.9.1 (x)", "    · Fix"])
+
+    def test_tally_update_pulls_reinstalls_and_says_what_changed(self):
+        import socket
+        git = lambda cwd, *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(cwd)]  # noqa: E731
+                                             + list(a), capture_output=True, text=True, check=True).stdout
+        src = self.env.tmp / "src"
+        src.mkdir()
+        shutil.copytree(str(PLUGIN), str(src / "plugin"), ignore=shutil.ignore_patterns("__pycache__"))
+        init = src / "plugin" / "tally" / "__init__.py"
+
+        def release(version, note):
+            init.write_text(re.sub(r'__version__ = "[^"]+"', '__version__ = "%s"' % version, init.read_text()))
+            old = (src / "CHANGELOG.md").read_text() if (src / "CHANGELOG.md").exists() else "# Changelog\n"
+            (src / "CHANGELOG.md").write_text(old.replace("# Changelog\n", "# Changelog\n\n## %s (today)\n\n- **%s:** x\n"
+                                                          % (version, note), 1))
+            git(src, "add", "-A")
+            git(src, "commit", "-qm", version)
+        git(src, "init", "-q", "-b", "main")
+        release("0.0.1", "First")
+        inst = self.env.tmp / "inst"
+        git(self.env.tmp, "clone", "-q", str(src), str(inst))
+        release("0.0.2", "Second thing")
+        from tally import settings
+        with socket.socket() as sock:                                       # never the real dashboard's port
+            sock.bind(("127.0.0.1", 0))
+            settings.set_value("dashboard_port", sock.getsockname()[1])
+        run = lambda *a: subprocess.run([sys.executable, str(inst / "plugin" / "bin" / "tally")] + list(a),  # noqa: E731
+                                        capture_output=True, text=True, env=os.environ, timeout=60,
+                                        stdin=subprocess.DEVNULL)
+        (inst / "plugin" / "tally" / "fmt.py").write_text("# edited\n" + (inst / "plugin" / "tally" / "fmt.py").read_text())
+        r = run("update")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("has local changes", r.stdout + r.stderr)
+        git(inst, "checkout", "--", ".")
+        r = run("update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Updated Tally 0.0.1 → 0.0.2", r.stdout)
+        self.assertIn("· Second thing", r.stdout)
+        self.assertNotIn("· First", r.stdout)
+        self.assertIn('__version__ = "0.0.2"', (inst / "plugin" / "tally" / "__init__.py").read_text())
+        self.assertIn("Tally 0.0.2 is up to date", run("update").stdout)
+        from tally import updates
+        self.assertEqual(updates.state()["latest"], "0.0.2")
 
 
 class InstallerOnboarding(unittest.TestCase):
@@ -2109,7 +2232,7 @@ class InstallerOnboarding(unittest.TestCase):
     def test_setup_once_and_a_welcome_per_new_agent(self):
         from unittest import mock
         from tally import installer, settings
-        with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=["off", "", "", "", "", ""]):
+        with mock.patch("sys.stdin") as stdin, mock.patch("builtins.input", side_effect=["off", "", "", "", "", "", ""]):
             stdin.isatty.return_value = True
             self.assertEqual(installer.install(["codex", "pi"]), 0)
         self.assertEqual(settings.get("log.prompts"), "off")

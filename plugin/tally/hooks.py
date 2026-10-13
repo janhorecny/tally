@@ -135,7 +135,8 @@ def _recently_cleared(conn, cwd, now, window: float = 30.0):
 def _session_message(conn, cwd, new_project, agent="claude"):
     """Shown to the user only (systemMessage, 0 tokens): a welcome after
     installing, the setup question for a project Tally has not been told how
-    to track (or a notice of its default mode), and the open todos."""
+    to track (or a notice of its default mode), the open todos, and a new
+    version (at most once a day)."""
     from . import onboarding, projects, settings, todos
     cfg = paths.load_config()
     name = projects.detect(cwd)
@@ -152,6 +153,11 @@ def _session_message(conn, cwd, new_project, agent="claude"):
         text = todos.reminder(conn, name, int(settings.get("todos.reminder_limit", cfg) or 5))
         if text:
             parts.append(text)
+    from . import updates
+    updates.check_in_background()
+    text = updates.notice("session", conn)
+    if text:
+        parts.append(text)
     return {"systemMessage": "\n\n".join(parts)} if parts else None
 
 

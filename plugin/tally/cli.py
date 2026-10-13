@@ -532,6 +532,24 @@ class Parser(argparse.ArgumentParser):
         super().print_help(file)
 
 
+def cmd_update(args):
+    """Update to the latest version, or only check (--check)."""
+    from . import updates
+    if args.check:
+        st = updates.check_now()
+        if args.quiet:
+            return 0
+        if st.get("error") and not st.get("latest"):
+            _die("Could not check for a new version: %s" % st["error"])
+        if updates.newer(st.get("latest")):
+            _out(fmt.head("Tally %s is out (you have %s)" % (st["latest"], __version__), "⬆") + "\n"
+                 + fmt.hints("%s to update" % updates.update_command()))
+        else:
+            _out(fmt.head("Tally %s is the latest version" % __version__, "✓"))
+        return 0
+    return updates.update(say=_out)
+
+
 def cmd_doctor(args):
     _out("%s %s · doctor · python %s" % (fmt.BRAND, __version__, sys.version.split()[0]))
     print("data dir      %s" % paths.home())
@@ -565,6 +583,17 @@ def cmd_doctor(args):
     print("status line   %s" % {"ours": "Tally", "other": "another command (tally statusline can be added to it)",
                                 "absent": "none (tally setup can add it)",
                                 "invalid": "settings.json is not valid JSON"}[state])
+    from . import updates
+    st, root = updates.status(), updates.source_root()
+    print("installed at  %s" % (root or installer.REPO))
+    if not st["enabled"]:
+        print("updates       check off (tally settings updates.check on)")
+    elif st["available"]:
+        print("updates       %s is out: %s" % (st["available"], st["command"]))
+    elif st["checked_at"]:
+        print("updates       up to date (checked %s)" % fmt.when(st["checked_at"]))
+    else:
+        print("updates       not checked yet (tally update --check)")
     if paths.error_log_path().exists() and paths.error_log_path().stat().st_size:
         print("errors        see %s" % paths.error_log_path())
     else:
@@ -778,6 +807,11 @@ def build_parser():
 
     s = sub.add_parser("doctor", help="check installation")
     s.set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser("update", help="update to the latest version (git pull, reinstall into the agents)")
+    s.add_argument("--check", action="store_true", help="only say whether a new version is out")
+    s.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
+    s.set_defaults(func=cmd_update)
     return p
 
 
@@ -788,4 +822,23 @@ def main(argv=None) -> int:
         print(overview())
         return 0
     rc = args.func(args)
+    if args.cmd in NOTIFY:
+        _update_notice()
     return rc or 0
+
+
+# commands a person runs and reads: they mention a new version (once a day, on a terminal)
+NOTIFY = {"status", "show", "list", "ls", "sessions", "session", "stats", "todo", "project", "projects",
+          "settings", "doctor", "dashboard", "serve", "export", "setup"}
+
+
+def _update_notice() -> None:
+    try:
+        from . import updates
+        updates.check_in_background()
+        if sys.stderr.isatty():
+            text = updates.notice("cli")
+            if text:
+                sys.stderr.write("\n" + (fmt.paint(text) if fmt.use_color(sys.stderr) else text) + "\n")
+    except Exception:
+        pass

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.0 (2026-10-13)
+
+The repository is public.
+
+### Install and update
+
+- **One-line install:** `curl -fsSL https://raw.githubusercontent.com/janhorecny/tally/main/install.sh | bash` downloads Tally to `~/.local/share/tally` (`TALLY_DIR`) and runs the installer from there; questions still work, options go after `bash -s --`. `install.sh` in a clone works as before. A missing `~/.local/bin` on `PATH` comes with the line to add it.
+- **`tally update`:** pulls the checkout Tally runs from (fast-forward only, never over local changes), installs the new version into every agent Tally is in, restarts a running dashboard and lists the changes since your version from the changelog. Installed from Claude Code's plugin manager, it updates the plugin there.
+- **New versions are announced:** once a day a background process fetches the version of the plugin manifest on GitHub (nothing about you is sent). A newer one is mentioned in the session start message of every agent and below CLI commands, each at most once a day, and as a ⬆ chip in the dashboard header that copies `tally update`. `tally update --check` checks now; `tally doctor` shows the result and where Tally is installed.
+- **`updates.check`:** on by default; `tally setup` asks about it. `TALLY_NO_UPDATE_CHECK=1` turns it off too.
+- **Claude Code plugin manager:** `/plugin marketplace add janhorecny/tally` and `/plugin install tally@tally` install the Claude Code part without the installer.
+- **Uninstall** of a one-line install also deletes `~/.local/share/tally`.
+
+### Development
+
+- **`scripts/release.sh`:** checks that the versions and the changelog agree, runs the checks, pushes `main`, tags `vX.Y.Z` and creates the GitHub release with the changelog section.
+
 ## 0.8.0 (2026-10-13)
 
 ### Only the sessions you choose

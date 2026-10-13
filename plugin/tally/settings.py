@@ -19,6 +19,8 @@ SCHEMA = {
     "sessions.scope": (("enabled", "all"),
                        "Sessions overview: only projects set to track or tasks and sessions added one by one "
                        "(enabled), or every session in the agents' transcripts (all)"),
+    "updates.check": ((True, False), "Check once a day whether a new version is out and say so "
+                                     "(one request to GitHub; nothing about you is sent)"),
     "dashboard_port": (int, "Port of the local dashboard"),
     "dashboard_idle_minutes": (int, "Stop a dashboard started in the background after this many minutes "
                                     "without an open page (0 = never)"),

@@ -492,6 +492,7 @@ Show or change settings.
 | `auto_start` | `off` (default) or `session` |
 | `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
 | `sessions.scope` | `enabled` (default) or `all`: which sessions the sessions overview reads |
+| `updates.check` | `on` (default) or `off`: say when a new version is out (one request to GitHub a day) |
 | `dashboard_port` | a number (default 8765) |
 | `dashboard_idle_minutes` | a number (default 120; 0 = never) |
 

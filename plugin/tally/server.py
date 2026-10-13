@@ -81,7 +81,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, HTML.read_bytes(), "text/html; charset=utf-8")
                 return
             if url.path == "/api/health":
-                self._json({"app": "tally", "version": __version__, "pid": os.getpid()})
+                from . import updates
+                updates.check_in_background()          # an open page checks in every minute
+                self._json({"app": "tally", "version": __version__, "pid": os.getpid(), "update": updates.status()})
                 return
             if url.path == "/api/export":
                 from . import export

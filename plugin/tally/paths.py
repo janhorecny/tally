@@ -34,6 +34,10 @@ DEFAULT_CONFIG = {
         # all:     every session, except projects set to off
         "scope": "enabled",
     },
+    "updates": {
+        # once a day, ask GitHub for the latest version (one request, nothing sent) and say when one is out
+        "check": True,
+    },
     "todos": {
         # show open todos of the project when a Claude Code session starts
         "reminder": True,
