@@ -126,10 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.match(r"^/api/projects/([^/]+)$", url.path)
                 if m:
                     from urllib.parse import unquote
-                    from . import projects
-                    days = arg("days")
-                    self._json(projects.stats(conn, unquote(m.group(1)), days=int(days) if days else None,
-                                              series_days=int(arg("series") or 30)))
+                    self._json(_project_detail(conn, unquote(m.group(1))))
                     return
                 if url.path == "/api/todos":
                     self._json({"todos": _todos(conn, arg("project") or None, arg("status", "board")),
@@ -240,19 +237,53 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _projects(conn, full: bool = False) -> list:
+    """Projects Tally knows; with full=1 also every project seen in the sessions
+    index in the last 30 days, with that usage (whole sessions, any mode)."""
     from . import projects
+    usage = {}
+    if full:
+        from . import sessions
+        sessions.refresh_async(30)                 # keep the index current; returns at once
+        usage = sessions.project_usage(30)
+    names = set(projects.all_names(conn)) | set(usage)
     out = []
-    for p in projects.all_names(conn):
+    for p in names:
         n_open = conn.execute("SELECT COUNT(*) FROM todos WHERE project = ? AND parent_id IS NULL AND status IN "
                               "('todo','doing','blocked')", (p,)).fetchone()[0]
         n_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE project = ?", (p,)).fetchone()[0]
-        d = {"project": p, "open_todos": n_open, "tasks": n_tasks, "mode": projects.mode_of(conn, p)}
+        d = {"project": p, "open_todos": n_open, "tasks": n_tasks, "mode": projects.mode_of(conn, p),
+             "registered": projects.get(conn, p) is not None}
         if full:
-            st = projects.stats(conn, p, series_days=1)
-            d.update({"last_30d": st["last_30d"], "totals": st["totals"], "sessions": st["sessions"],
-                      "last_activity": st["last_activity"], "task_share": st["tasks"]["share"]})
+            u = usage.get(p) or {"sessions": 0, "total": 0, "output": 0, "calls": 0, "cost": 0.0, "last_activity": None}
+            d.update({"last_30d": {k: u[k] for k in ("total", "output", "calls", "cost")}, "sessions": u["sessions"],
+                      "last_activity": u["last_activity"] or None})
         out.append(d)
+    if full:
+        out.sort(key=lambda d: (-d["last_30d"]["total"], d["project"].lower()))
+    else:
+        out.sort(key=lambda d: d["project"].lower())
     return out
+
+
+def _project_detail(conn, name: str) -> dict:
+    """What Tally counted for the project (tasks, todos, tracked totals) plus the
+    last 30 days of every session from the sessions index."""
+    from . import projects, sessions
+    st = projects.stats(conn, name, series_days=30)
+    ix = sessions.connect()
+    try:
+        recent = projects.stats(conn, name, days=30, series_days=30, usage_conn=ix)
+    finally:
+        ix.close()
+    st["tracked"] = st["totals"]
+    for k in ("last_7d", "daily", "by_model", "last_activity", "first_activity"):
+        st[k] = recent[k]
+    # the same numbers as the projects list: sessions active in the last 30 days
+    u = sessions.project_usage(30).get(name) or {"sessions": 0, "total": 0, "output": 0, "calls": 0, "cost": 0.0}
+    st["last_30d"] = dict(recent["last_30d"], **{k: u[k] for k in ("total", "output", "calls", "cost")})
+    st["sessions"] = u["sessions"]
+    st["registered"] = projects.get(conn, name) is not None
+    return st
 
 
 def _todos(conn, project, status) -> list:

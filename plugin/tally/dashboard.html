@@ -213,6 +213,26 @@ tbody tr:hover td { background: var(--hover); }
   display: none; max-width: 320px; }
 #tip b { display: block; margin-bottom: 2px; }
 
+/* ---------------------------------------------------------------- getting started */
+.tasks-layout.solo { grid-template-columns: minmax(0, 1fr); }
+.hero { padding: 28px 28px 24px; }
+.hero h2 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; }
+.hero p { color: var(--text-secondary); margin: 0 0 18px; max-width: 760px; }
+.cmds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+@media (max-width: 760px) { .cmds { grid-template-columns: minmax(0, 1fr); } }
+.cmd { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-2); }
+.cmd .who { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.cmd code { font-size: 13px; color: var(--text-primary); }
+.hero .ctas { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.hero .ctas a { display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 7px; border: 1px solid var(--border-strong); color: var(--text-primary); font-weight: 500; }
+.hero .ctas a.primary { background: var(--text-primary); color: var(--surface-1); border-color: transparent; }
+.hero .ctas a:hover { text-decoration: none; background: var(--hover); }
+.hero .ctas a.primary:hover { background: var(--text-primary); opacity: .88; }
+.hero .tiles { margin: 0 -28px; }
+.banner { border: 1px dashed var(--border-strong); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; color: var(--text-secondary); }
+.banner b { color: var(--text-primary); }
+.banner code { background: var(--surface-2); border-radius: 4px; padding: 0 4px; }
+
 /* ---------------------------------------------------------------- todos */
 .addbar { display: flex; gap: 8px; margin-bottom: 6px; }
 .addbar input { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 9px; }
@@ -245,6 +265,8 @@ tbody tr:hover td { background: var(--hover); }
 .prog .bar { height: 100%; background: var(--seq); }
 
 /* ---------------------------------------------------------------- projects, sessions, settings */
+#projtable { max-height: 46vh; overflow: auto; }
+.ptbl thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
 .ptbl tbody tr { cursor: pointer; }
 .ptbl tbody tr.sel td { background: var(--select); }
 .chart { display: block; width: 100%; }
@@ -318,6 +340,7 @@ tbody tr:hover td { background: var(--hover); }
       <button type="submit" class="primary">Add</button>
     </form>
     <div class="addhint" id="addhint"></div>
+    <div id="todobanner"></div>
     <div class="board" id="board"></div>
   </div>
 
@@ -352,7 +375,7 @@ const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmtTok = n => n == null ? "–" : n < 1e3 ? String(n) : n < 1e6 ? (n/1e3).toFixed(1) + "k" : n < 1e9 ? (n/1e6).toFixed(2) + "M" : (n/1e9).toFixed(2) + "B";
 const fmtFull = n => (n ?? 0).toLocaleString("en-US");
-const fmtCost = (c, partial) => c == null ? "–" : (c >= 0.995 || c === 0 ? "$" + c.toFixed(2) : "$" + c.toFixed(3)) + (partial ? "+" : "");
+const fmtCost = (c, partial) => c == null ? "–" : (c >= 999.5 ? "$" + Math.round(c).toLocaleString("en-US") : c >= 0.995 || c === 0 ? "$" + c.toFixed(2) : "$" + c.toFixed(3)) + (partial ? "+" : "");
 function fmtDur(s) {
   if (s == null) return "–";
   s = Math.round(s);
@@ -495,10 +518,9 @@ function renderTasks() {
     (!taskFilter.q || (("#" + t.id + " " + t.name).toLowerCase().includes(taskFilter.q))));
   const active = tasks.filter(t => t.status === "active").length;
   $("#taskcount").textContent = tasks.length ? plural(tasks.length, "task") + (active ? " · " + active + " active" : "") : "";
-  if (!tasks.length) {
-    el.innerHTML = `<div class="empty">No tasks${project ? " in <b>" + esc(project) + "</b>" : ""} yet.<br><br>Start one in your agent:<br><b>/tally:start &lt;name&gt;</b> (Claude Code) · <b>tally:start</b> (Codex) · <b>/tally start</b> (pi)</div>`;
-    return;
-  }
+  $(".tasks-layout").classList.toggle("solo", !tasks.length);
+  $(".tasklist").classList.toggle("hide", !tasks.length);
+  if (!tasks.length) { renderWelcome(); return; }
   if (!shown.length) { el.innerHTML = '<div class="empty">No task matches the filter.</div>'; return; }
   el.innerHTML = shown.map(t => `
     <div class="trow ${t.id === selected ? "sel" : ""}" data-id="${t.id}" role="button" tabindex="0" aria-label="task ${t.id}: ${esc(t.name)}">
@@ -514,7 +536,33 @@ function renderTasks() {
     r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
   });
 }
+// no tasks yet: say what a task is, how to start one, and what the agents already used
+async function renderWelcome() {
+  const el = $("#detail");
+  const where = project ? ` in <b>${esc(project)}</b>` : "";
+  el.innerHTML = `<div class="hero"><h2>Measure your first task${where}</h2>
+    <p>A task counts the tokens, cost and time of everything an agent does until you end it: the main conversation, its subagents and workflows. Start one in your agent, work as usual, and the report appears here.</p>
+    <div class="cmds">
+      <div class="cmd"><div class="who">Claude Code</div><code>/tally:start Fix login bug</code></div>
+      <div class="cmd"><div class="who">Codex</div><code>tally:start Fix login bug</code></div>
+      <div class="cmd"><div class="who">pi</div><code>/tally start Fix login bug</code></div>
+    </div><div id="welcome-usage"></div>
+    <div class="ctas"><a class="primary" href="#sessions">Open Sessions</a><a href="#todos">Plan with todos</a><a href="#settings">Settings</a></div></div>`;
+  try {
+    const d = await getJSON("/api/sessions?" + new URLSearchParams({days: "30", project, limit: "1"}));
+    const t = d.totals;
+    if (!t.sessions) return;
+    $("#welcome-usage").innerHTML = `<div class="section-title" style="padding-top:4px">Meanwhile, your agents in the last 30 days${where}</div><div class="tiles">
+      ${tile("Sessions", fmtFull(t.sessions), d.by_agent.map(a => (AGENTS[a.agent] || a.agent) + " " + a.sessions).join(" · "))}
+      ${tile("Tokens", fmtTok(t.total), fmtTok(t.output) + " output")}
+      ${tile("Est. cost", fmtCost(t.cost), "at API list price")}
+      ${tile("Prompts", fmtFull(t.prompts), fmtFull(t.calls) + " API calls")}
+      ${tile("Active time", fmtDur(t.active_s), "time agents were working")}</div>`;
+  } catch (e) { /* the welcome works without numbers */ }
+}
+
 async function loadDetail() {
+  if (!tasks.length) return;
   if (!selected) { $("#detail").innerHTML = '<div class="empty">Select a task.</div>'; return; }
   try {
     renderDetail(await getJSON("/api/tasks/" + selected));
@@ -724,6 +772,7 @@ function renderTodos() {
   $("#addhint").innerHTML = project
     ? `Adds to <b>${esc(project)}</b>. Write <code>!</code> <code>!!</code> <code>!!!</code> for priority, <code>due:fri</code>, <code>due:+3d</code>, and <code>-- notes</code>.`
     : `Adds without a project unless you write <code>@project</code>. Also <code>!!</code> for priority, <code>due:fri</code> and <code>-- notes</code>.`;
+  $("#todobanner").innerHTML = d.todos.length ? "" : `<div class="banner"><b>No todos${project ? " in " + esc(project) : ""} yet.</b> Add one above, or with <code>/tally:todo Fix the export !! due:fri</code> in your agent. A written plan becomes todos with <code>tally todo import plan.md</code>, and the <code>tally-todos</code> skill lets your agent keep the board current. <code>/tally:take &lt;id&gt;</code> then measures what a todo really cost.</div>`;
   $("#board").innerHTML = COLS.map(([k, label, mark]) => `<div class="col"><h3><span>${mark} ${label}</span><span class="num">${by[k].length}</span></h3>${
     by[k].map(t => card(t, d.now)).join("") || '<div class="empty">Nothing here</div>'}</div>`).join("");
   const board = $("#board");
@@ -800,12 +849,13 @@ async function loadProjectsView() {
   }
   const names = d.projects.map(p => p.project);
   if (!names.includes(projSel)) projSel = names.includes(project) ? project : names[0];
-  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th>project</th><th>tracking</th><th>30 days</th><th>30d cost</th><th>all time</th><th>cost</th><th>sessions</th><th>tasks</th><th>open todos</th><th>last active</th></tr></thead><tbody>${
-    d.projects.map(p => `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td><b>${esc(p.project)}</b></td>
+  const max = Math.max(...d.projects.map(p => p.last_30d.total), 1);
+  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th>project</th><th>tracking</th><th>sessions</th><th>tokens</th><th></th><th>cost</th><th>tasks</th><th>open todos</th><th>last active</th></tr></thead><tbody>${
+    d.projects.map(p => `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
       <td><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
-      <td class="num">${fmtTok(p.last_30d.total)}</td><td class="num">${fmtCost(p.last_30d.cost)}</td><td class="num">${fmtTok(p.totals.total)}</td><td class="num">${fmtCost(p.totals.cost)}</td>
-      <td class="num">${p.sessions}</td><td class="num">${p.tasks}</td><td class="num">${p.open_todos}</td><td class="num muted">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
-    <div class="note" style="padding:12px 0 0">track: every session in the project is counted · tasks: only the tasks you start · off: ignored</div>`;
+      <td class="num">${p.sessions}</td><td class="num">${fmtTok(p.last_30d.total)}</td><td><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
+      <td class="num">${p.tasks}</td><td class="num">${p.open_todos}</td><td class="num muted">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td></tr>`).join("")}</tbody></table>
+    <div class="note" style="padding:12px 0 0">Sessions, tokens and cost: every session of the last 30 days, from the agents' transcripts, whatever the tracking mode. Tracking decides what Tally keeps for good: <b>track</b> every session, <b>tasks</b> only the tasks you start, <b>off</b> nothing (and the project disappears from these numbers).</div>`;
   $$("select[data-mode]", $("#projtable")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
     guard(postJSON("/api/projects/" + encodeURIComponent(el.dataset.mode), {mode: el.value}).then(() => { toast(el.dataset.mode + ": " + el.value); return loadProjectsView(); })); });
   $$("tr[data-p]", $("#projtable")).forEach(tr => {
@@ -841,16 +891,16 @@ function renderProjectDetail() {
   el.innerHTML = `<div class="dhead"><div class="top"><h2>${esc(st.project)}</h2></div><div class="line"><span class="badge">${esc(st.mode)} · ${MODE_HELP[st.mode] || ""}</span>
       <a href="#sessions" data-psess>Sessions of this project →</a></div>${st.path ? `<div class="path" title="${esc(st.path)}">${esc(st.path)}</div>` : ""}</div>
     <div class="tiles">
-      ${tile("All time", fmtTok(st.totals.total), fmtCost(st.totals.cost) + " · " + fmtFull(st.totals.calls) + " calls")}
-      ${tile("Last 30 days", fmtTok(st.last_30d.total), fmtCost(st.last_30d.cost))}
+      ${tile("Last 30 days", fmtTok(st.last_30d.total), fmtCost(st.last_30d.cost) + " · " + fmtFull(st.last_30d.calls) + " calls", "every session in the project, from the agents' transcripts")}
       ${tile("Last 7 days", fmtTok(st.last_7d.total), fmtCost(st.last_7d.cost))}
-      ${tile("Sessions", fmtFull(st.sessions), st.last_activity ? "last " + fmtAgo(st.last_activity) : "")}
-      ${tile("Tasks", fmtFull(tk.count), tk.share != null ? (tk.share * 100).toFixed(0) + "% of tokens via tasks" : (tk.active ? tk.active + " active" : ""))}
+      ${tile("Sessions", fmtFull(st.sessions), st.last_activity ? "last " + fmtAgo(st.last_activity) : "in the last 30 days")}
+      ${tile("Kept by Tally", fmtTok(st.tracked.total), st.mode === "track" ? fmtCost(st.tracked.cost) + " · all time" : st.mode === "tasks" ? "tasks only" : "set tracking to keep it", "what Tally stores for good: every session (track) or the tasks (tasks); transcripts are deleted after a while, this is not")}
+      ${tile("Tasks", fmtFull(tk.count), tk.share != null && st.mode === "track" ? (tk.share * 100).toFixed(0) + "% of tokens via tasks" : (tk.active ? tk.active + " active" : ""))}
       ${tile("Todos", fmtFull(td.todo + td.doing + td.blocked) + " open", td.done + " done")}
     </div>
-    <div class="section"><div class="section-title">Tokens per day · last 30 days</div><div id="pchart">${chart(st.daily, W)}</div></div>
+    <div class="section"><div class="section-title">Tokens per day · last 30 days · all sessions</div><div id="pchart">${chart(st.daily, W)}</div></div>
     ${st.by_model.length ? `<div class="section two"><div><div class="section-title">By model</div><table><thead><tr><th>model</th><th>tokens</th><th>output</th><th>cost</th></tr></thead><tbody>${st.by_model.map(m => `<tr><td title="${esc(m.model)}">${esc(shortModel(m.model))}</td><td class="num">${fmtTok(m.total)}</td><td class="num">${fmtTok(m.output)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join("")}</tbody></table></div>
-      <div><div class="section-title">Recent tasks</div><table><thead><tr><th>task</th><th>tokens</th><th>cost</th><th>active</th></tr></thead><tbody>${tk.recent.map(t => `<tr><td style="white-space:normal"><a href="#tasks/${t.id}">${esc(t.name)}</a> <span class="muted">#${t.id}</span></td><td class="num">${fmtTok(t.total)}</td><td class="num">${fmtCost(t.cost)}</td><td class="num">${fmtDur(t.active_s)}</td></tr>`).join("") || '<tr><td class="muted">none yet</td></tr>'}</tbody></table></div></div>` : ""}`;
+      <div><div class="section-title">Tasks</div><table><thead><tr><th>task</th><th>tokens</th><th>cost</th><th>active</th></tr></thead><tbody>${tk.recent.map(t => `<tr><td style="white-space:normal"><a href="#tasks/${t.id}">${esc(t.name)}</a> <span class="muted">#${t.id}</span></td><td class="num">${fmtTok(t.total)}</td><td class="num">${fmtCost(t.cost)}</td><td class="num">${fmtDur(t.active_s)}</td></tr>`).join("") || '<tr><td class="muted">none yet</td></tr>'}</tbody></table></div></div>` : ""}`;
   $("[data-psess]", el).onclick = () => { project = st.project; localStorage.setItem("tc-project", project); $("#project").value = project; };
 }
 let resizeTimer = null;

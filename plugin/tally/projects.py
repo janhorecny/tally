@@ -117,11 +117,13 @@ def all_names(conn) -> list:
 
 # ------------------------------------------------------------------ stats
 
-def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30) -> dict:
+def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30, usage_conn=None) -> dict:
     """Overall usage of a project.
 
     track mode: every API call of every session in the project.
     otherwise:  the project's tasks only.
+    usage_conn: read the usage of every session from this database instead
+    (the sessions index), whatever the mode; tasks and todos still come from conn.
     Also: daily series, by model, tasks, todos, and the share that went
     through tasks.
     """
@@ -150,7 +152,10 @@ def stats(conn, name: str, days: Optional[int] = None, series_days: int = 30) ->
     sessions_used = set()
     first = last = None
     rows = []
-    if mode == "track":
+    if usage_conn is not None:
+        rows = usage_conn.execute("SELECT u.* FROM usage u JOIN sessions s ON s.session_id = u.session_id "
+                                  "WHERE s.project = ? AND u.ts >= ?", (name, since)).fetchall()
+    elif mode == "track":
         rows = conn.execute("SELECT u.* FROM usage u JOIN sessions s ON s.session_id = u.session_id "
                             "WHERE s.project = ? AND u.ts >= ?", (name, since)).fetchall()
     else:

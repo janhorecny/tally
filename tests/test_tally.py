@@ -1366,6 +1366,48 @@ class SessionsOverview(unittest.TestCase):
             httpd.server_close()
 
 
+    def test_projects_and_titles_come_from_the_index(self):
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from tally import fmt, server, sessions
+        self.make_sessions()
+        sessions.refresh(30)
+        # a Claude Code session without an AI title is named after its first prompt
+        e = self.env
+        e.append(e.main(SID2), dict(user(time.time() - 50, "migrate the   billing\nto Stripe", prompt_id="q1"),
+                                    cwd="/Users/me/proj"), assistant(time.time() - 40, "z1", "y1", out=10))
+        sessions.refresh(30)
+        titles = {s["session_id"]: s["title"] for s in sessions.overview(30)["sessions"]}
+        self.assertEqual(titles[SID2], "migrate the billing to Stripe")
+        self.assertEqual(titles[SID], "Parser work")                            # the agent's own title wins
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % httpd.server_address[1]
+        try:
+            get = lambda path: json.loads(urllib.request.urlopen(base + path, timeout=10).read())  # noqa: E731
+            listed = get("/api/projects?full=1")["projects"]
+            by = {p["project"]: p for p in listed}
+            self.assertFalse(by["other"]["registered"])                         # seen only in the index (pi)
+            self.assertEqual((by["other"]["sessions"], by["other"]["last_30d"]["total"]), (1, 120))
+            self.assertAlmostEqual(by["other"]["last_30d"]["cost"], 0.25)
+            self.assertTrue(by["proj"]["registered"])                           # the task registered it
+            self.assertEqual(by["proj"]["sessions"], 3)                         # Claude x2 and Codex
+            self.assertEqual([p["project"] for p in listed], ["proj", "other"])   # most used first
+            det = get("/api/projects/other")
+            self.assertEqual((det["last_30d"]["total"], det["sessions"], det["registered"]), (120, 1, False))
+            self.assertEqual(det["tracked"]["total"], 0)                         # nothing kept for an untracked project
+            self.assertEqual(sum(d["total"] for d in det["daily"]), 120)
+            self.assertEqual(get("/api/projects/proj")["last_30d"]["total"], by["proj"]["last_30d"]["total"])
+        finally:
+            deadline = time.time() + 20
+            while sessions.progress()["running"] and time.time() < deadline:
+                time.sleep(0.05)
+            httpd.shutdown()
+            httpd.server_close()
+        self.assertEqual(fmt.money({"cost": 9050.11}), "$9,050")
+        self.assertEqual(fmt.money({"cost": 12.345}), "$12.35")
+
 class CliSmoke(unittest.TestCase):
     def setUp(self):
         self.env = Env()

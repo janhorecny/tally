@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1 (2026-10-13)
+
+Reviewed against a real installation: no tasks yet, 750 sessions in 54 projects.
+
+- **First run:** with no tasks, the Tasks tab explains what a task is, shows the start command for each agent and what the agents used in the last 30 days, with links to Sessions and Todos, instead of an empty list and a lone *Select a task*. An empty todo board explains how to add or import todos.
+- **Projects:** every project with sessions in the last 30 days is listed, most used first, with sessions, tokens and cost from the sessions index whatever its tracking mode. Projects Tally has not set up yet are marked *new* and can be set up from the table. The detail shows the same 30-day numbers, a daily chart of all sessions, and what Tally keeps for good. Before, an untracked project showed zeros and unknown projects were missing.
+- **Session titles:** a session without an AI title is named after its first prompt instead of its id (dashboard and `tally sessions`).
+- **Money:** amounts from $1,000 are shown as `$9,052` (dashboard and CLI).
+- **Layout:** the projects table scrolls with a sticky header, so the detail stays in view.
+
 ## 0.6.0 (2026-10-13)
 
 ### Dashboard

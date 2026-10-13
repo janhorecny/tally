@@ -481,6 +481,9 @@ def overview(days: Optional[float] = 30, agent: Optional[str] = None, project: O
             out.append({"session_id": r["session_id"], "agent": r["agent"], "project": r["project"],
                         "cwd": r["cwd"], "title": r["title"], "tasks": tasks_by_sid.get(r["session_id"], []), **s})
         out.sort(key=lambda d: -d["last_ts"])
+        first = _first_prompts(conn, [s["session_id"] for s in out if not s["title"]])
+        for s in out:
+            s["title"] = s["title"] or first.get(s["session_id"])
         by_agent = {}
         overall = _zero()
         for s in out:
@@ -501,6 +504,42 @@ def overview(days: Optional[float] = 30, agent: Optional[str] = None, project: O
     finally:
         if own:
             conn.close()
+
+
+def _first_prompts(conn, sids: List[str]) -> dict:
+    """The first prompt typed in each session: the title when the agent wrote none
+    (nothing when log.prompts is off, since no prompt text is stored then)."""
+    out = {}
+    for i in range(0, len(sids), 500):
+        chunk = sids[i:i + 500]
+        for r in conn.execute("SELECT session_id, prompt FROM prompts WHERE task_id IS NULL AND prompt IS NOT NULL "
+                              "AND session_id IN (%s) ORDER BY ts DESC" % ",".join("?" * len(chunk)), chunk):
+            out[r["session_id"]] = r["prompt"]          # newest first, so the earliest one stays
+    return {k: _cut_title(v) for k, v in out.items() if v.strip()}
+
+
+def _cut_title(text: str) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= 80 else text[:79] + "…"
+
+
+def project_usage(days: float = 30, conn=None) -> dict:
+    """Per project: sessions active in the last `days` days, their tokens, cost and
+    last activity, from the index (whole sessions, whatever the tracking mode)."""
+    out: dict = {}
+    for s in overview(days, conn=conn)["sessions"]:
+        if not s["project"]:
+            continue
+        d = out.setdefault(s["project"], {"sessions": 0, "total": 0, "output": 0, "calls": 0, "cost": 0.0,
+                                          "last_activity": 0})
+        t = s["totals"]
+        d["sessions"] += 1
+        d["total"] += t["total"]
+        d["output"] += t["output"]
+        d["calls"] += t["calls"]
+        d["cost"] += t.get("cost_with_unlogged", t["cost"])
+        d["last_activity"] = max(d["last_activity"], s["last_ts"] or 0)
+    return out
 
 
 def _zero() -> dict:
@@ -526,6 +565,8 @@ def detail(session_id: str, conn=None) -> Optional[dict]:
                  "end_note": None, "project": r["project"]}
         rep = report.build(conn, whole, windows=[(session_id, a - 1, b + 1)])
         rep["session"] = {k: r[k] for k in ("session_id", "agent", "project", "cwd", "title", "path")}
+        if not r["title"]:
+            rep["session"]["title"] = _first_prompts(conn, [session_id]).get(session_id)
         return rep
     finally:
         if own:

@@ -127,7 +127,7 @@ To skip the question, set a default for new projects with `tally setup` or `/tal
 - tasks and how much of the usage they account for;
 - todos.
 
-`/tally:projects` lists all projects. The dashboard has a *Projects* tab where you can switch modes and see a 30-day chart. Until a project is set up, the status line shows a hint.
+`/tally:projects` lists all projects. The dashboard's *Projects* tab also shows the projects of the last 30 days that Tally has not set up yet, with their usage from the agents' transcripts, so you can pick a mode for each. Until a project is set up, the status line shows a hint.
 
 ## Sessions
 
@@ -272,9 +272,9 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 
 | tab | what you can do |
 |---|---|
-| *Tasks* | Filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
+| *Tasks* | Before the first task: how to start one in each agent, and what your agents used in the last 30 days. Then: filter the list by name or status. The detail shows summary tiles, token composition, the expandable agent tree, tables by model, agent type and workflow, and the per-prompt breakdown. **Rename** a task, **end** an active one, or **delete** an ended one; ending and deleting ask for confirmation first. |
 | *Todos* | A board with Doing, Todo, Blocked and Done. Add todos with the quick syntax, change the status, tick plan steps, **edit** title, priority, due date, project and notes, or **delete** a todo. *Copy /tally:do* copies the command that hands a todo to your agent. |
-| *Projects* | Tracking modes, totals, a 30-day chart, models and recent tasks per project. |
+| *Projects* | Every project with sessions in the last 30 days, most used first: sessions, tokens and cost of all its sessions (from the [sessions index](#sessions), whatever the tracking mode). Projects Tally has not set up yet are marked *new*; choose their mode right in the table. The detail adds what Tally keeps for good, a daily chart, models and tasks. |
 | *Sessions* | Every session of every agent; see [Sessions](#sessions). |
 | *Settings* | The same settings as `/tally:settings`, grouped and described. |
 

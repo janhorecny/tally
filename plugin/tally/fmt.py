@@ -136,7 +136,7 @@ def money(d: dict) -> str:
         return "-"
     if c == 0 and d.get("cost_partial"):
         return "n/a"
-    s = "$%.2f" % c if c >= 0.995 or c == 0 else "$%.3f" % c
+    s = "${:,.0f}".format(c) if c >= 999.5 else "$%.2f" % c if c >= 0.995 or c == 0 else "$%.3f" % c
     return s + ("+" if d.get("cost_partial") else "")
 
 

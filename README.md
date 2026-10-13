@@ -132,7 +132,7 @@ The CLI has the same features: `tally list | status | stats | show | todo … | 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v       # 62 end-to-end tests (Claude Code, Codex and pi transcripts)
+python3 -m unittest discover -s tests -v       # 64 end-to-end tests (Claude Code, Codex and pi transcripts)
 python3 scripts/validate_against_claude.py     # compare with Claude Code's own totals (reads files only)
 claude --plugin-dir ./plugin                   # try the plugin without installing it
 python3 scripts/make_banner.py                 # regenerate docs/assets/banner-{light,dark}.svg
