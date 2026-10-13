@@ -171,9 +171,10 @@ a.chip:hover { text-decoration: none; border-color: var(--border-strong); color:
 .chip.accent { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 #detail { min-width: 0; }
 .dhead { padding: 18px 20px 4px; }
-.dhead .top { display: flex; align-items: flex-start; gap: 12px; }
-.dhead h2 { font-size: 20px; margin: 0 0 8px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; flex: 1; }
-.dhead .actions { display: flex; gap: 6px; flex: none; }
+.dhead .top { display: flex; align-items: flex-start; gap: 4px 12px; flex-wrap: wrap; }
+/* the title keeps at least 260px; below that the buttons move under it */
+.dhead h2 { font-size: 20px; margin: 0 0 8px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; flex: 1 1 260px; }
+.dhead .actions { display: flex; gap: 6px; flex: none; flex-wrap: wrap; margin-bottom: 8px; }
 .dhead .line { color: var(--text-secondary); font-size: 13px; display: flex; gap: 8px 12px; flex-wrap: wrap; align-items: center; }
 .dhead .path { color: var(--text-muted); font-size: 12px; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dhead .rename { display: flex; gap: 6px; flex: 1; margin-bottom: 8px; }
@@ -278,6 +279,9 @@ tbody tr:hover td { background: var(--hover); }
 
 /* ---------------------------------------------------------------- projects, sessions, settings */
 #projtable { max-height: 46vh; overflow: auto; }
+.ptbl th.pname { width: 30%; }
+.ptbl th.c-track, .ptbl td.c-track { text-align: left; width: 1%; }
+.ptbl th:last-child, .ptbl td:last-child { padding-right: 14px; }
 .ptbl thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
 .ptbl tbody tr { cursor: pointer; }
 .ptbl tbody tr.sel td { background: var(--select); }
@@ -312,6 +316,27 @@ tbody tr:hover td { background: var(--hover); }
 .setrow .d { color: var(--text-secondary); font-size: 13px; }
 @media (max-width: 760px) { .setrow { grid-template-columns: 1fr; } }
 
+/* ---------------------------------------------------------------- menus, scope bar */
+.menu-wrap { position: relative; display: inline-flex; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 25; min-width: 280px; background: var(--surface-1);
+  border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 6px; text-align: left; }
+.menu .grp { font-size: 11px; color: var(--text-muted); padding: 8px 10px 3px; font-weight: 600; }
+.menu .grp:first-child { padding-top: 4px; }
+.menu a, .menu button { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 14px; padding: 7px 10px;
+  border: 0; border-radius: 6px; background: none; color: var(--text-primary); font-size: 13px; font-weight: 400; text-decoration: none; cursor: pointer; }
+.menu a:hover, .menu button:hover, .menu a:focus-visible, .menu button:focus-visible { background: var(--hover); text-decoration: none; }
+.menu .ext { color: var(--text-muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+button svg.i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+#scopebar { max-width: 1600px; margin: 0 auto; padding: 14px 24px 0; }
+#scopebar .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--text-primary); }
+#scopebar .bar .lbl { color: var(--text-secondary); font-size: 12px; }
+#scopebar .bar b { font-size: 15px; }
+#scopebar .bar .grow { flex: 1; }
+@media (max-width: 900px) { #scopebar { padding: 12px 16px 0; } }
+.view.scoped.wrap { padding-top: 14px; }
+.stbl.noproj .c-proj { display: none; }
+
 /* ---------------------------------------------------------------- toasts */
 #toasts { position: fixed; right: 20px; bottom: 20px; display: grid; gap: 8px; z-index: 40; max-width: min(420px, calc(100vw - 40px)); }
 .toast { background: var(--surface-1); border: 1px solid var(--border-strong); border-left: 4px solid var(--good); border-radius: 9px;
@@ -337,15 +362,18 @@ tbody tr:hover td { background: var(--hover); }
     <div class="controls">
       <span class="status" id="status" role="status"><span class="dot"></span><span id="updated">connecting…</span></span>
       <select id="project" aria-label="Project filter"><option value="">All projects</option></select>
+      <span id="gexport"></span>
       <button id="theme" class="icon" type="button"></button>
       <button id="refresh" class="icon" type="button" title="Reload the data (R)" aria-label="Reload the data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
     </div>
   </header>
 
+  <div id="scopebar" class="hide"></div>
+
   <div id="view-tasks" class="view wrap">
     <div class="tasks-layout">
       <section class="card tasklist" aria-label="Tasks">
-        <div class="card-head"><h2>Tasks</h2><span class="count num" id="taskcount"></span></div>
+        <div class="card-head"><h2>Tasks</h2><span class="count num" id="taskcount"></span><span class="grow"></span><span id="texport"></span></div>
         <div class="filters">
           <input type="search" id="tsearch" placeholder="Filter by name…" aria-label="Filter tasks by name">
           <div class="seg" role="group" aria-label="Task status"><button data-st="" class="on">All</button><button data-st="active">Active</button><button data-st="ended">Ended</button></div>
@@ -367,7 +395,7 @@ tbody tr:hover td { background: var(--hover); }
   </div>
 
   <div id="view-projects" class="view wrap">
-    <section class="card"><div class="card-head"><h2>Projects</h2><span class="count num" id="projcount"></span></div>
+    <section class="card"><div class="card-head"><h2>Projects</h2><span class="count num" id="projcount"></span><span class="grow"></span><span id="pexport"></span></div>
       <div class="section" style="padding-top:0"><div class="tscroll" id="projtable"></div></div></section>
     <section class="card" id="projdetail"></section>
   </div>
@@ -377,6 +405,7 @@ tbody tr:hover td { background: var(--hover); }
       <select id="sdays" aria-label="Period"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="">All time</option></select>
       <select id="sagent" aria-label="Agent"><option value="">All agents</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="pi">pi</option></select>
       <span class="muted num" id="sindex" style="font-size:12px"></span>
+      <span class="grow" style="flex:1"></span><span id="sexport"></span>
     </div>
     <section class="card"><div id="stiles"></div><div id="stable"><div class="empty">Loading…</div></div></section>
     <section class="card hide" id="sdetail"></section>
@@ -462,6 +491,71 @@ async function postJSON(url, body) {
 }
 const guard = p => p.catch(e => toast(e.message || String(e), true));
 
+// ---------------------------------------------------------------- export menus and copy
+const ICON_DL = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>';
+const ICON_COPY = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+const EXT = {csv: ".csv", md: ".md", json: ".json", text: ".txt"};
+const exportUrl = q => "/api/export?" + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== null && v !== undefined && v !== ""));
+let menuSeq = 0;
+// groups: [[title or null, [[label, query, "copy"?], ...]], ...]
+function menu(groups, opts) {
+  opts = opts || {};
+  const id = "menu" + (++menuSeq);
+  const items = groups.map(([title, list]) => (title ? `<div class="grp">${esc(title)}</div>` : "") + list.map(([label, q, kind]) =>
+    kind === "copy"
+      ? `<button type="button" role="menuitem" data-copy="${esc(exportUrl(q))}">${esc(label)}<span class="ext">copy</span></button>`
+      : `<a role="menuitem" href="${esc(exportUrl(Object.assign({}, q, {download: 1})))}" download>${esc(label)}<span class="ext">${EXT[q.format]}</span></a>`).join("")).join("");
+  const button = opts.icon
+    ? `<button type="button" class="icon" data-menu="${id}" aria-haspopup="menu" aria-expanded="false" title="${esc(opts.title || "Export")}" aria-label="${esc(opts.title || "Export")}">${ICON_DL.replace('class="i" ', "")}</button>`
+    : `<button type="button" class="sm" data-menu="${id}" aria-haspopup="menu" aria-expanded="false">${ICON_DL}${esc(opts.label || "Export")}</button>`;
+  return `<span class="menu-wrap">${button}<div class="menu hide" role="menu" id="${id}">${items}</div></span>`;
+}
+function closeMenus() { $$(".menu").forEach(m => m.classList.add("hide")); $$("[data-menu]").forEach(b => b.setAttribute("aria-expanded", "false")); }
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-menu]");
+  if (b) {
+    const m = document.getElementById(b.dataset.menu), was = !m.classList.contains("hide");
+    closeMenus();
+    if (!was) {
+      m.style.left = m.style.right = "";
+      m.classList.remove("hide");
+      b.setAttribute("aria-expanded", "true");
+      const r = m.getBoundingClientRect();            // keep it on screen: open to the right if needed
+      if (r.left < 8) { m.style.right = "auto"; m.style.left = "0"; }
+    }
+    return;
+  }
+  const c = e.target.closest("[data-copy]");
+  if (c) copyFrom(c.dataset.copy);
+  if (!e.target.closest(".menu") || c || e.target.closest(".menu a")) closeMenus();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeMenus(); });
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+}
+async function copyFrom(url) {
+  try {
+    const r = await fetch(url, {cache: "no-store"});
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "export failed (" + r.status + ")");
+    await copyText(await r.text());
+    toast("Copied to the clipboard");
+  } catch (e) { toast(e.message, true); }
+}
+function renderGlobalExport() {
+  const groups = [
+    ["Everything · last 30 days", [["Summary (Markdown)", {scope: "summary", format: "md", days: 30}], ["Summary (CSV)", {scope: "summary", format: "csv", days: 30}],
+      ["Summary (JSON)", {scope: "summary", format: "json", days: 30}], ["Copy summary as Markdown", {scope: "summary", format: "md", days: 30}, "copy"]]],
+    ["All data", [["Tasks · time sheet (CSV)", {scope: "tasks", format: "csv"}], ["Projects · last 30 days (CSV)", {scope: "projects", format: "csv"}],
+      ["Sessions · last 30 days (CSV)", {scope: "sessions", format: "csv", days: 30}]]],
+  ];
+  if (project) groups.push(["Project " + project, [["Report (Markdown)", {scope: "project", ref: project, format: "md"}],
+    ["Tasks · time sheet (CSV)", {scope: "tasks", project, format: "csv"}], ["Sessions · last 30 days (CSV)", {scope: "sessions", project, days: 30, format: "csv"}]]]);
+  $("#gexport").innerHTML = menu(groups, {icon: true, title: "Export"});
+}
+
 // ---------------------------------------------------------------- theme
 // one icon button: auto (follow the system) → light → dark
 const THEMES = {
@@ -503,6 +597,7 @@ function parseHash() {
   if (/^\d+$/.test(h)) return {view: "tasks", id: Number(h)};
   const [v, id] = h.split("/");
   if (v === "sessions") return {view: v, id: null, sid: id ? decodeURIComponent(id) : null};
+  if (v === "projects") return {view: v, id: null, pname: id ? decodeURIComponent(h.slice("projects/".length)) : null};
   return {view: ["tasks", "todos", "projects", "settings"].includes(v) ? v : "tasks", id: Number(id) || null};
 }
 let view = parseHash().view;
@@ -516,6 +611,8 @@ const seenKeys = new Set();       // nodes with many children start collapsed
 function setView(v) {
   view = v;
   $$(".view").forEach(el => el.classList.toggle("on", el.id === "view-" + v));
+  renderScope();
+  closeMenus();
   $$("nav.tabs a").forEach(a => { a.classList.toggle("on", a.dataset.view === v); a.toggleAttribute("aria-current", a.dataset.view === v); });
   if (v === "todos") guard(loadTodos());
   if (v === "settings") guard(loadSettings());
@@ -530,7 +627,25 @@ async function loadProjects() {
     `<option value="${esc(p.project)}">${esc(p.project)}${p.open_todos ? " · " + p.open_todos + " open" : ""}</option>`).join("");
   sel.value = d.projects.some(p => p.project === project) ? project : "";
 }
-$("#project").onchange = e => { project = e.target.value; localStorage.setItem("tc-project", project); selected = null; setView(view); };
+function setProject(name) {
+  project = name || "";
+  localStorage.setItem("tc-project", project);
+  $("#project").value = project;
+  selected = null;
+  renderGlobalExport();
+}
+$("#project").onchange = e => { setProject(e.target.value); setView(view); };
+// a visible heading whenever a view shows one project only
+function renderScope() {
+  const show = project && ["tasks", "todos", "sessions"].includes(view);
+  $("#scopebar").classList.toggle("hide", !show);
+  $$(".view").forEach(el => el.classList.toggle("scoped", !!show));
+  if (!show) return;
+  $("#scopebar").innerHTML = `<div class="bar"><span class="lbl">${{tasks: "Tasks of project", todos: "Todos of project", sessions: "Sessions of project"}[view]}</span>
+    <b>${esc(project)}</b><a href="#projects/${encodeURIComponent(project)}">Project details →</a><span class="grow"></span>
+    <button type="button" class="sm" data-clear-project>✕ All projects</button></div>`;
+  $("[data-clear-project]").onclick = () => { setProject(""); setView(view); };
+}
 
 // ---------------------------------------------------------------- tasks
 async function loadTasks() {
@@ -550,6 +665,11 @@ function renderTasks() {
   const shown = tasks.filter(t => (!taskFilter.st || t.status === taskFilter.st) &&
     (!taskFilter.q || (("#" + t.id + " " + t.name).toLowerCase().includes(taskFilter.q))));
   const active = tasks.filter(t => t.status === "active").length;
+  $("#texport").innerHTML = tasks.length ? menu([
+    [null, [["Time sheet (CSV)", {scope: "tasks", project, format: "csv"}], ["Markdown table", {scope: "tasks", project, format: "md"}],
+      ["JSON, full reports", {scope: "tasks", project, format: "json"}]]],
+    ["Copy", [["One line per task", {scope: "tasks", project, format: "text"}, "copy"], ["Markdown table", {scope: "tasks", project, format: "md"}, "copy"]]],
+  ]) : "";
   $("#taskcount").textContent = tasks.length ? plural(tasks.length, "task") + (active ? " · " + active + " active" : "") : "";
   $(".tasks-layout").classList.toggle("solo", !tasks.length);
   $(".tasklist").classList.toggle("hide", !tasks.length);
@@ -610,8 +730,12 @@ function tile(label, value, hint, tipText) {
 }
 
 function taskActions(t) {
-  if (t.status === "active") return `<button class="sm" data-act="rename">Rename</button><button class="sm" data-act="end">End task</button>`;
-  return `<button class="sm" data-act="rename">Rename</button><button class="sm danger" data-act="delete">Delete</button>`;
+  const q = f => ({scope: "task", ref: t.id, format: f});
+  const out = `<button class="sm" type="button" data-copy="${esc(exportUrl(q("text")))}" title="one line for your time tracker: name, project, time, tokens, cost">${ICON_COPY}Copy</button>` +
+    menu([[null, [["Report (Markdown)", q("md")], ["Time sheet row (CSV)", q("csv")], ["JSON", q("json")]]],
+          ["Copy", [["Report as Markdown", q("md"), "copy"]]]]);
+  if (t.status === "active") return out + `<button class="sm" data-act="rename">Rename</button><button class="sm" data-act="end">End task</button>`;
+  return out + `<button class="sm" data-act="rename">Rename</button><button class="sm danger" data-act="delete">Delete</button>`;
 }
 
 function renderDetail(rep, target) {
@@ -629,7 +753,9 @@ function renderDetail(rep, target) {
   ];
   const h = [];
   if (sess) h.push(`<div class="dhead"><div class="top"><h2>${esc(sess.title || "Session " + sess.session_id)}</h2>
-      ${target ? `<div class="actions"><button class="ghost sm" data-close aria-label="Close">✕ Close</button></div>` : ""}</div>
+      ${target ? `<div class="actions"><button class="sm" type="button" data-copy="${esc(exportUrl({scope: "session", ref: sess.session_id, format: "text"}))}" title="one line: title, agent, project, time, tokens, cost">${ICON_COPY}Copy</button>${
+        menu([[null, [["Report (Markdown)", {scope: "session", ref: sess.session_id, format: "md"}], ["JSON", {scope: "session", ref: sess.session_id, format: "json"}]]],
+              ["Copy", [["Report as Markdown", {scope: "session", ref: sess.session_id, format: "md"}, "copy"]]]])}<button class="ghost sm" data-close aria-label="Close">✕ Close</button></div>` : ""}</div>
     <div class="line"><span class="badge">${esc(AGENTS[sess.agent] || sess.agent)}</span>
     <span class="num">${fmtWhen(t.started_at)} → ${fmtWhen(t.ended_at)}</span>
     ${sess.project ? `<span class="chip">${esc(sess.project)}</span>` : ""}</div>
@@ -814,9 +940,9 @@ function renderTodos() {
     .then(() => { toast("Todo #" + el.dataset.id + " is now " + el.value); return loadTodos(); })));
   $$("input[type=checkbox][data-step]", board).forEach(el => el.onchange = () => guard(postJSON("/api/todos/" + el.dataset.step, {status: el.checked ? "done" : "todo"}).then(loadTodos)));
   $$("button[data-edit]", board).forEach(b => b.onclick = () => { editing = Number(b.dataset.edit); renderTodos(); const i = $(`form[data-form="${editing}"] input`); if (i) i.focus(); });
-  $$("button[data-copy]", board).forEach(b => b.onclick = () => {
-    const text = "/tally:do " + b.dataset.copy;
-    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast("Copied " + text), () => toast(text));
+  $$("button[data-docmd]", board).forEach(b => b.onclick = () => {
+    const text = "/tally:do " + b.dataset.docmd;
+    copyText(text).then(() => toast("Copied " + text), () => toast(text));
   });
   $$("form[data-form]", board).forEach(form => {
     const id = Number(form.dataset.form);
@@ -854,7 +980,7 @@ function card(t, now) {
     ${w.tasks ? `<div class="row num" data-tip="measured over ${plural(w.tasks, "task")}${w.active_task ? " · task #" + w.active_task + " running" : ""}">${w.active_task ? '<span class="dot active" style="margin:0"></span>' : ""}${fmtTok(w.total)} tokens · ${fmtCost(w.cost)} · ${fmtDur(w.active_s)} active</div>` : ""}
     <div class="row"><select class="sm" data-id="${t.id}" aria-label="status of todo ${t.id}">${STATUSES.map(s => `<option ${s === t.status ? "selected" : ""}>${s}</option>`).join("")}</select>
       <span class="grow"></span>
-      <button class="ghost sm" data-copy="${t.id}" title="copy the command that hands this todo to your agent">Copy /tally:do</button>
+      <button class="ghost sm" data-docmd="${t.id}" title="copy the command that hands this todo to your agent">Copy /tally:do</button>
       <button class="ghost sm" data-edit="${t.id}">Edit</button></div>
     ${(t.notes || t.steps.length) ? `<details><summary>${t.steps.length ? plural(t.steps.length, "step") + (t.notes ? " · notes" : "") : "notes"}</summary>${t.notes ? `<div class="muted" style="white-space:pre-wrap;margin:4px 0">${esc(t.notes)}</div>` : ""}
       <ul class="steps">${t.steps.map(c => `<li class="${c.status === "done" ? "done" : ""}"><input type="checkbox" data-step="${c.id}" ${c.status === "done" ? "checked" : ""} aria-label="step ${c.id} done"><span>${esc(c.title)}</span></li>`).join("")}</ul></details>` : ""}
@@ -882,9 +1008,14 @@ async function loadProjectsView() {
     return;
   }
   const names = d.projects.map(p => p.project);
+  const wanted = parseHash().pname;
+  if (wanted) projSel = wanted;
   if (!names.includes(projSel)) projSel = names.includes(project) ? project : names[0];
+  $("#pexport").innerHTML = menu([
+    [null, [["Projects (CSV)", {scope: "projects", format: "csv"}], ["Markdown table", {scope: "projects", format: "md"}], ["JSON", {scope: "projects", format: "json"}]]],
+    ["Copy", [["Markdown table", {scope: "projects", format: "md"}, "copy"]]]]);
   const max = Math.max(...d.projects.map(p => p.last_30d.total), 1);
-  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th>project</th><th class="c-track">tracking</th><th class="c-sess">sessions</th><th class="c-ptok">tokens</th><th class="c-share"></th><th>cost</th><th class="c-tasks">tasks</th><th class="c-todos">open todos</th><th class="c-last">last active</th></tr></thead><tbody>${
+  $("#projtable").innerHTML = `<table class="ptbl"><thead><tr><th class="pname">project</th><th class="c-track">tracking</th><th class="c-sess">sessions</th><th class="c-ptok">tokens</th><th class="c-share"></th><th>cost</th><th class="c-tasks">tasks</th><th class="c-todos">open todos</th><th class="c-last">last active</th></tr></thead><tbody>${
     d.projects.map(p => `<tr data-p="${esc(p.project)}" class="${p.project === projSel ? "sel" : ""}" tabindex="0"><td class="pname" title="${esc(p.project)}"><b>${esc(p.project)}</b>${p.registered ? "" : ' <span class="chip">new</span>'}</td>
       <td class="c-track"><select class="sm" data-mode="${esc(p.project)}" aria-label="tracking mode of ${esc(p.project)}">${(p.mode === "ask" ? ["ask"] : []).concat(["track", "tasks", "off"]).map(m => `<option value="${m}" ${m === p.mode ? "selected" : ""}>${m === "ask" ? "— set up —" : m}</option>`).join("")}</select></td>
       <td class="num c-sess">${p.sessions}</td><td class="num c-ptok">${fmtTok(p.last_30d.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(p.last_30d.total, max)}%"></div></div></div></td><td class="num">${fmtCost(p.last_30d.cost)}</td>
@@ -893,10 +1024,20 @@ async function loadProjectsView() {
   $$("select[data-mode]", $("#projtable")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
     guard(postJSON("/api/projects/" + encodeURIComponent(el.dataset.mode), {mode: el.value}).then(() => { toast(el.dataset.mode + ": " + el.value); return loadProjectsView(); })); });
   $$("tr[data-p]", $("#projtable")).forEach(tr => {
-    const go = () => { projSel = tr.dataset.p; $$("tr[data-p]", $("#projtable")).forEach(x => x.classList.toggle("sel", x === tr)); guard(loadProjectDetail(projSel)); };
+    const go = () => selectProject(tr.dataset.p, false);
     tr.onclick = go; tr.onkeydown = e => { if (e.key === "Enter") go(); };
   });
-  await loadProjectDetail(projSel);
+  await selectProject(projSel, !!wanted);
+}
+// every project has its own address: #projects/<name>
+async function selectProject(name, scroll) {
+  projSel = name;
+  history.replaceState(null, "", "#projects/" + encodeURIComponent(name));
+  $$("tr[data-p]", $("#projtable")).forEach(x => x.classList.toggle("sel", x.dataset.p === name));
+  const row = $$("tr[data-p]", $("#projtable")).find(x => x.dataset.p === name);
+  if (row && scroll) row.scrollIntoView({block: "nearest"});
+  await guard(loadProjectDetail(name));
+  if (scroll) $("#projdetail").scrollIntoView({behavior: "smooth", block: "start"});
 }
 async function loadProjectDetail(name) {
   projStats = await getJSON("/api/projects/" + encodeURIComponent(name) + "?days=&series=30");
@@ -922,8 +1063,13 @@ function renderProjectDetail() {
   el.classList.remove("hide");
   const td = st.todos, tk = st.tasks;
   const W = Math.max(280, (el.clientWidth || 900) - 40);
-  el.innerHTML = `<div class="dhead"><div class="top"><h2>${esc(st.project)}</h2></div><div class="line"><span class="badge">${esc(st.mode)} · ${MODE_HELP[st.mode] || ""}</span>
-      <a href="#sessions" data-psess>Sessions of this project →</a></div>${st.path ? `<div class="path" title="${esc(st.path)}">${esc(st.path)}</div>` : ""}</div>
+  const pq = (scope, f, extra) => Object.assign({scope, format: f}, scope === "project" ? {ref: st.project} : {project: st.project}, extra || {});
+  el.innerHTML = `<div class="dhead"><div class="top"><h2>${esc(st.project)}</h2><div class="actions">${menu([
+      ["This project", [["Report (Markdown)", pq("project", "md")], ["Tokens per day (CSV)", pq("project", "csv")], ["JSON", pq("project", "json")]]],
+      ["Its data", [["Tasks · time sheet (CSV)", pq("tasks", "csv")], ["Sessions · last 30 days (CSV)", pq("sessions", "csv", {days: 30})]]],
+      ["Copy", [["Report as Markdown", pq("project", "md"), "copy"], ["Tasks, one line each", pq("tasks", "text"), "copy"]]]])}</div></div>
+      <div class="line"><span class="badge">${esc(st.mode)} · ${MODE_HELP[st.mode] || ""}</span>
+      <a href="#sessions" data-psess>Sessions of this project →</a><a href="#tasks" data-ptasks>Tasks →</a></div>${st.path ? `<div class="path" title="${esc(st.path)}">${esc(st.path)}</div>` : ""}</div>
     <div class="tiles">
       ${tile("Last 30 days", fmtTok(st.last_30d.total), fmtCost(st.last_30d.cost) + " · " + fmtFull(st.last_30d.calls) + " calls", "every session in the project, from the agents' transcripts")}
       ${tile("Last 7 days", fmtTok(st.last_7d.total), fmtCost(st.last_7d.cost))}
@@ -935,7 +1081,8 @@ function renderProjectDetail() {
     <div class="section"><div class="section-title">Tokens per day · last 30 days · all sessions</div><div id="pchart">${chart(st.daily, W)}</div></div>
     ${st.by_model.length ? `<div class="section two"><div><div class="section-title">By model</div><table><thead><tr><th>model</th><th>tokens</th><th>output</th><th>cost</th></tr></thead><tbody>${st.by_model.map(m => `<tr><td title="${esc(m.model)}">${esc(shortModel(m.model))}</td><td class="num">${fmtTok(m.total)}</td><td class="num">${fmtTok(m.output)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join("")}</tbody></table></div>
       <div><div class="section-title">Tasks</div><table><thead><tr><th>task</th><th>tokens</th><th>cost</th><th>active</th></tr></thead><tbody>${tk.recent.map(t => `<tr><td style="white-space:normal"><a href="#tasks/${t.id}">${esc(t.name)}</a> <span class="muted">#${t.id}</span></td><td class="num">${fmtTok(t.total)}</td><td class="num">${fmtCost(t.cost)}</td><td class="num">${fmtDur(t.active_s)}</td></tr>`).join("") || '<tr><td class="muted">none yet</td></tr>'}</tbody></table></div></div>` : ""}`;
-  $("[data-psess]", el).onclick = () => { project = st.project; localStorage.setItem("tc-project", project); $("#project").value = project; };
+  $("[data-psess]", el).onclick = () => setProject(st.project);
+  $("[data-ptasks]", el).onclick = () => setProject(st.project);
 }
 let resizeTimer = null;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (view === "projects") renderProjectDetail(); }, 150); });
@@ -962,6 +1109,10 @@ async function loadSessions(force) {
 }
 function renderSessions(d) {
   const t = d.totals;
+  const sq = f => ({scope: "sessions", format: f, days: $("#sdays").value, agent: $("#sagent").value, project});
+  $("#sexport").innerHTML = d.sessions.length ? menu([
+    [null, [["Sessions (CSV)", sq("csv")], ["Markdown table", sq("md")], ["JSON", sq("json")]]],
+    ["Copy", [["Markdown table", sq("md"), "copy"]]]]) : "";
   $("#stiles").innerHTML = `<div class="tiles" style="margin-top:0;border-top:none;border-radius:12px 12px 0 0;overflow:hidden">
     ${tile("Sessions", fmtFull(t.sessions), d.by_agent.map(a => (AGENTS[a.agent] || a.agent) + " " + a.sessions).join(" · "))}
     ${tile("Total tokens", fmtTok(t.total), fmtTok(t.output) + " output")}
@@ -974,14 +1125,14 @@ function renderSessions(d) {
     return;
   }
   const max = Math.max(...d.sessions.map(s => s.totals.total), 1);
-  $("#stable").innerHTML = `<table class="stbl"><thead><tr><th class="c-when">last activity</th><th class="c-agent">agent</th><th>project</th><th>session</th><th class="c-span">span</th><th class="c-active">active</th><th class="c-prompts">prompts</th><th class="c-calls">calls</th><th>tokens</th><th class="c-share"></th><th>cost</th><th class="c-models">models</th></tr></thead><tbody>${
+  $("#stable").innerHTML = `<table class="stbl${project ? " noproj" : ""}"><thead><tr><th class="c-when">last activity</th><th class="c-agent">agent</th><th class="c-proj">project</th><th>session</th><th class="c-span">span</th><th class="c-active">active</th><th class="c-prompts">prompts</th><th class="c-calls">calls</th><th>tokens</th><th class="c-share"></th><th>cost</th><th class="c-models">models</th></tr></thead><tbody>${
     d.sessions.map(s => {
       const st = s.totals, cost = st.cost_with_unlogged ?? st.cost;
       const label = s.title || s.session_id;
       const tasksHtml = s.tasks.map(x => `<a class="chip accent" href="#tasks/${x.id}" title="${esc(x.name)}">#${x.id}</a>`).join(" ");
       const mtip = s.models.map(m => `${esc(m.model)} · ${fmtTok(m.total)} · ${fmtCost(m.cost)}`).join("<br>");
       return `<tr data-sid="${esc(s.session_id)}" class="${s.session_id === sessSel ? "sel" : ""}" tabindex="0">
-        <td class="num c-when" title="${esc(fmtWhen(s.last_ts))}">${fmtAgo(s.last_ts)}</td><td class="c-agent">${esc(AGENTS[s.agent] || s.agent)}</td><td class="prj" title="${esc(s.project || "")}">${esc(s.project || "–")}</td>
+        <td class="num c-when" title="${esc(fmtWhen(s.last_ts))}">${fmtAgo(s.last_ts)}</td><td class="c-agent">${esc(AGENTS[s.agent] || s.agent)}</td><td class="prj c-proj" title="${esc(s.project || "")}">${esc(s.project || "–")}</td>
         <td class="ttl"><span title="${esc(s.session_id + (s.cwd ? " · " + s.cwd : ""))}">${tasksHtml} ${esc(label)}</span></td>
         <td class="num c-span">${fmtDur(s.wall_s)}</td><td class="num c-active">${fmtDur(s.active_s)}</td><td class="num c-prompts">${fmtFull(s.prompts)}</td><td class="num c-calls">${fmtFull(st.calls)}</td>
         <td class="num">${fmtTok(st.total)}</td><td class="c-share"><div class="share"><div class="track" style="width:70px"><div class="bar" style="width:${pct(st.total, max)}%"></div></div></div></td>
@@ -1056,8 +1207,10 @@ window.addEventListener("hashchange", () => {
   if (h.view !== view) setView(h.view);
   if (h.view === "tasks" && h.id && h.id !== selected) { selected = h.id; renderTasks(); guard(loadDetail()); }
   if (h.view === "sessions" && h.sid && h.sid !== sessSel) selectSession(h.sid, true);
+  if (h.view === "projects" && h.pname && h.pname !== projSel && view === "projects") selectProject(h.pname, true);
 });
 getJSON("/api/health").then(d => { $("#ver").textContent = "v" + d.version; }).catch(() => {});
+renderGlobalExport();
 loadProjects().catch(() => {}).then(() => setView(view));
 setInterval(() => {
   if (document.hidden) return;

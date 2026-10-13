@@ -30,7 +30,7 @@ Inside an agent session, the [in-agent commands](commands.md) are usually quicke
 | [`resume`](#tally-resume) | Continue a task in a session. |
 | [`rename`](#tally-rename) | Rename a task. |
 | [`delete`](#tally-delete) | Delete a task. |
-| [`export`](#tally-export) | Export all tasks as CSV or JSON. |
+| [`export`](#tally-export) | Export tasks, a task, projects, a project, sessions, a session or a summary. |
 
 | todos | |
 |---|---|
@@ -195,21 +195,41 @@ tally delete <id> [-y]
 
 ### `tally export`
 
-Export every task.
+Export for spreadsheets, time trackers and documents. The dashboard's *Export* menus and *Copy* buttons produce exactly the same content.
 
 ```
-tally export [--format csv|json] [-o FILE]
+tally export [scope] [ref] [-f FORMAT] [-o FILE | --copy] [-p PROJECT] [--days N | --all] [--agent AGENT]
 ```
 
-| | |
+| scope | what | formats (the first is the default) |
+|---|---|---|
+| `tasks` (default) | Every task, or the tasks of one project with `-p` | `csv`, `json`, `md`, `text` |
+| `task <id>` | One task | `md`, `text`, `json`, `csv` |
+| `projects` | Every project with its last 30 days | `csv`, `json`, `md` |
+| `project <name>` | One project; `csv` is its tokens per day | `md`, `json`, `csv` |
+| `sessions` | Sessions of a period (`--days`, `--all`, `--agent`, `-p`) | `csv`, `json`, `md` |
+| `session <id>` | One session (an id prefix is enough) | `md`, `text`, `json` |
+| `summary` | Everything at a glance: totals, agents, projects, models, tasks | `md`, `json`, `csv` |
+
+| option | |
 |---|---|
-| `--format` | `csv` (default): one row per task. `json`: the full report of every task. |
+| `-f`, `--format` | `csv` for spreadsheets, `md` for documents and issues, `json` for scripts, `text` for time trackers. |
 | `-o`, `--output FILE` | Write to a file. Default: standard output. |
+| `--copy` | Copy to the clipboard (`pbcopy`, `wl-copy`, `xclip` or `xsel`). |
+| `-p`, `--project` | Tasks or sessions of one project. |
+| `--days N`, `--all` | Sessions and summary: the last N days (default 30) or all history. |
 
-CSV columns: `id`, `name`, `status`, `started`, `ended`, `wall_s`, `active_s`, `total_tokens`, `input`, `output`, `cache_write`, `cache_read`, `api_calls`, `cost_usd`, `subagents`, `workflows`, `initial_prompt`.
+- **Time sheets:** the tasks CSV has one row per task with `started`, `ended`, `wall_hm` and `active_hm` (hours:minutes), `wall_hours` and `active_hours` (decimal), `project`, tokens, `cost_usd` and the end `note`. The columns from before 0.7 come first, in the same order.
+- **Copy and paste:** `text` is one line per task or session, for example `Fix login redirect loop (#3) · web-app · 2026-10-12 14:03–14:47 · active 31m 02s · wall 44m 10s · 4.21M tokens · $3.12 · PR #214`.
+- **Markdown:** tables that render on GitHub, in Notion and in most editors.
 
 ```bash
-tally export --format csv -o ~/Desktop/tasks.csv
+tally export -o ~/Desktop/tasks.csv                     # every task, one row each
+tally export task 12 -f text --copy                     # paste it into your time tracker
+tally export project web-app -f md -o web-app.md        # a report of one project
+tally export tasks -p web-app -f csv                    # the time sheet of one project
+tally export sessions --days 7 -f md                    # last week's sessions as a table
+tally export summary --copy                             # everything, as Markdown, to the clipboard
 ```
 
 ## Todos

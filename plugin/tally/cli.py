@@ -1,8 +1,6 @@
 """Command line interface: `tally <command>`."""
 
 import argparse
-import contextlib
-import csv
 import json
 import os
 import sys
@@ -155,29 +153,34 @@ def cmd_delete(args):
 
 
 def cmd_export(args):
-    conn = db.connect()
-    rows = []
-    for t in tasks.list_tasks(conn, limit=0):
-        rep = report.summary_for(conn, t)
-        rows.append(rep)
-    with contextlib.ExitStack() as stack:
-        out = stack.enter_context(open(args.output, "w", newline="")) if args.output else sys.stdout
-        if args.format == "json":
-            json.dump(rows, out, indent=2)
-            out.write("\n")
-        else:
-            w = csv.writer(out)
-            w.writerow(["id", "name", "status", "started", "ended", "wall_s", "active_s", "total_tokens",
-                        "input", "output", "cache_write", "cache_read", "api_calls", "cost_usd",
-                        "subagents", "workflows", "initial_prompt"])
-            for rep in rows:
-                t, tm, tot = rep["task"], rep["time"], rep["totals"]
-                n_agents = sum(x["agents"] for x in rep["by_type"] if x["agent_type"] != "main")
-                w.writerow([t["id"], t["name"], t["status"], fmt.when(t["started_at"], "%Y-%m-%dT%H:%M:%S"),
-                            fmt.when(t["ended_at"], "%Y-%m-%dT%H:%M:%S") if t["ended_at"] else "",
-                            tm["wall_s"], tm["active_s"], tot["total"], tot["input"], tot["output"],
-                            tot["cache_write"], tot["cache_read"], tot["calls"], round(tot["cost"], 4),
-                            n_agents, len(rep["workflows"]), t["initial_prompt"] or ""])
+    """tally export [scope] [ref] [--format] [-o file | --copy]: see tally/export.py for the scopes."""
+    from . import export
+    f = args.format or export.FORMATS[args.scope][0]
+    try:
+        content, name = export.export(args.scope, f, ref=args.ref, project=args.project,
+                                      days=None if args.all else args.days, agent=args.agent)
+    except export.ExportError as e:
+        _die(str(e), "tally export -h shows the scopes and formats")
+    if args.copy:
+        _copy(content)
+        _out(fmt.head("Copied %s (%s) to the clipboard" % (args.scope + (" " + args.ref if args.ref else ""), f), "✓"))
+    elif args.output:
+        with open(args.output, "w", newline="") as fh:
+            fh.write(content)
+        _out(fmt.head("Exported to %s" % args.output, "✓"))
+    else:
+        sys.stdout.write(content)
+
+
+def _copy(text: str) -> None:
+    import shutil
+    import subprocess
+    for cmd in (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"],
+                ["clip"]):
+        if shutil.which(cmd[0]):
+            subprocess.run(cmd, input=text, text=True, check=True)
+            return
+    _die("No clipboard tool found (pbcopy, wl-copy, xclip, xsel)", "print it instead, or write it with -o FILE")
 
 
 def cmd_session(args):
@@ -630,9 +633,20 @@ def build_parser():
     s.add_argument("-y", "--yes", action="store_true")
     s.set_defaults(func=cmd_delete)
 
-    s = sub.add_parser("export", help="export all tasks as CSV or JSON")
-    s.add_argument("--format", choices=["csv", "json"], default="csv")
-    s.add_argument("-o", "--output")
+    s = sub.add_parser("export", help="export a summary, tasks, a task, projects, a project, sessions or a session",
+                       description="Scopes and formats (the first is the default): summary md|json|csv · "
+                                   "tasks csv|json|md|text · task <id> md|text|json|csv · projects csv|json|md · "
+                                   "project <name> md|json|csv · sessions csv|json|md · session <id> md|text|json")
+    s.add_argument("scope", nargs="?", default="tasks",
+                   choices=["summary", "tasks", "task", "projects", "project", "sessions", "session"])
+    s.add_argument("ref", nargs="?", help="task id, project name or session id (prefix)")
+    s.add_argument("-f", "--format", choices=["csv", "json", "md", "text"])
+    s.add_argument("-o", "--output", help="write to a file")
+    s.add_argument("--copy", action="store_true", help="copy to the clipboard")
+    s.add_argument("-p", "--project", help="tasks or sessions of this project")
+    s.add_argument("--days", type=float, default=30, help="sessions and summary: the last N days (default 30)")
+    s.add_argument("--all", action="store_true", help="sessions and summary: all history")
+    s.add_argument("--agent", choices=["claude", "codex", "pi"], help="sessions of this agent")
     s.set_defaults(func=cmd_export)
 
     s = sub.add_parser("session", help="report of one whole session (id or transcript path), any agent")

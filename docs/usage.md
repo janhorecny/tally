@@ -284,6 +284,21 @@ Everything described here. It is installed as the plugin `tally@tally`, with the
 - **Small screens:** tables keep the columns that identify a row and its cost; the rest is in the detail.
 - **Themes:** the button with the monitor, sun or moon icon switches between following the system, light and dark.
 - **Updates:** a dashboard left running by an older Tally version is replaced automatically by `/tally:dashboard` or `tally dashboard`.
+- **Addresses:** every task, project and session has its own URL, for example `#tasks/12`, `#projects/web-app` and `#sessions/3f9c2a1b-…`, so you can bookmark or share them on your machine.
+- **One project:** with a project chosen in the header (or after *Sessions of this project*), Tasks, Todos and Sessions show a bar with the project's name, a link to its details and *All projects*.
+
+### Export and copy
+
+| where | what |
+|---|---|
+| The ⤓ button in the header | The summary of the last 30 days (Markdown, CSV, JSON), all tasks as a time sheet, all projects, the sessions of the last 30 days, and the chosen project. |
+| Tasks list | Every task (of the chosen project): time sheet CSV, Markdown table, JSON; or copy one line per task. |
+| A task | **Copy**: one line for your time tracker. *Export*: the report as Markdown, a time-sheet row, JSON. |
+| Projects | All projects as CSV, Markdown or JSON. |
+| A project | Its report (Markdown), tokens per day (CSV), JSON, its tasks and its sessions. |
+| Sessions | The sessions of the current filters. A session: **Copy** one line, or its report as Markdown or JSON. |
+
+The terminal has the same exports: [`tally export`](cli.md#tally-export).
 
 The dashboard keeps running in the background after you close the page. To stop it: `pkill -f "tally dashboard"`.
 
@@ -312,8 +327,14 @@ Without an active task it shows the project's open todos (`📋 3 todos · 1 ove
 The CLI's commands and options are in the [CLI reference](cli.md).
 
 ```bash
-# all tasks to a spreadsheet
-tally export --format csv -o ~/Desktop/claude-tasks.csv
+# all tasks to a spreadsheet (a time sheet: h:mm and decimal hours per task)
+tally export -o ~/Desktop/tally-tasks.csv
+
+# one task into your time tracker
+tally export task 12 -f text --copy
+
+# a project report for a client or a PR
+tally export project web-app -f md -o web-app.md
 
 # what did a past session cost, including subagents? (no task needed)
 tally sessions --days 7           # find it (first column: id prefix)

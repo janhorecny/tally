@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 (2026-10-13)
+
+### Export and copy
+
+- **`tally export [scope] [ref]`:** `summary`, `tasks`, `task <id>`, `projects`, `project <name>`, `sessions` and `session <id>`, as CSV, JSON, Markdown or one line of text, to standard output, a file (`-o`) or the clipboard (`--copy`). `tally export --format csv` works as before.
+- **Time sheets:** the tasks CSV adds `project`, `todo_id`, `prompts`, wall and active time as `h:mm` and as decimal hours, and the end `note`, after the columns it had before.
+- **Dashboard:** an *Export* menu in the header (summary, all tasks, projects, sessions, the chosen project), on the task list, on a task, on projects and a project, and on sessions; downloads and copy to the clipboard. A task and a session have a **Copy** button that puts one line for a time tracker on the clipboard. `/api/export` serves the same files.
+
+### Dashboard
+
+- **Own addresses for projects:** `#projects/<name>` opens that project; selecting one updates the address.
+- **Which project:** when one project is chosen (in the header or with *Sessions of this project*), Tasks, Todos and Sessions show a bar with its name, a link to its details and *All projects*; the sessions table drops the repeated project column.
+- **Projects table:** the tracking column is left-aligned next to the project, the project column takes the free space, and the last column keeps clear of the scroll bar.
+- **Narrow screens:** the task and project headers move their buttons under the title instead of squeezing it, and menus open on screen.
+
 ## 0.6.3 (2026-10-13)
 
 Design pass over every view in light and dark at desktop, 760 px and 390 px width, on real data.

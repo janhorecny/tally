@@ -81,6 +81,27 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/health":
                 self._json({"app": "tally", "version": __version__, "pid": os.getpid()})
                 return
+            if url.path == "/api/export":
+                from . import export
+                scope, f = arg("scope", "summary"), arg("format")
+                days = arg("days", "30")
+                try:
+                    content, name = export.export(scope, f or export.FORMATS.get(scope, ("md",))[0], ref=arg("ref"),
+                                                  project=arg("project") or None, days=float(days) if days else None,
+                                                  agent=arg("agent") or None)
+                except export.ExportError as exc:
+                    self._json({"error": str(exc)}, 404 if "not found" in str(exc) else 400)
+                    return
+                body = content.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", export.MIME[f or export.FORMATS[scope][0]])
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                if arg("download") == "1":
+                    self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if url.path == "/api/sessions":
                 from . import sessions
                 days = arg("days", "30")
@@ -121,12 +142,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(rep)
                     return
                 if url.path == "/api/projects":
-                    self._json({"projects": _projects(conn, full=arg("full") == "1")})
+                    from . import projects
+                    self._json({"projects": projects.listing(conn, with_usage=arg("full") == "1")})
                     return
                 m = re.match(r"^/api/projects/([^/]+)$", url.path)
                 if m:
                     from urllib.parse import unquote
-                    self._json(_project_detail(conn, unquote(m.group(1))))
+                    from . import projects
+                    self._json(projects.detail(conn, unquote(m.group(1))))
                     return
                 if url.path == "/api/todos":
                     self._json({"todos": _todos(conn, arg("project") or None, arg("status", "board")),
@@ -234,56 +257,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             raise ValueError("action must be end, rename or delete")
         self._json(dict(tasks.get(conn, task_id)))
-
-
-def _projects(conn, full: bool = False) -> list:
-    """Projects Tally knows; with full=1 also every project seen in the sessions
-    index in the last 30 days, with that usage (whole sessions, any mode)."""
-    from . import projects
-    usage = {}
-    if full:
-        from . import sessions
-        sessions.refresh_async(30)                 # keep the index current; returns at once
-        usage = sessions.project_usage(30)
-    names = set(projects.all_names(conn)) | set(usage)
-    out = []
-    for p in names:
-        n_open = conn.execute("SELECT COUNT(*) FROM todos WHERE project = ? AND parent_id IS NULL AND status IN "
-                              "('todo','doing','blocked')", (p,)).fetchone()[0]
-        n_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE project = ?", (p,)).fetchone()[0]
-        d = {"project": p, "open_todos": n_open, "tasks": n_tasks, "mode": projects.mode_of(conn, p),
-             "registered": projects.get(conn, p) is not None}
-        if full:
-            u = usage.get(p) or {"sessions": 0, "total": 0, "output": 0, "calls": 0, "cost": 0.0, "last_activity": None}
-            d.update({"last_30d": {k: u[k] for k in ("total", "output", "calls", "cost")}, "sessions": u["sessions"],
-                      "last_activity": u["last_activity"] or None})
-        out.append(d)
-    if full:
-        out.sort(key=lambda d: (-d["last_30d"]["total"], d["project"].lower()))
-    else:
-        out.sort(key=lambda d: d["project"].lower())
-    return out
-
-
-def _project_detail(conn, name: str) -> dict:
-    """What Tally counted for the project (tasks, todos, tracked totals) plus the
-    last 30 days of every session from the sessions index."""
-    from . import projects, sessions
-    st = projects.stats(conn, name, series_days=30)
-    ix = sessions.connect()
-    try:
-        recent = projects.stats(conn, name, days=30, series_days=30, usage_conn=ix)
-    finally:
-        ix.close()
-    st["tracked"] = st["totals"]
-    for k in ("last_7d", "daily", "by_model", "last_activity", "first_activity"):
-        st[k] = recent[k]
-    # the same numbers as the projects list: sessions active in the last 30 days
-    u = sessions.project_usage(30).get(name) or {"sessions": 0, "total": 0, "output": 0, "calls": 0, "cost": 0.0}
-    st["last_30d"] = dict(recent["last_30d"], **{k: u[k] for k in ("total", "output", "calls", "cost")})
-    st["sessions"] = u["sessions"]
-    st["registered"] = projects.get(conn, name) is not None
-    return st
 
 
 def _todos(conn, project, status) -> list:

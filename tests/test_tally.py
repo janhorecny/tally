@@ -1411,6 +1411,122 @@ class SessionsOverview(unittest.TestCase):
         self.assertEqual(fmt.money({"cost": 9050.11}), "$9,050")
         self.assertEqual(fmt.money({"cost": 12.345}), "$12.35")
 
+class Exports(unittest.TestCase):
+    """tally export and /api/export: every scope and format, the time-sheet columns, copy."""
+
+    def setUp(self):
+        self.env = Env()
+        self.codex = Path(os.environ["CODEX_HOME"])
+        self.pi = Path(os.environ["PI_CODING_AGENT_DIR"])
+        SessionsOverview.make_sessions(self)
+        e = self.env
+        e.hook("UserPromptSubmit", prompt="/tally:end shipped | v2")          # a pipe in the note
+        from tally import sessions
+        sessions.refresh(30)
+
+    def tearDown(self):
+        from tally import sessions
+        deadline = time.time() + 20
+        while sessions.progress()["running"] and time.time() < deadline:
+            time.sleep(0.05)
+        self.env.cleanup()
+
+    def test_every_scope_and_format(self):
+        import csv as csvmod
+        from tally import export
+        for scope, formats in export.FORMATS.items():
+            ref = {"task": "1", "project": "proj", "session": "T1"}.get(scope)
+            for f in formats:
+                content, name = export.export(scope, f, ref=ref)
+                self.assertTrue(content.strip(), (scope, f))
+                self.assertTrue(name.startswith("tally-%s" % scope) and name.endswith("." + export.EXT[f]), name)
+                if f == "json":
+                    json.loads(content)
+                if f == "csv":
+                    rows = list(csvmod.reader(io.StringIO(content)))
+                    self.assertGreaterEqual(len(rows), 2, (scope, rows))
+                    self.assertEqual(len({len(r) for r in rows}), 1, (scope, "ragged CSV"))
+                if f == "md":
+                    self.assertTrue(content.lstrip().startswith("#"), (scope, content[:40]))
+
+    def test_time_sheet_contents(self):
+        import csv as csvmod
+        from tally import export
+        rows = list(csvmod.DictReader(io.StringIO(export.export("tasks", "csv")[0])))
+        self.assertEqual(list(rows[0])[:17], export.TASK_COLUMNS[:17])           # the columns before 0.7 stay first
+        self.assertEqual(rows[0]["project"], "proj")
+        self.assertRegex(rows[0]["active_hm"], r"^\d+:\d\d$")
+        self.assertEqual(rows[0]["note"], "shipped | v2")
+        line = export.export("task", "text", ref="1")[0]
+        self.assertRegex(line, r"^parser \(#1\) · proj · \d{4}-\d\d-\d\d \d\d:\d\d.+ · active .+ · wall .+ tokens · \$")
+        md = export.export("tasks", "md")[0]
+        self.assertIn("shipped", export.export("task", "md", ref="1")[0])
+        self.assertIn("| **Total** |", md)
+        self.assertIn("|---|---|---|", md.replace("---:", "---"))           # a well-formed table
+        self.assertNotIn("shipped | v2", export.export("task", "md", ref="1")[0])   # pipes escaped in cells
+        summary = json.loads(export.export("summary", "json")[0])
+        self.assertEqual(summary["totals"]["sessions"], 3)
+        self.assertEqual({a["agent"] for a in summary["by_agent"]}, {"claude", "codex", "pi"})
+        self.assertEqual(summary["tasks"]["count"], 1)
+        with self.assertRaises(export.ExportError):
+            export.export("task", "md", ref="99")
+        with self.assertRaises(export.ExportError):
+            export.export("projects", "text")
+        with self.assertRaises(export.ExportError):
+            export.export("project", "md", ref="nope")
+
+    def test_cli_and_api(self):
+        tally = [sys.executable, str(PLUGIN / "bin" / "tally")]
+        run = lambda *a, **kw: subprocess.run(tally + list(a), capture_output=True, text=True, env=kw.get("env", os.environ),  # noqa: E731
+                                              timeout=60, stdin=subprocess.DEVNULL)
+        r = run("export", "task", "1", "-f", "text")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("parser (#1) · proj"), r.stdout)
+        self.assertIn("id,name,status,started", run("export").stdout)            # the old default: tasks as CSV
+        out = self.env.tmp / "p.md"
+        r = run("export", "projects", "-f", "md", "-o", str(out))
+        self.assertIn("Exported to", r.stdout)
+        self.assertTrue(out.read_text().startswith("# Tally projects"))
+        r = run("export", "task", "42")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("task 42 not found", r.stderr)
+        # --copy goes through the platform's clipboard tool
+        fakebin = self.env.tmp / "bin"
+        fakebin.mkdir()
+        clip = self.env.tmp / "clipboard.txt"
+        for tool in ("pbcopy", "wl-copy", "xclip", "xsel"):
+            (fakebin / tool).write_text("#!/bin/sh\ncat > %s\n" % clip)
+            (fakebin / tool).chmod(0o755)
+        env = dict(os.environ, PATH="%s:%s" % (fakebin, os.environ.get("PATH", "")))
+        r = run("export", "summary", "--copy", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Copied summary (md)", r.stdout)
+        self.assertTrue(clip.read_text().startswith("# Tally summary"))
+        # the dashboard serves the same content, as a download when asked
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from tally import server
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d/api/export?" % httpd.server_address[1]
+        try:
+            with urllib.request.urlopen(base + "scope=task&ref=1&format=text", timeout=10) as resp:
+                self.assertTrue(resp.read().decode().startswith("parser (#1)"))
+                self.assertIsNone(resp.headers.get("Content-Disposition"))
+            with urllib.request.urlopen(base + "scope=projects&format=csv&download=1", timeout=10) as resp:
+                self.assertIn('attachment; filename="tally-projects-', resp.headers["Content-Disposition"])
+                self.assertEqual(resp.headers["Content-Type"], "text/csv; charset=utf-8")
+            for query, code in (("scope=task&ref=9&format=md", 404), ("scope=projects&format=text", 400),
+                                ("scope=bogus", 400)):
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    urllib.request.urlopen(base + query, timeout=10)
+                self.assertEqual(cm.exception.code, code, query)
+                cm.exception.close()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
 class CliSmoke(unittest.TestCase):
     def setUp(self):
         self.env = Env()
