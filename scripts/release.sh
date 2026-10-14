@@ -32,6 +32,17 @@ EOF
 [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || die "not on main"
 [ -z "$(git status --porcelain)" ] || die "uncommitted changes"
 git rev-parse -q --verify "refs/tags/v$V" >/dev/null && die "tag v$V exists already; bump the version first"
+# installed copies announce only a higher version (updates.newer): a lower one would never reach them
+LATEST="$(git tag -l 'v*' | python3 -c '
+import sys
+sys.path.insert(0, "plugin")
+from tally.updates import parse
+tags = [t.strip() for t in sys.stdin if t.strip()]
+print(max(tags, key=parse) if tags else "")')"
+if [ -n "$LATEST" ]; then
+  python3 -c 'import sys; sys.path.insert(0, "plugin"); from tally.updates import newer; sys.exit(0 if newer(sys.argv[1], sys.argv[2]) else 1)' \
+    "$V" "${LATEST#v}" || die "version $V is not higher than the latest tag $LATEST; bump the version first"
+fi
 scripts/check.sh || die "checks failed"
 echo "Tally $V: ready"
 [ "$DRY" = 1 ] && exit 0

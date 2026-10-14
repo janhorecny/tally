@@ -139,11 +139,16 @@ def statusline_state():
 def _write_settings(data: dict) -> None:
     path = claude_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        shutil.copy2(path, path.with_name("settings.json.bak-tally"))
-    tmp = path.with_name("settings.json.tmp-tally")
+    # a symlink (dotfiles) stays one: the file it points to is written, with its mode (often 600)
+    real = Path(os.path.realpath(str(path)))
+    real.parent.mkdir(parents=True, exist_ok=True)
+    if real.exists():
+        shutil.copy2(str(real), str(path.with_name("settings.json.bak-tally")))
+    tmp = real.with_name(real.name + ".tmp-tally")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
-    os.replace(str(tmp), str(path))
+    if real.exists():
+        shutil.copymode(str(real), str(tmp))
+    os.replace(str(tmp), str(real))
 
 
 def add_statusline() -> bool:

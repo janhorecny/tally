@@ -1,4 +1,33 @@
 #!/bin/sh
-# The quick checks of scripts/check.sh before every push (GitHub Actions is off).
+# The quick checks of scripts/check.sh before every push (GitHub Actions is off), run on
+# the commits being pushed: a fix that is only in the working tree, or a file that was
+# never committed, must not hide a broken push. A clean checkout of the pushed commit is
+# checked where it is, anything else in a temporary worktree of that commit.
 # Skip once: git push --no-verify. Full matrix: scripts/check.sh --all
-exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
+top="$(git rev-parse --show-toplevel)" || exit 1
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX      # the tests run git in repositories of their own
+refs="$(cat)"                                               # "<local ref> <sha> <remote ref> <sha>" per line
+head="$(git -C "$top" rev-parse HEAD)"
+clean=""
+[ -z "$(git -C "$top" status --porcelain)" ] && clean=1
+wt=""
+cleanup() { if [ -n "$wt" ]; then git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; wt=""; fi; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+checked=" "
+for sha in $(printf '%s\n' "$refs" | awk '{print $2}'); do
+  case "$sha" in *[!0]*) ;; *) continue ;; esac             # a deleted ref: nothing to check
+  commit="$(git -C "$top" rev-parse -q --verify "$sha^{commit}")" || continue
+  case "$checked" in *" $commit "*) continue ;; esac
+  checked="$checked$commit "
+  if [ "$commit" = "$head" ] && [ -n "$clean" ]; then
+    "$top/scripts/check.sh" </dev/null || exit 1
+  else
+    wt="$(mktemp -d "${TMPDIR:-/tmp}/tally-pre-push.XXXXXX")" || exit 1
+    git -C "$top" worktree add --quiet --detach "$wt" "$commit" || exit 1
+    echo "Checking $(git -C "$top" log -1 --format='%h %s' "$commit") (the pushed commit, not the working tree)"
+    "$wt/scripts/check.sh" </dev/null || exit 1
+    cleanup
+  fi
+done
+exit 0
