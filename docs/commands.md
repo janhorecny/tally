@@ -75,7 +75,7 @@ Start a task in this session.
 - From now on, the main conversation, every subagent and every workflow agent of this session count towards the task.
 - Your next prompt is stored as the task's initial prompt.
 - If this session already has an active task, that task is ended first and its final report is shown.
-- The task follows `/clear` automatically. To continue it in another terminal, use [`resume`](#tallyresume).
+- A task counts until you end it. It follows `/clear`, and a new session in the same project takes it over once the session it ran in has closed (Claude Code quit, the computer restarted). To count it in a second terminal that is open at the same time, use [`resume`](#tallyresume).
 
 ```
 /tally:start Fix login redirect loop
@@ -161,7 +161,7 @@ End a task and show its final report.
 
 | Argument | Meaning |
 |---|---|
-| `id` | Task to end. Default: the active task of this session. A first word that is a number is taken as the id. |
+| `id` | Task to end. Default: the active task of this session. `#12` or a number alone is always an id; a number followed by more text is an id only if this session has no active task or that task counted here, otherwise it starts the note. |
 | `note` | Free text stored with the task, for example a PR number. |
 
 - The report is frozen when the task ends. Usage written later, for example by background agents that are still running, is not counted.
@@ -394,7 +394,7 @@ Set a todo's status.
 | `status` | Required. `todo`, `doing`, `blocked`, `done` or `dropped`. |
 | `note` | Appended to the todo's notes. |
 
-Only the status changes: no task is started or ended. To measure work, use [`take`](#tallytake); to finish it with its task, use [`done`](#tallydone).
+No task is started. `done` and `dropped` end the todo's running task as [`done`](#tallydone) does (the note goes to the task); the other statuses change only the todo. To measure work, use [`take`](#tallytake).
 
 ```
 /tally:mark 4 blocked waiting for the API key

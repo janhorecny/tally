@@ -73,7 +73,7 @@ Paths starting with `tally/` are in `plugin/tally/`.
 | `plugin/hooks/hooks.json` | Hook registrations. Every hook runs `python3 bin/tally hook <Event>`. |
 | `plugin/commands/*.md` | Slash command definitions. The hook answers them. Their bodies are only a fallback that runs the CLI when hooks are disabled. |
 | `plugin/bin/tally` | Launcher. `hook` goes straight to `tally.hooks`, without argparse. Everything else goes to `tally.cli`. |
-| `tally/hooks.py` | Hook entry point. Never raises: errors go to `errors.log`. |
+| `tally/hooks.py` | Hook entry point. Never raises: errors go to `errors.log`, and Claude Code shows a warning (rate-limited in `hook_errors.json`). |
 | `tally/commands.py` | `/tally:*` parsing and handlers, shared by the hook and the CLI. |
 | `tally/cli.py` | The `tally` command line. |
 | `tally/tasks.py` | Task lifecycle: start, end, attach/resume, reopen, the `/clear` carry-over. |
@@ -98,8 +98,8 @@ Claude Code's events are below. Codex gets the same six events through `~/.codex
 | `UserPromptSubmit` | `/tally:*`: runs the command and returns `{"decision":"block","reason":…}`, so the reason is shown to you and the model is never called. A normal prompt while a task is active is stored, and a turn timer starts. | ~35 ms |
 | `Stop` | Reads new transcript bytes of the session (only while a task is active) and closes the turn timer. | ~35 ms plus the new bytes |
 | `SubagentStop`, `PreCompact` | Read new transcript bytes. | same |
-| `SessionStart` | Records the session (transcript path, cwd, Claude Code PID). On `source=clear`, attaches the new session to the active task. Shows, as a `systemMessage` (0 tokens): the welcome once after installing, the new-project question or notice, and open todos. | ~33 ms |
-| `SessionEnd` | Reads the rest, closes the turn, and notes a `/clear` for the carry-over. | same |
+| `SessionStart` | Records the session (transcript path, cwd, Claude Code PID). On `source=clear`, attaches the new session to the active task; on a new or resumed session, takes over the project's one active task whose sessions have all closed. Shows, as a `systemMessage` (0 tokens): the welcome once after installing, the new-project question or notice, tasks still running in other sessions, and open todos. | ~33 ms |
+| `SessionEnd` | Reads the rest, closes the turn, notes that the session closed (`ended:<session>`) and a `/clear` for the carry-over. | same |
 
 Times are medians on an M-series Mac. About 18 ms of each is Python interpreter startup. Hooks that have nothing to do (no active task) touch the database once and exit. Only `/tally:*` prompts import the command and report modules.
 
@@ -124,7 +124,8 @@ Subagent metadata comes from `agent-<id>.meta.json`: `agentType`, `description`,
 A task counts usage whose timestamp lies inside one of its `task_sessions` intervals:
 
 - **Start:** `/tally:start` opens an interval for the current session.
-- **`/clear`:** opens an interval for the new session ID. Claude Code keeps the same process, recognized by `CLAUDE_PID`. As a fallback, Tally uses the session that `SessionEnd(reason=clear)` reported for the same cwd within 30 s.
+- **`/clear`:** opens an interval for the new session ID. Claude Code keeps the same process, recognized by `CLAUDE_PID` (seen within the last hour). As a fallback, Tally uses the session that `SessionEnd(reason=clear)` reported for the same cwd within 30 s, if it ran in the same process.
+- **A new session after quitting or a restart:** if exactly one active task of the project counts only in sessions that have closed (a `SessionEnd` after their last prompt, or their Claude Code process no longer runs), the new session gets an interval of it. A task still counting in an open session stays there.
 - **`/tally:resume <id>`:** opens an interval in another session, or reopens an ended task. The time between ending and reopening is not counted.
 - **End:** `/tally:end` closes all intervals.
 

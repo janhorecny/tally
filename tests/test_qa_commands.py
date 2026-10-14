@@ -459,7 +459,8 @@ class OtherSessions(Base):
         e = self.env
         e.hook("UserPromptSubmit", sid=SID2, prompt="/tally:start video vrana")
         e.hook("UserPromptSubmit", sid=SID3, prompt="/tally:start elsewhere", cwd="/Users/me/other")
-        msg = e.hook("SessionStart", source="startup")["systemMessage"]
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=True):   # its session is still open
+            msg = e.hook("SessionStart", source="startup")["systemMessage"]
         self.assertIn("▶ Task #1 video vrana is still active in another session → /tally:resume 1 counts it here · "
                       "/tally:end 1 ends it", msg)
         self.assertNotIn("elsewhere", msg)                                                 # another project
@@ -526,3 +527,70 @@ class FailingHook(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskContinues(Base):
+    """A task counts until it is ended: a new session in its project takes it over once every session it
+    was counting in has closed (Claude Code quit, the computer restarted)."""
+
+    def start_in_other_session(self, name="video vrana"):
+        self.env.hook("UserPromptSubmit", sid=SID2, prompt="/tally:start " + name)
+
+    def test_a_new_session_continues_the_task_of_a_closed_session(self):
+        e = self.env
+        self.start_in_other_session()
+        e.hook("SessionEnd", sid=SID2, reason="prompt_input_exit")
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=True):   # still exiting: SessionEnd wins
+            msg = e.hook("SessionStart", source="startup")["systemMessage"]
+        self.assertIn("▶ Task #1 video vrana continues in this session (its previous session closed)", msg)
+        self.assertNotIn("still active in another session", msg)
+        r = e.hook("UserPromptSubmit", prompt="/tally:end")
+        self.assertIn("Task #1 ended: video vrana", r["reason"])
+
+    def test_after_a_restart_the_old_process_is_gone(self):
+        e = self.env
+        self.start_in_other_session()
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=False):  # no SessionEnd (crash, reboot)
+            msg = e.hook("SessionStart", source="startup")["systemMessage"]
+        self.assertIn("continues in this session", msg)
+        self.assertEqual(self.one("SELECT COUNT(*) FROM task_sessions WHERE task_id = 1 AND session_id = ?", SID), 1)
+
+    def test_a_task_still_open_in_another_window_stays_there(self):
+        e = self.env
+        self.start_in_other_session()
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=True):
+            msg = e.hook("SessionStart", source="startup")["systemMessage"]
+        self.assertNotIn("continues in this session", msg)
+        self.assertIn("still active in another session", msg)
+        self.assertEqual(self.one("SELECT COUNT(*) FROM task_sessions WHERE session_id = ?", SID), 0)
+
+    def test_a_resumed_old_session_is_open_again(self):
+        e = self.env
+        self.start_in_other_session()
+        e.hook("SessionEnd", sid=SID2, reason="prompt_input_exit")
+        time.sleep(0.01)
+        e.hook("SessionStart", sid=SID2, source="resume")                     # claude --resume: open again
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=True):
+            msg = e.hook("SessionStart", source="startup")["systemMessage"]
+        self.assertNotIn("continues in this session", msg)
+
+    def test_two_closed_tasks_are_not_guessed(self):
+        e = self.env
+        self.start_in_other_session("one")
+        e.hook("UserPromptSubmit", sid=SID3, prompt="/tally:start two")
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=False):
+            msg = e.hook("SessionStart", source="startup")["systemMessage"]
+        self.assertNotIn("continues in this session", msg)
+        self.assertIn("Task #1 one is still active", msg)
+        self.assertIn("Task #2 two is still active", msg)
+
+    def test_not_in_another_project_nor_in_a_project_set_to_off(self):
+        e = self.env
+        e.hook("UserPromptSubmit", sid=SID2, prompt="/tally:start elsewhere", cwd="/Users/me/other")
+        with unittest.mock.patch("tally.hooks._process_runs", return_value=False):
+            msg = (e.hook("SessionStart", source="startup") or {}).get("systemMessage", "")
+            self.assertNotIn("continues", msg)
+            self.start_in_other_session()
+            e.hook("UserPromptSubmit", prompt="/tally:project off")
+            msg = (e.hook("SessionStart", source="startup") or {}).get("systemMessage", "")
+        self.assertNotIn("continues", msg)

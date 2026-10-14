@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.12.0 (2026-10-14)
+
+A full review of the code after this week's incidents (a command run twice, counting that stopped silently), by area, with every finding reproduced first and covered by a test (118 new tests).
+
+**A task counts until you end it**
+- A new session in the project takes over its active task when the session it ran in has closed (Claude Code quit, the computer restarted) and says so: `▶ Task #2 … continues in this session`. A task still open in another window stays there; the session start names it with `/tally:resume 2` and `/tally:end 2`, and so does `/tally:end` in a session without a task.
+- An open turn (a long `/goal`, for example) counts in active time while it runs, and when the task is ended during it.
+
+**Nothing runs twice**
+- The command fallbacks (`plugin/commands/*.md`) passed your text through the shell: `$HOME`, `$(…)` and backticks were expanded or run, and the changed text then ran the command a second time. The text now arrives verbatim (a quoted heredoc), and a fallback counts as the twin of the hook's run of the same command.
+- The once-per-command guard waits for a first run that is still working (it gave up after 3 s and ran again, which left two active tasks), keeps one record per command, and also reads the records of older Tally versions.
+- With two hooks registered: auto-start no longer starts and ends a task, a prompt is stored once, `/tally:resume` and `/clear` no longer open a session twice (tokens counted double; existing duplicates are merged in reports), and a duplicate start returns the running task.
+
+**Counting never stops silently**
+- One transcript line that cannot be stored (half an emoji in a workflow summary, in your transcripts too) blocked reading the whole session on every hook. Text is cleaned, a bad line is skipped and logged, each file is read on its own.
+- The database repairs itself on every start: missing tables, columns and indexes are created from the schema, whatever the version says.
+- When a hook fails, Claude Code shows `▍Tally · ⚠ the Stop hook failed …` (at most every 30 minutes per error) instead of only writing errors.log.
+- A task ended while its transcripts could not be read is read again when its report is next shown.
+
+**Correct numbers**
+- Fork agents copy their parent's history: the parent's usage no longer moves to the fork in the agent tree. A response keeps the time it started.
+- Task start no longer parses the whole session history (2.4 s on a large session); Codex keeps its token baseline when history is skipped.
+- Main-session time counts only the task's own intervals; per-prompt rows and prompt counts no longer double; a snapshot frozen with missing data is rebuilt; web searches are priced ($10 per 1,000).
+- Partial costs keep their `+`/`n/a`, plurals read right ("1 prompt"), calls without a prompt read "unattributed", and `1.00M` instead of `1000.0k`.
+
+**Commands**
+- `/tally:new`, `/tally:todo` and others followed by Shift+Enter are intercepted. `/tally:end 1 test still flaky` with this session's task #2 running is a note for #2, not the end of #1. `/tally:mark … done|dropped` ends the todo's running task. `/tally:list ²` no longer crashes. The setup question says "Project X is not set up yet" after the first time. Auto-start skips projects set to `off`. `/clear` in another terminal no longer joins its task.
+
+**Settings and data**
+- `config.json` is written atomically under a lock and never replaced when it does not parse (pricing overrides and `log.prompts off` were lost); an invalid value falls back to its default instead of breaking a hook; `tally config` no longer writes every default into the file.
+- An invalid price override is ignored instead of breaking every report. Todo priorities must be 0–3; deleting a todo or a task cleans up its links; the 5 s same-todo guard no longer swallows a different todo with the same title.
+
+**Dashboard and install**
+- Exports of tasks with č, š, ž … in the name download again (ASCII file names plus `filename*`). Links to a task from other views open that task. A confirm, menu or text selection is no longer wiped by the refresh; a card menu closes when the view changes. The task list says "500 of 602 tasks" and filters on the server. The todo modal keeps a "+4h" deadline and is not closed by a text selection. The keepalive works in a background tab.
+- Only an older dashboard is replaced (a newer one was stopped), an open page reloads after an update, local requests ignore `http_proxy`, a dashboard that does not start is reported, and the page cannot be framed by another site.
+- `install.sh` finishes when one agent fails; Codex hooks call `python3` from PATH; a symlinked `settings.json` stays a symlink; the pre-push hook tests the commits being pushed, and a release must be newer than the last tag.
+
 ## 0.11.8 (2026-10-14)
 
 - **Counting stopped in sessions running Tally from a working tree:** a database at the current schema version could lack a column that the code reads (an unreleased 0.11.7 build had named it differently). Every transcript read then failed, so a running task stopped counting until the column existed. Tally now adds any missing column on start, whatever the recorded version. No data was lost: the next read takes the transcript from where it stopped.

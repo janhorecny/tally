@@ -72,7 +72,7 @@ Models with no known price show the cost with a `+` suffix (for example `$1.20+`
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TALLY_HOME` | `~/.claude/tally` | Data directory: `tally.db`, `sessions.db`, `config.json`, `errors.log` and `dashboard.log`. |
+| `TALLY_HOME` | `~/.claude/tally` | Data directory: `tally.db`, `sessions.db`, `config.json` (written atomically, under `config.lock`), `errors.log`, `hook_errors.json` (when a hook last warned about an error) and `dashboard.log`. |
 | `TALLY_PROJECTS_DIR` | `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects` | Where Claude Code transcripts are read from. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Respected the same way Claude Code respects it. |
 | `CODEX_HOME` | `~/.codex` | Where Codex keeps `hooks.json` and its rollouts (`sessions/`). Used by the installer, the Codex reader and the sessions overview. |

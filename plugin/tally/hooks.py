@@ -177,7 +177,10 @@ def handle(event: str, p: dict):
                                              previous_session=p.get("previous_session_id")
                                              or _recently_cleared(conn, cwd, now, pid))
             if p.get("source") in ("startup", "resume", None):
-                return _session_message(conn, cwd, new_project, p.get("agent") or "claude", sid=sid, is_new=is_new)
+                from . import projects
+                continued = _continue_task(conn, sid, projects.detect(cwd), tpath)
+                return _session_message(conn, cwd, new_project, p.get("agent") or "claude", sid=sid, is_new=is_new,
+                                        continued=continued)
             return None
 
         if event == "UserPromptSubmit":
@@ -190,6 +193,8 @@ def handle(event: str, p: dict):
         if event in ("Stop", "SubagentStop", "SessionEnd", "PreCompact"):
             if event == "SessionEnd" and p.get("reason") == "clear" and cwd:
                 db.kv_set(conn, "cleared:" + cwd, json.dumps({"session_id": sid, "ts": now}))
+            if event == "SessionEnd":               # its task may go on in the next session (_continue_task)
+                db.kv_set(conn, "ended:" + sid, repr(now))
             from . import projects
             if tasks.active_for_session(conn, sid) is not None or projects.session_tracked(conn, sid):
                 from . import ingest
@@ -224,7 +229,7 @@ def _recently_cleared(conn, cwd, now, pid=None, window: float = 30.0):
     return d.get("session_id")
 
 
-def _session_message(conn, cwd, new_project, agent="claude", sid=None, is_new=True):
+def _session_message(conn, cwd, new_project, agent="claude", sid=None, is_new=True, continued=None):
     """Shown to the user only (systemMessage, 0 tokens): a welcome after
     installing, the setup question for a project Tally has not been told how
     to track (or a notice of its default mode), the project's tasks still
@@ -242,6 +247,12 @@ def _session_message(conn, cwd, new_project, agent="claude", sid=None, is_new=Tr
             parts.append(projects.setup_prompt(new_project["name"], is_new=is_new))
         else:
             parts.append(projects.default_notice(new_project["name"], new_project["mode"]))
+    if continued is not None:
+        from . import fmt
+        parts.append("\n".join([
+            fmt.head("Task #%d %s continues in this session (its previous session closed)"
+                     % (continued["id"], fmt._cut(continued["name"], 60)), "▶"),
+            fmt.hints("/tally:end ends it", "/tally:status live totals")]))
     text = _elsewhere(conn, sid, name)
     if text:
         parts.append(text)
@@ -259,6 +270,65 @@ def _session_message(conn, cwd, new_project, agent="claude", sid=None, is_new=Tr
     if text:
         parts.append(text)
     return {"systemMessage": "\n\n".join(parts)} if parts else None
+
+
+def _continue_task(conn, sid, project, tpath):
+    """A task counts until it is ended, also when Claude Code is quit or the
+    computer restarts: a new session in its project takes it over when every
+    session it was counting in has closed. Only one such task; one still
+    running in another open session stays there (_elsewhere names it)."""
+    from . import projects, tasks
+    if not project or projects.mode_of(conn, project) == "off" or tasks.active_for_session(conn, sid) is not None:
+        return None
+    rows = conn.execute(
+        "SELECT t.id FROM tasks t WHERE t.status = 'active' AND t.project = ? AND NOT EXISTS "
+        "(SELECT 1 FROM task_sessions s WHERE s.task_id = t.id AND s.session_id = ?)", (project, sid)).fetchall()
+    closed = []
+    for r in rows:
+        open_sids = [x[0] for x in conn.execute(
+            "SELECT DISTINCT session_id FROM task_sessions WHERE task_id = ? AND detached_at IS NULL", (r["id"],))]
+        if not any(_session_alive(conn, s) for s in open_sids):
+            closed.append(r["id"])
+    if len(closed) != 1:
+        return None
+    task, _ = tasks.attach(conn, closed[0], sid, tpath, reason="continued")
+    return task
+
+
+def _session_alive(conn, sid) -> bool:
+    """Whether a session may still be in use: not ended (SessionEnd) since its
+    last prompt, and its Claude Code process still runs. When unsure: alive."""
+    from . import db
+    row = conn.execute("SELECT claude_pid, last_seen FROM sessions WHERE session_id = ?", (sid,)).fetchone()
+    try:
+        ended = float(db.kv_get(conn, "ended:" + sid) or 0)
+    except ValueError:
+        ended = 0.0
+    if ended and (row is None or ended >= (row["last_seen"] or 0)):
+        return False
+    pid = row["claude_pid"] if row is not None else None
+    return _process_runs(pid) if pid else not ended
+
+
+def _process_runs(pid: int) -> bool:
+    """A Claude Code process with this id runs (after a restart the id can belong
+    to another program). When unsure: True."""
+    if os.name == "nt":                     # os.kill(pid, 0) would end the process there
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    try:
+        import subprocess
+        out = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True,
+                             timeout=2).stdout.strip()
+    except Exception:
+        return True
+    name = os.path.basename(out).lower()
+    return not name or any(n in name for n in ("claude", "node", "bun"))
 
 
 def _elsewhere(conn, sid, project, limit=3):

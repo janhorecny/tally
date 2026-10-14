@@ -40,7 +40,11 @@ In the report, workflow agents are grouped under their workflow and phase. Agent
 
 Nothing to do. The task continues in the new session automatically.
 
-### A second terminal, or after a restart
+### After quitting Claude Code or a restart
+
+Nothing to do either. A task counts until you end it: when a new session starts in the same project and the session the task ran in has closed, the new session takes it over and says so (`▶ Task #12 … continues in this session`). If several such tasks are waiting, none is picked; the session start lists them with the commands below.
+
+### A second terminal at the same time
 
 ```
 /tally:list                 ← find the task id, e.g. 12
@@ -112,7 +116,7 @@ tally todo import docs/plans/2026-10-12-export.md
 
 ## Projects
 
-The first time an agent opens in a git repository Tally does not know yet, it asks (0 tokens):
+The first time an agent opens in a git repository Tally does not know yet, it asks (0 tokens); until you answer, every new session asks again ("Project website is not set up yet. Track it?"):
 
 ```
 ▍Tally · 👋 First time in project website. Track it?

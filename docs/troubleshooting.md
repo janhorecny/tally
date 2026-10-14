@@ -64,7 +64,7 @@ Only usage written before `/tally:end` is counted. To include the rest, use `/ta
 
 ## I used `/clear` and want to keep counting
 
-Nothing to do. The task follows the new session ID automatically, because it is the same Claude Code process. For a different terminal, or after a restart, use `/tally:resume <id>`.
+Nothing to do. The task follows the new session ID automatically, because it is the same Claude Code process. After quitting Claude Code or a restart, the next session in the project takes the task over by itself; for a second terminal open at the same time, use `/tally:resume <id>`.
 
 ## I don't see the todo reminder or the new-project question
 
@@ -101,7 +101,7 @@ The CLI colours its output only on a terminal, never when piped. `NO_COLOR=1` tu
 
 ## Errors
 
-Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/errors.log` with a traceback. Please include that file when reporting a problem.
+Hook errors never interrupt Claude Code. They are written to `~/.claude/tally/errors.log` with a traceback, and Claude Code shows a warning (`▍Tally · ⚠ the Stop hook failed …`) at most every 30 minutes per error, so counting never stops unnoticed. A transcript line that cannot be stored is skipped and noted in the log; the rest is counted. Please include that file when reporting a problem.
 
 ## The dashboard does not open
 

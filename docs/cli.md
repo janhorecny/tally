@@ -329,7 +329,7 @@ tally todo done <id> [--note TEXT]
 
 ### `tally todo mark`
 
-Set a todo's status; no task is started or ended. In-agent: [`/tally:mark`](commands.md#tallymark).
+Set a todo's status; no task is started, and `done` or `dropped` end its running task. In-agent: [`/tally:mark`](commands.md#tallymark).
 
 ```
 tally todo mark <id> <todo|doing|blocked|done|dropped> [--note TEXT]
@@ -552,7 +552,7 @@ tally dashboard [--open] [--background] [--stop] [--idle-minutes N]
 | `--background` | Start detached (or reuse a running dashboard) and return. Default: run in the foreground until Ctrl+C. |
 | `--stop` | Stop the running dashboard. |
 | `--idle-minutes N` | Stop after N minutes without an open page. A dashboard started in the background (`--background`, `/tally:dashboard`) uses `dashboard_idle_minutes`, 120 by default; in the foreground it runs until you stop it. |
-| `--host`, `--port` | Default: `dashboard_host` and `dashboard_port` from the configuration (127.0.0.1:8765). |
+| `--host`, `--port` | Default: `dashboard_host` and `dashboard_port` from the configuration (127.0.0.1:8765). The port must be 1–65535. |
 
 If a dashboard of the same version is already running, it is reused; one of an older version is stopped and replaced. An open page checks in every minute, so the idle stop only happens when nobody has it open. *Settings → Dashboard* in the page has a *Stop* button as well.
 
