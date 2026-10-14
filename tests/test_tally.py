@@ -745,6 +745,17 @@ class ReviewRegressions(unittest.TestCase):
         from tally import tasks
         self.assertEqual(tasks.active_for_session(conn, "sess-old")["name"], "old task")
 
+    def test_a_column_missing_at_the_current_version_is_added(self):
+        """Hooks run from a working tree: an unreleased build can leave the database at SCHEMA_VERSION
+        without a column the released code reads (0.11.7: tools_offset). Every read then failed."""
+        from tally import db
+        conn = db.connect()
+        conn.execute("ALTER TABLE files RENAME COLUMN tools_offset TO tools")
+        conn.close()
+        conn = db.connect()
+        self.assertIn("tools_offset", db._columns(conn, "files"))
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+
 
 class TodosAndStats(unittest.TestCase):
     def setUp(self):

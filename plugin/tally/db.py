@@ -248,14 +248,26 @@ def _columns(conn: sqlite3.Connection, table: str) -> set:
     return {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
 
 
+def _missing_columns(conn: sqlite3.Connection) -> bool:
+    """A database already at SCHEMA_VERSION can still lack a column: one written
+    by an unreleased build of the same version (hooks run from a working tree)."""
+    seen: dict = {}
+    for table, column, _ in _ADDED_COLUMNS:
+        if table not in seen:
+            seen[table] = _columns(conn, table)
+        if column not in seen[table]:
+            return True
+    return False
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version >= SCHEMA_VERSION:
+    if version >= SCHEMA_VERSION and not _missing_columns(conn):
         return
     conn.execute("BEGIN IMMEDIATE")
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]   # another process may have won
-        if version < SCHEMA_VERSION:
+        if version < SCHEMA_VERSION or _missing_columns(conn):
             if version and version < 3:
                 _migrate_to_3(conn)
             stmts = [x.strip() for x in SCHEMA.split(";") if x.strip()]
@@ -268,7 +280,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     conn.execute(stmt)
             if version and version < 4:
                 _fill_projects(conn)
-            conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+            conn.execute("PRAGMA user_version = %d" % max(version, SCHEMA_VERSION))
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

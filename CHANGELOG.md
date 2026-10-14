@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.8 (2026-10-14)
+
+- **Counting stopped in sessions running Tally from a working tree:** a database at the current schema version could lack a column that the code reads (an unreleased 0.11.7 build had named it differently). Every transcript read then failed, so a running task stopped counting until the column existed. Tally now adds any missing column on start, whatever the recorded version. No data was lost: the next read takes the transcript from where it stopped.
+
 ## 0.11.7 (2026-10-14)
 
 - **Which tools the agent used, by default:** `log.depth` now defaults to `calls`, so every task report shows its tool calls (Bash, Read, Edit, Skill, MCP tools …), how often and how many failed, per task and per prompt, in `/tally:stats` and the dashboard. Only tool names are stored, never their input. A setting you chose yourself stays.
