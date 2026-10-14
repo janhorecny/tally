@@ -61,6 +61,58 @@ class Result:
         self.context = context      # additionalContext for the model (non-blocking commands)
 
 
+ONCE_S = 3.0          # the same command in the same session this soon: the same prompt, answered once
+
+
+def _once_digest(cmd: str, args: str) -> str:
+    """The hook gets the prompt as typed, the command file's fallback gets the
+    arguments through the shell ("$ARGUMENTS"): compare them without quotes,
+    backslashes and extra spaces."""
+    import hashlib
+    text = " ".join(re.sub(r"[\"'`\\]", "", args or "").split())
+    return hashlib.sha1(("%s %s" % (cmd, text)).encode("utf-8", "replace")).hexdigest()
+
+
+def run_once(conn, session_id: str, cmd: str, args: str, run) -> Result:
+    """Run a /tally:* command once per prompt. Claude Code can run one prompt
+    twice: the hook and also the command file's fallback (tally slash), or two
+    hooks after a plugin was reloaded with a new version. Whichever comes
+    second waits for the first one and gives the same answer."""
+    import json
+    import time
+    from . import db
+    key = "once:" + session_id
+    digest = _once_digest(cmd, args)
+    now = time.time()
+    with db.transaction(conn):
+        try:
+            prev = json.loads(db.kv_get(conn, key) or "{}")
+        except ValueError:
+            prev = {}
+        twin = prev.get("hash") == digest and now - float(prev.get("ts", 0)) < ONCE_S
+        if not twin:
+            db.kv_set(conn, key, json.dumps({"hash": digest, "ts": now, "done": False}))
+    if twin:
+        deadline = now + 10
+        while not prev.get("done") and time.time() < deadline:
+            time.sleep(0.05)
+            try:
+                prev = json.loads(db.kv_get(conn, key) or "{}")
+            except ValueError:
+                prev = {}
+        r = prev.get("result")
+        if isinstance(r, dict) and prev.get("hash") == digest:
+            return Result(r.get("text"), r.get("block", True), r.get("context"))
+    res = None
+    try:
+        res = run()
+    finally:
+        saved = {"text": res.text, "block": res.block, "context": res.context} if res is not None else None
+        with db.transaction(conn):
+            db.kv_set(conn, key, json.dumps({"hash": digest, "ts": now, "done": True, "result": saved}))
+    return res
+
+
 def parse(prompt: str):
     m = PREFIX_RE.match(prompt or "")
     if not m:

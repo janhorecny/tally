@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.6 (2026-10-14)
+
+- **A command could still run twice in a fresh session:** besides the hook, Claude Code sometimes also runs the fallback in the command file (`tally slash`, meant for when the hook did not run), even though the hook then blocks the prompt. `/tally:start x` then started task #1 and at once ended it for #2, and `/tally:todo` added the todo twice. The hook and the fallback now share one guard: whichever comes second within 3 seconds gives the first one's answer, for every command. Arguments are compared without the quotes the shell removes. pi's commands go through the same guard.
+
 ## 0.11.5 (2026-10-13)
 
 - **Plain output in the Claude app:** the app shows command output in a proportional font and collapses runs of spaces, so aligned columns can't work there (0.11.4 only padded them with em spaces). In the app every table row is now one line (`#2 Fix login · active · 1.2M tokens · $0.40`), the help reads `/tally:start [name] – start a task here`, labels get a colon (`time: 3m wall`), and the agent tree keeps its nesting. The terminal output is unchanged.

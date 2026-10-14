@@ -157,7 +157,7 @@ class DoubleHooks(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0], 1)
         self.assertEqual(outs[0], outs[1])
         self.assertIn("Todo #1 added", json.loads(outs[0])["reason"])
-        with unittest.mock.patch("tally.hooks.ONCE_S", 0), unittest.mock.patch("tally.todos.TWIN_S", 0):
+        with unittest.mock.patch("tally.commands.ONCE_S", 0), unittest.mock.patch("tally.todos.TWIN_S", 0):
             self.assertIn("Todo #2 added", e.hook("UserPromptSubmit", prompt=prompt)["reason"])  # later: again
 
     def test_every_command_runs_once_when_the_hook_runs_twice(self):
@@ -220,6 +220,31 @@ class DoubleHooks(unittest.TestCase):
         from tally import settings
         self.assertEqual(settings.get("log.depth"), "calls")
         self.assertEqual(one("SELECT COUNT(*) FROM tasks"), 4)                    # start, take, do, new
+
+    def test_the_command_fallback_and_the_hook_run_it_once(self):
+        """Claude Code can run the command file's fallback (tally slash, arguments through the shell)
+        and the hook for one prompt: whichever comes second answers with the first one's result."""
+        from tally import db
+        e = self.env
+        e.append(e.main(), user(time.time(), "hi", prompt_id="p1"))
+        conn = db.connect()
+
+        def fallback(cmd, args):
+            return subprocess.run([sys.executable, str(PLUGIN / "bin" / "tally"), "slash", "--session", SID,
+                                   "--cwd", "/Users/me/proj", cmd, "--", args],
+                                  capture_output=True, text=True, env=os.environ, timeout=60).stdout
+
+        self.assertIn("Task #1 started: video crow", fallback("start", "video crow"))     # the fallback first
+        reply = e.hook("UserPromptSubmit", prompt="/tally:start video crow")
+        self.assertIn("Task #1 started: video crow", reply["reason"])
+        self.assertNotIn("ended", reply["reason"])
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 1)
+        reply = e.hook("UserPromptSubmit", prompt='/tally:end "shipped"  it')               # the hook first
+        self.assertIn("Task #1 ended", reply["reason"])
+        out = fallback("end", "shipped it")                                                # the shell ate the quotes
+        self.assertIn("Task #1 ended", out)
+        self.assertNotIn("✗", out)
+        self.assertEqual(conn.execute("SELECT end_note FROM tasks WHERE id = 1").fetchone()[0], '"shipped"  it')
 
     def test_an_old_hook_without_the_guard_ran_first(self):
         """A session started before 0.10.1 keeps its old hooks after /reload-plugins: they add the

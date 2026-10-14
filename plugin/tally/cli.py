@@ -63,8 +63,10 @@ def cmd_slash(args):
         with db.transaction(conn):
             tasks.touch_session(conn, sid, args.transcript, cwd, None, project=projects.detect(cwd),
                                 agent=args.agent)
-    res = commands.run(conn, sid, args.command, text, cwd=cwd, transcript_path=args.transcript,
-                       prompt_id=args.prompt_id)
+    from . import hooks
+    fmt.APP = not args.agent and os.environ.get("CLAUDE_CODE_ENTRYPOINT") in hooks.APP_ENTRYPOINTS
+    res = commands.run_once(conn, sid, args.command, text, lambda: commands.run(   # the hook may run it too
+        conn, sid, args.command, text, cwd=cwd, transcript_path=args.transcript, prompt_id=args.prompt_id))
     if args.json:
         print(json.dumps({"text": res.text, "block": res.block, "context": res.context}))
     elif res.text:
