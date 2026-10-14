@@ -2,6 +2,8 @@
 
 import json
 import os
+import stat
+from contextlib import contextmanager
 from pathlib import Path
 
 DEFAULT_CONFIG = {
@@ -101,7 +103,48 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
+    """Write config.json atomically: a temporary file in the same folder
+    replaces it, so a hook reading it meanwhile sees the old settings or the
+    new ones, never an empty or half-written file (which reads as defaults).
+    The file keeps its mode; a symlinked config.json stays a symlink."""
     home().mkdir(parents=True, exist_ok=True)
-    with open(config_path(), "w") as fh:
-        json.dump(cfg, fh, indent=2)
-        fh.write("\n")
+    target = os.path.realpath(str(config_path()))
+    try:
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+    except OSError:
+        mode = None
+    tmp = "%s.%d.%s.tmp" % (target, os.getpid(), os.urandom(4).hex())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)      # a new file: as open() would (umask)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+@contextmanager
+def config_lock():
+    """Serialise read-modify-write of config.json between processes (two
+    writers would otherwise each save their own change over the other's)."""
+    home().mkdir(parents=True, exist_ok=True)
+    try:
+        import fcntl
+    except ImportError:            # not POSIX: the atomic write still protects readers
+        yield
+        return
+    with open(str(home() / "config.lock"), "a") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)

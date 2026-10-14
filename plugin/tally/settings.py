@@ -43,13 +43,31 @@ LABELS = {
 PREVIEW_CHARS = 300
 
 
-def get(key: str, cfg: dict = None) -> Any:
-    node: Any = cfg if cfg is not None else paths.load_config()
+_MISSING = object()
+
+
+def _lookup(node: Any, key: str) -> Any:
     for part in key.split("."):
         if not isinstance(node, dict) or part not in node:
-            return None
+            return _MISSING
         node = node[part]
     return node
+
+
+def get(key: str, cfg: dict = None) -> Any:
+    """A setting's value (None if not set). A setting of SCHEMA with an
+    invalid value (a hand edit: a word where a number belongs, an unknown
+    choice) reads as its default, so a typo never breaks a hook."""
+    value = _lookup(cfg if cfg is not None else paths.load_config(), key)
+    if value is _MISSING:
+        return None
+    if key not in SCHEMA:
+        return value
+    try:
+        return coerce(key, value)
+    except ValueError:
+        default = _lookup(paths.DEFAULT_CONFIG, key)
+        return None if default is _MISSING else default
 
 
 def coerce(key: str, value: Any) -> Any:
@@ -61,6 +79,8 @@ def coerce(key: str, value: Any) -> Any:
             v = int(value)
         except (TypeError, ValueError):
             raise ValueError("%s must be a number" % key) from None
+        if key == "dashboard_port" and not 1 <= v <= 65535:
+            raise ValueError("%s must be between 1 and 65535" % key)
         if v < 0:
             raise ValueError("%s must be positive" % key)
         return v
@@ -80,24 +100,46 @@ def coerce(key: str, value: Any) -> Any:
 
 
 def set_value(key: str, value: Any) -> Any:
+    """Change one setting in config.json, keeping everything else in it.
+    Raises ValueError (and changes nothing) for an invalid value, or when
+    config.json exists but cannot be read as a JSON object: starting from
+    an empty one would throw away the user's other settings."""
     value = coerce(key, value)
-    try:
-        import json
-        with open(paths.config_path()) as fh:
-            raw = json.load(fh)
-        if not isinstance(raw, dict):
-            raw = {}
-    except (OSError, ValueError):
-        raw = {}
-    node = raw
-    parts = key.split(".")
-    for part in parts[:-1]:
-        if not isinstance(node.get(part), dict):
-            node[part] = {}
-        node = node[part]
-    node[parts[-1]] = value
-    paths.save_config(raw)
+    with paths.config_lock():
+        raw = _read_raw()
+        node = raw
+        parts = key.split(".")
+        for part in parts[:-1]:
+            if not isinstance(node.get(part), dict):
+                node[part] = {}
+            node = node[part]
+        node[parts[-1]] = value
+        paths.save_config(raw)
     return value
+
+
+def _read_raw() -> dict:
+    """config.json as written (no defaults merged in); {} if there is none."""
+    import json
+    path = paths.config_path()
+    try:
+        with open(path) as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        raise ValueError("cannot read %s (%s); nothing was changed" % (path, e.strerror or e)) from None
+    if not text.strip():
+        return {}
+    try:
+        raw = json.loads(text)
+    except ValueError as e:
+        raise ValueError("%s is not valid JSON (%s); fix it or move it away, nothing was changed"
+                         % (path, e)) from None
+    if not isinstance(raw, dict):
+        raise ValueError("%s does not hold a JSON object ({...}); fix it or move it away, nothing was changed"
+                         % path)
+    return raw
 
 
 def show(value: Any) -> str:

@@ -108,24 +108,41 @@ def add(conn, title: str, project: Optional[str] = None, priority: int = 0, due_
         notes: Optional[str] = None, parent_id: Optional[int] = None, source: str = "user",
         source_ref: Optional[str] = None, status: str = "todo", position: Optional[int] = None,
         once: bool = False):
-    """Add a todo. once: if the same title was added to the same project and
-    parent a moment ago, return that one instead (commands, the dashboard;
-    not plan imports, whose steps may repeat a title)."""
+    """Add a todo. once: if the same todo (title, project, parent, notes,
+    priority and due date) was added a moment ago, return that one instead
+    (commands, the dashboard; not plan imports, whose steps may repeat a
+    title)."""
     now = time.time()
+    priority = _priority(priority)
     with db.transaction(conn):
         if once:
+            # due dates like +4h are computed from the moment each run parsed them: a little apart
             twin = conn.execute(
-                "SELECT id FROM todos WHERE title = ? AND project IS ? AND parent_id IS ? AND created_at > ? "
-                "ORDER BY id DESC LIMIT 1", (title.strip(), project, parent_id, now - TWIN_S)).fetchone()
+                "SELECT id FROM todos WHERE title = ? AND project IS ? AND parent_id IS ? AND notes IS ? "
+                "AND priority = ? AND ((due_at IS NULL AND ? IS NULL) OR ABS(due_at - ?) < ?) AND created_at > ? "
+                "ORDER BY id DESC LIMIT 1",
+                (title.strip(), project, parent_id, notes, priority, due_at, due_at, TWIN_S, now - TWIN_S)).fetchone()
             if twin is not None:
                 return get(conn, twin[0])
         cur = conn.execute(
             "INSERT INTO todos(project, title, notes, status, priority, due_at, parent_id, position, source, "
             "source_ref, created_at, updated_at, done_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (project, title.strip(), notes, status, int(priority or 0), due_at, parent_id, position, source,
+            (project, title.strip(), notes, status, priority, due_at, parent_id, position, source,
              source_ref, now, now, now if status == "done" else None),
         )
     return get(conn, cur.lastrowid)
+
+
+def _priority(value) -> int:
+    """0 none, 1 low, 2 medium, 3 high; anything else is refused (lists sort and label by it)."""
+    try:
+        p = int(value or 0)
+        ok = 0 <= p <= 3 and not (isinstance(value, float) and value != p)
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        raise ValueError("priority must be 0 (none), 1 (low), 2 (medium) or 3 (high)")
+    return p
 
 
 def update(conn, todo_id: int, **fields):
@@ -133,6 +150,8 @@ def update(conn, todo_id: int, **fields):
     sets = {k: v for k, v in fields.items() if k in allowed}
     if "status" in sets and sets["status"] not in STATUSES:
         raise ValueError("status must be one of: %s" % ", ".join(STATUSES))
+    if "priority" in sets:
+        sets["priority"] = _priority(sets["priority"])
     if not sets:
         return get(conn, todo_id)
     now = time.time()
@@ -177,8 +196,11 @@ def set_status(conn, todo_id: int, status: str, note: Optional[str] = None):
 
 
 def delete(conn, todo_id: int) -> bool:
+    """Delete a todo and its steps (cascade); tasks that worked on any of them stay, unlinked."""
     with db.transaction(conn):
-        conn.execute("UPDATE tasks SET todo_id = NULL WHERE todo_id = ?", (todo_id,))
+        conn.execute(
+            "WITH RECURSIVE tree(id) AS (SELECT ? UNION SELECT t.id FROM todos t JOIN tree ON t.parent_id = tree.id) "
+            "UPDATE tasks SET todo_id = NULL WHERE todo_id IN (SELECT id FROM tree)", (todo_id,))
         cur = conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
     return cur.rowcount > 0
 
