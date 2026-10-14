@@ -298,6 +298,7 @@ class Formatting(Base):
         conn, task = self.task_with_one_prompt()
         rep = report.summary_for(conn, task)
         rep["totals"]["web_search"] = 1
+        rep["time"]["turns"] = 1                       # set, not timed: a hook closes a turn of 0 or 1 ms
         rep["stats"]["automatic_turns"] = 1
         rep["stats"]["tool_calls"], rep["stats"]["tool_errors"] = 1, 1
         rep["stats"]["tools"] = [{"tool": "Bash", "calls": 1, "errors": 1}] + [
