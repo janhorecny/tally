@@ -248,68 +248,112 @@ def _columns(conn: sqlite3.Connection, table: str) -> set:
     return {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
 
 
-def _missing_columns(conn: sqlite3.Connection) -> bool:
-    """A database already at SCHEMA_VERSION can still lack a column: one written
-    by an unreleased build of the same version (hooks run from a working tree)."""
-    seen: dict = {}
-    for table, column, _ in _ADDED_COLUMNS:
-        if table not in seen:
-            seen[table] = _columns(conn, table)
-        if column not in seen[table]:
-            return True
-    return False
+# The database heals itself at every version: the tables, columns and indexes
+# SCHEMA declares are compared with the real ones on every connect, and
+# whatever is missing is added. A database already at SCHEMA_VERSION can still
+# lack something: hooks run from a working tree, and an unreleased build of the
+# same version may have named a column differently. Nothing is ever dropped or
+# renamed; unknown tables and columns are left alone.
+
+_expected = None       # (tables {name: [(column, type, notnull, default)]}, index names), once per process
+
+
+def _expected_schema():
+    """SCHEMA as SQLite itself reads it: built once per process in memory."""
+    global _expected
+    if _expected is None:
+        mem = sqlite3.connect(":memory:", isolation_level=None)
+        try:
+            mem.execute("BEGIN")
+            for stmt in _statements():
+                mem.execute(stmt)
+            mem.execute("COMMIT")
+            tables: dict = {}
+            for t, col, ctype, notnull, dflt in mem.execute(
+                    "SELECT m.name, p.name, p.type, p.\"notnull\", p.dflt_value FROM sqlite_master m "
+                    "JOIN pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' "
+                    "ORDER BY m.name, p.cid"):
+                tables.setdefault(t, []).append((col, ctype, notnull, dflt))
+            indexes = {r[0] for r in mem.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL")}
+        finally:
+            mem.close()
+        _expected = (tables, indexes)
+    return _expected
+
+
+def _statements() -> list:
+    return [x.strip() for x in SCHEMA.split(";") if x.strip()]
+
+
+def _schema_gaps(conn: sqlite3.Connection):
+    """(missing tables, {table: [missing column specs]}, missing indexes); all empty = healthy.
+    One query on the real database: cheap enough for every connect."""
+    tables, indexes = _expected_schema()
+    have_cols: dict = {}
+    have_idx = set()
+    for kind, name, col in conn.execute(
+            "SELECT m.type, m.name, p.name FROM sqlite_master m LEFT JOIN pragma_table_info(m.name) p "
+            "ON m.type = 'table' WHERE m.type IN ('table', 'index')"):
+        if kind == "index":
+            have_idx.add(name.lower())
+        elif col is not None:
+            have_cols.setdefault(name.lower(), set()).add(col.lower())
+    missing_tables = [t for t in tables if t.lower() not in have_cols]
+    missing_cols = {}
+    for t, cols in tables.items():
+        have = have_cols.get(t.lower())
+        if have is not None:
+            gap = [c for c in cols if c[0].lower() not in have]
+            if gap:
+                missing_cols[t] = gap
+    missing_idx = [i for i in indexes if i.lower() not in have_idx]
+    return missing_tables, missing_cols, missing_idx
+
+
+def _heal(conn: sqlite3.Connection) -> None:
+    """Add what SCHEMA declares and the database lacks (inside a write transaction)."""
+    stmts = _statements()
+    for stmt in stmts:                            # tables first (IF NOT EXISTS) ...
+        if "CREATE TABLE" in stmt:
+            conn.execute(stmt)
+    for table, cols in _schema_gaps(conn)[1].items():   # ... then columns, with their declared type and default ...
+        for col, ctype, notnull, dflt in cols:
+            spec = ['"%s"' % col]
+            if ctype:
+                spec.append(ctype)
+            if dflt is not None:
+                spec.append("DEFAULT %s" % dflt)
+                if notnull:
+                    spec.append("NOT NULL")       # ALTER TABLE adds NOT NULL only with a default
+            conn.execute('ALTER TABLE "%s" ADD COLUMN %s' % (table, " ".join(spec)))
+    for stmt in stmts:                            # ... then indexes, which may use them
+        if "CREATE TABLE" not in stmt:
+            try:
+                conn.execute(stmt)
+            except sqlite3.IntegrityError:        # a unique index over rows that already repeat a value:
+                conn.execute(stmt.replace("CREATE UNIQUE INDEX", "CREATE INDEX", 1))   # keep the lookups fast
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version >= SCHEMA_VERSION and not _missing_columns(conn):
+    if version >= SCHEMA_VERSION and not any(_schema_gaps(conn)):
         return
     conn.execute("BEGIN IMMEDIATE")
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]   # another process may have won
-        if version < SCHEMA_VERSION or _missing_columns(conn):
+        if version < SCHEMA_VERSION or any(_schema_gaps(conn)):
             if version and version < 3:
                 _migrate_to_3(conn)
-            stmts = [x.strip() for x in SCHEMA.split(";") if x.strip()]
-            for stmt in stmts:                       # tables first ...
-                if "CREATE TABLE" in stmt:
-                    conn.execute(stmt)
-            _ensure_columns(conn)                    # ... columns added in later versions ...
-            for stmt in stmts:                       # ... then indexes, which may use them
-                if "CREATE TABLE" not in stmt:
-                    conn.execute(stmt)
+            _heal(conn)
             if version and version < 4:
                 _fill_projects(conn)
-            conn.execute("PRAGMA user_version = %d" % max(version, SCHEMA_VERSION))
+            if version < SCHEMA_VERSION:                              # never lowered
+                conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
         raise
-
-
-# Columns added after a table first shipped: (table, column, type).
-_ADDED_COLUMNS = [
-    ("task_snapshots", "summary_json", "TEXT"),
-    ("session_costs", "updated_at", "REAL"),
-    ("tasks", "project", "TEXT"),
-    ("tasks", "todo_id", "INTEGER"),
-    ("files", "last_prompt_id", "TEXT"),
-    ("usage", "prompt_id", "TEXT"),
-    ("turns", "prompt_id", "TEXT"),
-    ("prompts", "prompt_id", "TEXT"),
-    ("sessions", "project", "TEXT"),
-    ("sessions", "agent", "TEXT"),
-    ("usage", "cost", "REAL"),
-    ("files", "state", "TEXT"),
-    ("todos", "rank", "REAL"),
-    ("files", "tools_offset", "INTEGER"),
-]
-
-
-def _ensure_columns(conn: sqlite3.Connection) -> None:
-    for table, column, ctype in _ADDED_COLUMNS:
-        if column not in _columns(conn, table):
-            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, ctype))
 
 
 def _fill_projects(conn: sqlite3.Connection) -> None:
