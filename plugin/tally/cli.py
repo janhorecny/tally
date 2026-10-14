@@ -50,12 +50,23 @@ def cmd_hook(args):
     return hooks.main(args.event, agent=args.agent, payload_text=args.payload)
 
 
+def _stdin_text() -> str:
+    """The arguments of a command fallback, from a quoted heredoc: as typed, never
+    seen by the shell. Without its last newline (the heredoc adds one)."""
+    stream = getattr(sys.stdin, "buffer", None)
+    data = stream.read().decode("utf-8", "replace") if stream is not None else sys.stdin.read()
+    return data[:-1] if data.endswith("\n") else data
+
+
 def cmd_slash(args):
-    """Run a /tally:<cmd> exactly as the hook would (used by command fallbacks)."""
+    """Run a /tally:<cmd> exactly as the hook would (used by command fallbacks
+    with --stdin, and by pi with the arguments after the command)."""
+    now = time.time()
+    words = list(args.args)
+    if words[:1] == ["--"]:             # the separator, if argparse left it; never the user's own "--x"
+        words = words[1:]
+    text = (_stdin_text() if args.stdin else " ".join(words)).strip()
     conn = db.connect()
-    text = " ".join(args.args).strip()
-    if text.startswith("--"):
-        text = text[2:].strip()
     sid = _session(args)
     cwd = args.cwd or os.getcwd()
     if args.agent or args.transcript:
@@ -66,7 +77,8 @@ def cmd_slash(args):
     from . import hooks
     fmt.APP = not args.agent and os.environ.get("CLAUDE_CODE_ENTRYPOINT") in hooks.APP_ENTRYPOINTS
     res = commands.run_once(conn, sid, args.command, text, lambda: commands.run(   # the hook may run it too
-        conn, sid, args.command, text, cwd=cwd, transcript_path=args.transcript, prompt_id=args.prompt_id))
+        conn, sid, args.command, text, cwd=cwd, transcript_path=args.transcript, prompt_id=args.prompt_id),
+        via="agent" if args.agent else "fallback", now=now)
     if args.json:
         print(json.dumps({"text": res.text, "block": res.block, "context": res.context}))
     elif res.text:
@@ -245,7 +257,9 @@ def cmd_dashboard(args):
     from . import server
     cfg = paths.load_config()
     host = args.host or cfg.get("dashboard_host", "127.0.0.1")
-    port = args.port or int(cfg.get("dashboard_port", 8765))
+    if args.port is not None and not 1 <= args.port <= 65535:
+        _die("--port %d: the port must be between 1 and 65535" % args.port)
+    port = args.port if args.port is not None else int(cfg.get("dashboard_port", 8765))
     if args.stop:
         if server.stop(host, port):
             _out(fmt.head("Dashboard stopped (http://%s:%d/)" % (host, port), "■"))
@@ -366,13 +380,10 @@ def cmd_todo(args):
             todo, task, _ = todos.take(conn, args.id, _session(args), cwd=os.getcwd())
             _out(fmt.head("Todo #%d taken: %s · task #%d measures it" % (todo["id"], todo["title"], task["id"]), "▶"))
         elif a == "done":
-            t = todos.set_status(conn, args.id, "done", note=args.note)
-            for task in conn.execute("SELECT * FROM tasks WHERE todo_id = ? AND status = 'active'",
-                                     (args.id,)).fetchall():
-                tasks.end(conn, task["id"], note=args.note or "todo done")
+            t, _ = commands.close_todo(conn, args.id, "done", note=args.note)
             _out(fmt.head("Todo #%d done: %s" % (t["id"], t["title"]), "✓"))
         elif a == "mark":
-            t = todos.set_status(conn, args.id, args.status, note=args.note)
+            t, _ = commands.close_todo(conn, args.id, args.status, note=args.note)
             _out(fmt.head("Todo #%d is now %s: %s" % (t["id"], t["status"], t["title"]),
                           fmt.STATUS_MARKS.get(t["status"], "")))
         elif a == "edit":
@@ -510,8 +521,18 @@ def cmd_config(args):
         value = json.loads(args.value)
     except ValueError:
         value = args.value
-    cfg[args.key] = value
-    paths.save_config(cfg)
+    # the file as it is, plus this key: saving load_config() would write every default into it
+    try:
+        with open(paths.config_path()) as fh:
+            raw = json.load(fh)
+    except FileNotFoundError:
+        raw = {}
+    except (OSError, ValueError) as e:
+        _die("%s is not valid JSON (%s)" % (paths.config_path(), e), "fix it or remove it, then try again")
+    if not isinstance(raw, dict):
+        _die("%s is not valid JSON (not an object)" % paths.config_path(), "fix it or remove it, then try again")
+    raw[args.key] = value
+    paths.save_config(raw)
     print("%s = %s" % (args.key, json.dumps(value)))
 
 
@@ -730,6 +751,7 @@ def build_parser():
     s.add_argument("--cwd")
     s.add_argument("--prompt-id")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--stdin", action="store_true", help="read the arguments from stdin (the command files' heredoc)")
     s.add_argument("command")
     s.add_argument("args", nargs=argparse.REMAINDER)
 

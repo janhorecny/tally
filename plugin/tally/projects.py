@@ -92,10 +92,12 @@ def session_tracked(conn, session_id: str) -> bool:
     return bool(row) and row[0] == "track"
 
 
-def setup_prompt(name: str) -> str:
+def setup_prompt(name: str, is_new: bool = True) -> str:
+    """The question for a project still in mode ask; is_new: seen for the first time."""
     from . import fmt
     return "\n".join([
-        fmt.head("First time in project %s. Track it?" % name, "👋"),
+        fmt.head(("First time in project %s. Track it?" if is_new else "Project %s is not set up yet. Track it?")
+                 % name, "👋"),
         "  /tally:project track   count every session here (overall project stats)",
         "  /tally:project tasks   only tasks you start (/tally:start, /tally:take)",
         "  /tally:project off     ignore this project, don't ask again",
