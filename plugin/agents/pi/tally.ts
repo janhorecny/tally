@@ -178,6 +178,14 @@ export default function (pi: ExtensionAPI) {
       const space = trimmed.search(/\s/);
       const cmd = space < 0 ? trimmed : trimmed.slice(0, space);
       const rest = space < 0 ? "" : trimmed.slice(space + 1).trim();
+      // /tally new, /tally do hand the work to the model, which print/json mode
+      // cannot do from a command (pi exits when it returns, before a queued run
+      // starts): refuse them before they start a task or take a todo.
+      const handsOn = cmd === "new" || cmd === "do";
+      if (handsOn && ctx.mode !== "tui" && ctx.mode !== "rpc") {
+        show(ctx, `In ${ctx.mode} mode use tally:${cmd} ${rest} as the prompt instead (it hands the work to the model directly).`);
+        return;
+      }
       const res = await slash(ctx, cmd, rest);
       if (!res) return;
       if (res.block) {
@@ -188,7 +196,6 @@ export default function (pi: ExtensionAPI) {
         // afterwards (pi may replace it while it starts the run); the status
         // refreshes when the run settles.
         if (ctx.mode !== "tui" && ctx.mode !== "rpc") {
-          // print/json mode exit when the command returns, before a queued run starts
           show(ctx, `In ${ctx.mode} mode use tally:${cmd} ${rest} as the prompt instead (it hands the work to the model directly).`);
           return;
         }

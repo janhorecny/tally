@@ -5,13 +5,16 @@ blocks them, so running a command costs zero tokens. The same functions back
 the CLI.
 """
 
+import json
 import re
+import time
 from typing import Optional
 
 from . import fmt, report, tasks
 
-# "/tally:start x" (Claude Code), "tally:start x" (Codex: its TUI rejects unknown slash commands)
-PREFIX_RE = re.compile(r"^\s*/?tally:([a-z][a-z-]*)(?:[ \t]+(.*))?\s*$", re.S)
+# "/tally:start x" (Claude Code), "tally:start x" (Codex: its TUI rejects unknown slash commands);
+# the text may also start on the next line ("/tally:new" + Shift+Enter)
+PREFIX_RE = re.compile(r"^\s*/?tally:([a-z][a-z-]*)(?:\s+(.*))?\s*$", re.S)
 
 HELP = (
     ("Tasks", (
@@ -61,7 +64,8 @@ class Result:
         self.context = context      # additionalContext for the model (non-blocking commands)
 
 
-ONCE_S = 3.0          # the same command in the same session this soon: the same prompt, answered once
+ONCE_S = 3.0          # a command that finished this soon before: the same prompt, answered once
+ONCE_WAIT_S = 55.0    # a command still running: wait this long for it (the prompt hook's timeout is 60 s)
 
 
 def _once_digest(cmd: str, args: str) -> str:
@@ -73,44 +77,172 @@ def _once_digest(cmd: str, args: str) -> str:
     return hashlib.sha1(("%s %s" % (cmd, text)).encode("utf-8", "replace")).hexdigest()
 
 
-def run_once(conn, session_id: str, cmd: str, args: str, run) -> Result:
+def run_once(conn, session_id: str, cmd: str, args: str, run, via: str = "hook", raw: Optional[str] = None,
+             now: Optional[float] = None) -> Result:
     """Run a /tally:* command once per prompt. Claude Code can run one prompt
     twice: the hook and also the command file's fallback (tally slash), or two
     hooks after a plugin was reloaded with a new version. Whichever comes
-    second waits for the first one and gives the same answer."""
-    import json
-    import time
+    second waits for the first one (as long as it runs) and gives the same answer.
+
+    via: "hook", "fallback" (a Claude Code command file: its arguments went
+    through Claude Code and the shell, so they are not compared) or "agent"
+    (pi). raw: the prompt as typed (what 0.10.1-0.11.5 compared). now: when
+    the hook started (a run that waited for the database still finds its twin).
+
+    One record per session and command (once:<session>:<cmd>), and for the
+    hooks of older versions still registered next to this one, also the record
+    they read (once:<session>).
+    """
+    import hashlib
     from . import db
-    key = "once:" + session_id
+    now = time.time() if now is None else now
+    keys = ("once:%s:%s" % (session_id, cmd), "once:" + session_id, "once_last:" + session_id)
     digest = _once_digest(cmd, args)
-    now = time.time()
+    raw_digest = hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest() if raw is not None else None
+    mine = None
     with db.transaction(conn):
-        try:
-            prev = json.loads(db.kv_get(conn, key) or "{}")
-        except ValueError:
-            prev = {}
-        twin = prev.get("hash") == digest and now - float(prev.get("ts", 0)) < ONCE_S
-        if not twin:
-            db.kv_set(conn, key, json.dumps({"hash": digest, "ts": now, "done": False}))
-    if twin:
-        deadline = now + 10
-        while not prev.get("done") and time.time() < deadline:
-            time.sleep(0.05)
-            try:
-                prev = json.loads(db.kv_get(conn, key) or "{}")
-            except ValueError:
-                prev = {}
-        r = prev.get("result")
-        if isinstance(r, dict) and prev.get("hash") == digest:
-            return Result(r.get("text"), r.get("block", True), r.get("context"))
+        twin = _twin(_claims(conn, keys[0]), _kv_json(conn, keys[2]), digest, via, now)
+        legacy = None if twin is not None else _legacy_twin(_kv_json(conn, keys[1]), digest, raw_digest, now)
+        if twin is None and legacy is None:
+            mine = _claim(conn, keys, cmd, digest, via, now)
+    if mine is None:
+        res = _wait(conn, keys, twin, legacy, now)
+        if res is not None:
+            return res
+        with db.transaction(conn):              # the first run failed or did not finish: run it here
+            mine = _claim(conn, keys, cmd, digest, via, now)
     res = None
     try:
         res = run()
     finally:
-        saved = {"text": res.text, "block": res.block, "context": res.context} if res is not None else None
-        with db.transaction(conn):
-            db.kv_set(conn, key, json.dumps({"hash": digest, "ts": now, "done": True, "result": saved}))
+        _finish(conn, keys, mine, res, cmd)
     return res
+
+
+def _kv_json(conn, key: str) -> dict:
+    from . import db
+    try:
+        d = json.loads(db.kv_get(conn, key) or "{}")
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _num(d: dict, key: str, default: float = 0.0) -> float:
+    try:
+        return float(d.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _claims(conn, key: str) -> list:
+    claims = _kv_json(conn, key).get("claims")
+    return [c for c in claims if isinstance(c, dict)] if isinstance(claims, list) else []
+
+
+def _fresh(rec: dict, now: float) -> bool:
+    """Still running (claimed less than ONCE_WAIT_S ago), or finished less than
+    ONCE_S ago (the records of 0.11.8 and older have no done_ts: their claim time)."""
+    if rec.get("done"):
+        return now - _num(rec, "done_ts", _num(rec, "ts")) < ONCE_S
+    return now - _num(rec, "ts") < ONCE_WAIT_S
+
+
+def _twin(claims: list, latest: dict, digest: str, via: str, now: float) -> Optional[dict]:
+    """The claim of the same command this run is a twin of: the same arguments,
+    or a Claude Code command fallback on either side (the arguments it gets can
+    be expanded or cut off). Still running, or finished a moment ago with no
+    other command claimed in the session since (that would be a new prompt)."""
+    best = None
+    for c in claims:
+        if not _fresh(c, now) or not (c.get("hash") == digest or via == "fallback" or c.get("via") == "fallback"):
+            continue
+        if c.get("done") and _num(latest, "seq") > _num(c, "seq"):
+            continue
+        if best is None or _num(c, "seq") > _num(best, "seq"):
+            best = c
+    return best
+
+
+def _legacy_twin(rec: dict, digest: str, raw_digest: Optional[str], now: float):
+    """(record, raw) when once:<session> was written for this prompt by an older
+    version: 0.11.6-0.11.8 hash the command as _once_digest does, 0.10.1-0.11.5
+    the prompt as typed (raw). The copy this version writes there is not read:
+    its own record says more."""
+    if not rec or "cmd" in rec or not _fresh(rec, now):
+        return None
+    if rec.get("hash") == digest:
+        return rec, False
+    if raw_digest is not None and rec.get("hash") == raw_digest:
+        return rec, True
+    return None
+
+
+def _as_result(r, raw: bool = False) -> Optional[Result]:
+    """A stored answer: {"text", "block", "context"} (0.11.6 on), or what the
+    hook of 0.10.1-0.11.5 printed (raw; None there: the prompt went on to the
+    model). None: no answer to reuse (the run failed)."""
+    if isinstance(r, dict) and ("decision" in r or "hookSpecificOutput" in r):
+        if r.get("decision") == "block":
+            return Result(r.get("reason"))
+        out = r.get("hookSpecificOutput")
+        return Result(None, block=False, context=out.get("additionalContext") if isinstance(out, dict) else None)
+    if isinstance(r, dict):
+        return Result(r.get("text"), r.get("block", True), r.get("context"))
+    return Result(None, block=False) if r is None and raw else None
+
+
+def _claim(conn, keys, cmd: str, digest: str, via: str, now: float) -> dict:
+    import os
+    from . import db
+    key, legacy_key, latest_key = keys
+    seq = int(_num(_kv_json(conn, latest_key), "seq")) + 1
+    t = time.time()
+    mine = {"id": "%d:%.6f" % (os.getpid(), t), "hash": digest, "via": via, "ts": now, "seq": seq, "done": False}
+    db.kv_set(conn, key, json.dumps({"claims": [c for c in _claims(conn, key) if _fresh(c, t)] + [mine]}))
+    db.kv_set(conn, latest_key, json.dumps({"seq": seq, "cmd": cmd}))
+    # what the hooks of 0.11.6-0.11.8 compare (0.10.1-0.11.5 hash the raw prompt: they cannot match both)
+    db.kv_set(conn, legacy_key, json.dumps({"hash": digest, "ts": now, "done": False, "cmd": cmd, "id": mine["id"]}))
+    return mine
+
+
+def _wait(conn, keys, twin: Optional[dict], legacy, now: float) -> Optional[Result]:
+    """The twin's answer once it is done (waiting at most ONCE_WAIT_S from this
+    run's start); None when it failed, was replaced or did not finish."""
+    deadline = now + ONCE_WAIT_S
+    while True:
+        if twin is not None:
+            rec = next((c for c in _claims(conn, keys[0]) if c.get("id") == twin.get("id")), None)
+            if rec is None:
+                return None
+            if rec.get("done"):
+                return _as_result(rec.get("result"))
+        else:
+            first, raw = legacy
+            rec = _kv_json(conn, keys[1])
+            if rec.get("hash") != first.get("hash") or rec.get("ts") != first.get("ts"):
+                return None
+            if rec.get("done"):
+                return _as_result(rec.get("result"), raw)
+        if time.time() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
+def _finish(conn, keys, mine: dict, res: Optional[Result], cmd: str) -> None:
+    """Store the answer for a twin. Only this run's own claim is replaced: a
+    claim made meanwhile (another command, other arguments) stays as it is."""
+    from . import db
+    key, legacy_key, _ = keys
+    saved = {"text": res.text, "block": res.block, "context": res.context} if res is not None else None
+    t = time.time()
+    done = dict(mine, done=True, done_ts=t, result=saved)
+    with db.transaction(conn):
+        others = [c for c in _claims(conn, key) if c.get("id") != mine["id"] and _fresh(c, t)]
+        db.kv_set(conn, key, json.dumps({"claims": others + [done]}))
+        if _kv_json(conn, legacy_key).get("id") == mine["id"]:
+            db.kv_set(conn, legacy_key, json.dumps({"hash": mine["hash"], "ts": mine["ts"], "done": True,
+                                                    "result": saved, "cmd": cmd, "id": mine["id"], "done_ts": t}))
 
 
 def parse(prompt: str):
@@ -128,6 +260,23 @@ def _split_id(args: str):
     m = re.match(r"^#?(\d+)(?:\s+(.*))?$", args, re.S)
     if m:
         return int(m.group(1)), (m.group(2) or "").strip()
+    return None, args
+
+
+def _end_args(conn, session_id: str, args: str):
+    """/tally:end [id] [note]. '#2 …' and a number alone are a task id; '2 more
+    text' is one only when this session has no active task or task #2 is (or
+    was) counted in this session. Otherwise it is the note of this session's
+    task: '/tally:end 1 test still flaky' must not end task #1 of another terminal."""
+    m = re.match(r"^(#?)(\d+)(?:\s+(.*))?$", args, re.S)
+    if not m:
+        return None, args
+    task_id, rest = int(m.group(2)), (m.group(3) or "").strip()
+    if m.group(1) or not rest or tasks.active_for_session(conn, session_id) is None:
+        return task_id, rest
+    if conn.execute("SELECT 1 FROM task_sessions WHERE task_id = ? AND session_id = ? LIMIT 1",
+                    (task_id, session_id)).fetchone():
+        return task_id, rest
     return None, args
 
 
@@ -151,14 +300,19 @@ def help_text() -> str:
     return "\n".join(out)
 
 
-def _no_task_here(conn) -> str:
+def _no_task_here(conn, cmd: str = "") -> str:
     act = tasks.active_tasks(conn)
     msg = [fmt.head("No active task in this session")]
     if act:
         msg.append("  Active tasks in other sessions:")
         for t in act[:10]:
             msg.append("    #%d  %s  (started %s, %s)" % (t["id"], t["name"], fmt.when(t["started_at"]), t["cwd"] or ""))
-        msg.append(fmt.hints("/tally:status <id>", "/tally:end <id>", "/tally:resume <id>"))
+        if len(act) == 1:
+            n = act[0]["id"]
+            msg.append(fmt.hints("/tally:status %d shows it" % n if cmd == "status" else "",
+                                 "/tally:end %d ends it" % n, "/tally:resume %d counts it here" % n))
+        else:
+            msg.append(fmt.hints("/tally:status <id>", "/tally:end <id>", "/tally:resume <id>"))
     else:
         msg.append(fmt.hints("/tally:start <name> start one", "/tally:new <prompt>"))
     return "\n".join(msg)
@@ -229,10 +383,10 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
         return Result(None, block=False)
 
     if cmd in ("end", "stop"):
-        task_id, note = _split_id(args)
+        task_id, note = _end_args(conn, session_id, args)
         task = tasks.get(conn, task_id) if task_id else tasks.active_for_session(conn, session_id)
         if task is None:
-            return Result(_not_found(task_id) if task_id else _no_task_here(conn))
+            return Result(_not_found(task_id) if task_id else _no_task_here(conn, "end"))
         if task["status"] != "active":
             return Result("\n".join([fmt.render_report(report.summary_for(conn, task)), "",
                                      fmt.hints("/tally:resume %d reopens it" % task["id"])]))
@@ -243,7 +397,7 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
         task_id, _ = _split_id(args)
         task = tasks.get(conn, task_id) if task_id else tasks.active_for_session(conn, session_id)
         if task is None:
-            return Result(_not_found(task_id) if task_id else _no_task_here(conn))
+            return Result(_not_found(task_id) if task_id else _no_task_here(conn, "status"))
         return Result(fmt.render_report(report.summary_for(conn, task)))
 
     if cmd in ("show", "report"):
@@ -263,7 +417,7 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
         limit = 15
         if args == "all":
             limit = 0
-        elif args.isdigit():
+        elif re.fullmatch(r"\d+", args):          # not str.isdigit: it takes "²", which int() does not
             limit = int(args)
         return Result(fmt.render_list(list_rows(conn, limit)))
 
@@ -394,11 +548,10 @@ def _todo_command(conn, session_id, cmd, args, cwd, transcript_path, prompt_id) 
         todo = todos.get(conn, todo_id)
         if todo is None:
             return Result(fmt.error("Todo #%d not found" % todo_id, "/tally:todos lists them"))
-        todos.set_status(conn, todo_id, "done", note=rest or None)
+        _, ended = close_todo(conn, todo_id, "done", note=rest or None)
         out = [fmt.head("Todo #%d done: %s" % (todo_id, todo["title"]), "✓")]
-        for t in conn.execute("SELECT * FROM tasks WHERE todo_id = ? AND status = 'active'", (todo_id,)).fetchall():
-            tasks.end(conn, t["id"], note=rest or "todo done")
-            out += ["", _ended_text(conn, tasks.get(conn, t["id"]))]
+        for t in ended:
+            out += ["", _ended_text(conn, t)]
         st = todos.linked_stats(conn, todo_id)
         if st["tasks"]:
             out.insert(1, "  total over %d task%s: %s tokens · %s · %s active" % (
@@ -411,12 +564,27 @@ def _todo_command(conn, session_id, cmd, args, cwd, transcript_path, prompt_id) 
         if not todo_id or not parts or parts[0] not in todos.STATUSES:
             return Result(fmt.usage("/tally:mark <todo id> <%s> [note]" % "|".join(todos.STATUSES)))
         try:
-            t = todos.set_status(conn, todo_id, parts[0], note=parts[1] if len(parts) > 1 else None)
+            t, ended = close_todo(conn, todo_id, parts[0], note=parts[1] if len(parts) > 1 else None)
         except ValueError as e:
             return Result(fmt.error(str(e), "/tally:todos lists them"))
-        return Result(fmt.head("Todo #%d is now %s: %s" % (t["id"], t["status"], t["title"]),
-                               fmt.STATUS_MARKS.get(t["status"], "")))
+        out = [fmt.head("Todo #%d is now %s: %s" % (t["id"], t["status"], t["title"]),
+                        fmt.STATUS_MARKS.get(t["status"], ""))]
+        for task in ended:
+            out += ["", _ended_text(conn, task)]
+        return Result("\n".join(out))
     return Result(help_text())
+
+
+def close_todo(conn, todo_id: int, status: str, note: Optional[str] = None):
+    """Set a todo's status; done or dropped also ends the active tasks measuring
+    it (/tally:done, /tally:mark, tally todo done|mark). Returns (todo, ended tasks)."""
+    from . import todos
+    todo = todos.set_status(conn, todo_id, status, note=note)
+    ended = []
+    if status in ("done", "dropped"):
+        for t in conn.execute("SELECT id FROM tasks WHERE todo_id = ? AND status = 'active'", (todo_id,)).fetchall():
+            ended.append(tasks.end(conn, t["id"], note=note or "todo %s" % status))
+    return todo, ended
 
 
 def _settings_command(args: str) -> str:
