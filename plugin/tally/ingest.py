@@ -9,13 +9,20 @@ Layout of a session on disk (Claude Code 2.1.x):
     ~/.claude/projects/<project>/<session>/workflows/<run>.json         workflow run record
 
 Every assistant line carries `message.usage`. One API response is written as
-several lines (one per content block) with identical usage, so rows are keyed
-by message id + request id.
+several lines (one per content block), so rows are keyed by message id +
+request id: the row keeps the time of the first line and the token counts of
+the last (earlier blocks can carry partial output_tokens).
+
+A record that cannot be stored (e.g. text with half an emoji, which is valid
+JSON but not UTF-8) is skipped and noted in errors.log; the lines around it
+still count and the offset moves past it.
 """
 
 import json
 import re
+import sqlite3
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -28,16 +35,60 @@ _PROMPT_RE = re.compile(rb'"promptId"\s*:\s*"([^"]+)"')
 _PROMPT_SCAN = 600
 _TOOL_ERROR_RE = re.compile(rb'"is_error"\s*:\s*true')
 
+# Fork agents copy their parent's history line for line (same message and
+# request id, only agentId differs): a row is updated only by the agent that
+# owns it, so the copies cannot take the parent's usage over.
 USAGE_INSERT = (
-    "INSERT OR REPLACE INTO usage(msg_key, session_id, agent_id, ts, model, speed, input, output, cache_read, "
-    "cache_write_5m, cache_write_1h, web_search, prompt_id, cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    "INSERT INTO usage(msg_key, session_id, agent_id, ts, model, speed, input, output, cache_read, "
+    "cache_write_5m, cache_write_1h, web_search, prompt_id, cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+    "ON CONFLICT(msg_key) DO UPDATE SET ts = MIN(usage.ts, excluded.ts), model = excluded.model, "
+    "speed = excluded.speed, input = excluded.input, output = excluded.output, cache_read = excluded.cache_read, "
+    "cache_write_5m = excluded.cache_write_5m, cache_write_1h = excluded.cache_write_1h, "
+    "web_search = excluded.web_search, prompt_id = COALESCE(excluded.prompt_id, usage.prompt_id), "
+    "cost = excluded.cost "
+    "WHERE usage.agent_id = excluded.agent_id AND usage.session_id = excluded.session_id")
+
+_LOG_EVERY_S = 3600          # the same ingest problem goes to errors.log at most once an hour
+
+
+def clean(v):
+    """A value SQLite can bind. Text loses lone UTF-16 surrogates (json.loads
+    accepts "\\ud83d", SQLite cannot encode it); other objects become text."""
+    if isinstance(v, str):
+        if v.isascii():
+            return v
+        try:
+            v.encode("utf-8")
+            return v
+        except UnicodeEncodeError:
+            return v.encode("utf-8", "replace").decode("utf-8")
+    if v is None or isinstance(v, (int, float, bytes)):
+        return v
+    return clean(str(v))
+
+
+def _bind(row) -> tuple:
+    return tuple(map(clean, row))
+
+
+def _skippable(exc: BaseException) -> bool:
+    """An error caused by the record being stored (skip the record), not by the
+    database itself (locked, disk full: fail, the next hook reads it again)."""
+    if isinstance(exc, (sqlite3.OperationalError, MemoryError)):
+        return False
+    if isinstance(exc, sqlite3.DatabaseError):
+        return isinstance(exc, (sqlite3.IntegrityError, sqlite3.DataError, sqlite3.ProgrammingError))
+    return isinstance(exc, Exception)
 
 
 def parse_ts(value) -> Optional[float]:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value) / (1000.0 if value > 1e11 else 1.0)
+        try:
+            return float(value) / (1000.0 if value > 1e11 else 1.0)
+        except OverflowError:
+            return None
     s = str(value).strip()
     if not s:
         return None
@@ -45,7 +96,7 @@ def parse_ts(value) -> Optional[float]:
         s = s[:-1] + "+00:00"
     try:
         return datetime.fromisoformat(s).timestamp()
-    except ValueError:
+    except (ValueError, OverflowError, OSError):
         pass
     # fromisoformat in 3.9 wants 3 or 6 fractional digits
     m = re.match(r"^(.*T\d\d:\d\d:\d\d)(?:\.(\d+))?(.*)$", s)
@@ -53,7 +104,7 @@ def parse_ts(value) -> Optional[float]:
         frac = (m.group(2) or "0")[:6].ljust(6, "0")
         try:
             return datetime.fromisoformat("%s.%s%s" % (m.group(1), frac, m.group(3) or "+00:00")).timestamp()
-        except ValueError:
+        except (ValueError, OverflowError, OSError):
             return None
     return None
 
@@ -95,8 +146,14 @@ def resolve_transcript(conn, session_id: str, hint: Optional[str] = None) -> Opt
     return found
 
 
-def session_files(main: Path) -> List[Tuple[Path, str, Optional[str]]]:
-    """Return (path, agent_id, workflow_run_id) for main + every agent transcript."""
+def session_files(main: Path, conn=None, session_id: Optional[str] = None) -> List[Tuple[Path, str, Optional[str]]]:
+    """Return (path, agent_id, workflow_run_id) for main + every agent transcript.
+
+    Fork agents come last, deeper forks after shallower ones: a fork's file
+    repeats its parent's history, which must be read (and owned) first. With
+    conn, agents whose meta file is already loaded (they have a type) are
+    ranked from the database instead of reading their meta file again.
+    """
     out: List[Tuple[Path, str, Optional[str]]] = []
     if main.is_file():
         out.append((main, "", None))
@@ -108,7 +165,39 @@ def session_files(main: Path) -> List[Tuple[Path, str, Optional[str]]]:
             if p.parent.parent.name == "workflows" and p.parent.name.startswith("wf_"):
                 run_id = p.parent.name
             out.append((p, agent_id, run_id))
+    if len(out) > 1:
+        known = {}
+        if conn is not None:
+            known = {r[0]: ((1, _depth(r[2])) if r[1] else (0, 0)) for r in conn.execute(
+                "SELECT agent_id, is_fork, spawn_depth FROM agents WHERE session_id = ? AND agent_type IS NOT NULL",
+                (session_id,))}
+
+        def rank(f):
+            if not f[1]:
+                return (-1, 0)
+            return known.get(f[1]) or _fork_rank(f[0], f[1])
+        out.sort(key=rank)                  # stable: path order within a rank
     return out
+
+
+def _depth(v) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _fork_rank(path: Path, agent_id: str) -> tuple:
+    try:
+        data = path.with_name("agent-%s.meta.json" % agent_id).read_bytes()
+        if b'"isFork"' not in data:
+            return (0, 0)
+        meta = json.loads(data)
+    except (OSError, ValueError, RecursionError):
+        return (0, 0)
+    if isinstance(meta, dict) and meta.get("isFork"):
+        return (1, _depth(meta.get("spawnDepth")))
+    return (0, 0)
 
 
 # ---------------------------------------------------------------- ingest
@@ -119,9 +208,23 @@ class Stats:
         self.bytes = 0
         self.usage_rows = 0
         self.turns = 0
+        self.skipped = 0
+        self.path = None           # file being read, for skip()
+        self.problems = {}         # path -> [records skipped, first traceback]
 
     def as_dict(self):
         return dict(files=self.files, bytes=self.bytes, usage_rows=self.usage_rows, turns=self.turns)
+
+    def skip(self) -> None:
+        """Call in an except block: a record that cannot be stored is skipped
+        and noted (errors.log gets one entry per file, not one per line)."""
+        self.skipped += 1
+        where = self.path or "?"
+        p = self.problems.get(where)
+        if p is None:
+            self.problems[where] = [1, traceback.format_exc()]
+        else:
+            p[0] += 1
 
 
 def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
@@ -132,6 +235,9 @@ def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
     parsing; used when a task starts so history before the task is not read.
     backfill_tools=False: bytes read before tool calls were wanted stay without
     them (the sessions index, which would otherwise reread every transcript).
+
+    Each file is read in a savepoint of its own: a file that fails is rolled
+    back (and read again next time) without holding back the others.
     """
     from . import settings
     stats = Stats()
@@ -143,18 +249,64 @@ def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
     want_tools = settings.depth_at_least("calls")
     with db.transaction(conn):
         if agent == "claude":
-            files = session_files(main)
+            files = session_files(main, conn, session_id)
         elif agent == "codex":
             from . import codex
             files = codex.session_files(conn, session_id, main)
         else:
             files = [(main, "", None)]
         for path, agent_id, run_id in files:
-            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools, agent,
-                         backfill_tools)
+            conn.execute("SAVEPOINT ingest_file")
+            try:
+                _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools, agent,
+                             backfill_tools)
+            except Exception as exc:
+                conn.execute("ROLLBACK TO ingest_file")
+                conn.execute("RELEASE ingest_file")
+                if not _skippable(exc):
+                    raise
+                stats.path = str(path)
+                stats.skip()
+            else:
+                conn.execute("RELEASE ingest_file")
         if agent == "claude":
-            _load_workflow_records(conn, session_id, sdir)
+            stats.path = str(sdir / "workflows")
+            _load_workflow_records(conn, session_id, sdir, stats)
+        _log_problems(conn, stats)
     return stats
+
+
+def _log_problems(conn, stats: Stats) -> None:
+    """One errors.log entry per file with skipped records; the same problem
+    (a file that keeps failing) at most once an hour."""
+    if not stats.problems:
+        return
+    now = time.time()
+    try:
+        seen = json.loads(db.kv_get(conn, "ingest_errors") or "{}")
+    except ValueError:
+        seen = {}
+    if not isinstance(seen, dict):
+        seen = {}
+    seen = {k: v for k, v in seen.items() if isinstance(v, (int, float)) and now - v < _LOG_EVERY_S}
+    entries = []
+    for where, (count, first) in stats.problems.items():
+        lines = first.strip().splitlines()
+        sig = "%s|%s" % (where, lines[-1][:200] if lines else "")
+        if sig in seen:
+            continue
+        seen[sig] = now
+        entries.append("%s ingest: skipped %d record(s) that cannot be stored, in %s\n%s\n" % (
+            time.strftime("%Y-%m-%d %H:%M:%S"), count, where, first))
+    db.kv_set(conn, "ingest_errors", json.dumps(seen))
+    if not entries:
+        return
+    try:
+        paths.home().mkdir(parents=True, exist_ok=True)
+        with open(paths.error_log_path(), "a", encoding="utf-8", errors="replace") as fh:
+            fh.write("".join(entries))
+    except OSError:
+        pass
 
 
 def session_agent(conn, session_id: str) -> str:
@@ -166,6 +318,7 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
                  skip_existing: bool, stats: Stats, want_tools: bool = False, agent: str = "claude",
                  backfill_tools: bool = True) -> None:
     key = str(path)
+    stats.path = key
     row = conn.execute("SELECT offset, meta_loaded, last_prompt_id, state, tools_offset FROM files WHERE path = ?",
                        (key,)).fetchone()
     try:
@@ -173,10 +326,10 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
     except OSError:
         return
     if row is None:
-        offset = size if skip_existing else 0
+        offset = 0             # with skip_existing, skipped below (after reading the tail's state)
         conn.execute(
             "INSERT INTO files(path, session_id, agent_id, workflow_run_id, offset, tools_offset) VALUES(?,?,?,?,?,?)",
-            (key, session_id, agent_id, run_id, 0, 0),
+            _bind((key, session_id, agent_id, run_id, 0, 0)),
         )
         meta_loaded = 0
         tools_at = 0
@@ -186,12 +339,17 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
         tools_at = row["tools_offset"] or 0
         if (want_tools and tools_at < offset <= size and not skip_existing and backfill_tools
                 and agent == "claude"):
-            _backfill_tools(conn, session_id, path, agent_id, tools_at, offset)
+            _backfill_tools(conn, session_id, path, agent_id, tools_at, offset, stats)
             tools_at = offset
-        if skip_existing:
-            offset = max(offset, size)
     if agent_id and not meta_loaded:
-        if _load_agent_meta(conn, session_id, path, agent_id, run_id):
+        try:
+            loaded = _load_agent_meta(conn, session_id, path, agent_id, run_id)
+        except Exception as exc:
+            if not _skippable(exc):
+                raise
+            stats.skip()
+            loaded = True           # not tried again on every hook
+        if loaded:
             conn.execute("UPDATE files SET meta_loaded = 1 WHERE path = ?", (key,))
     if size < offset:          # file was rewritten; start over
         offset = tools_at = 0
@@ -202,7 +360,8 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
         return
     if skip_existing:
         # Skipped bytes are not parsed, but lines appended later still need to
-        # know which prompt they belong to: take the last one in the file tail.
+        # know which prompt they belong to: take the last one in the file tail
+        # (and, for Codex, the thread's running total to count from).
         from . import adapters
         if agent == "claude":
             tail_prompt, tail_state = _last_prompt_in_tail(path, size), None
@@ -210,14 +369,15 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
             tail_prompt, tail_state = adapters.tail_state(agent, path, size)
         conn.execute("UPDATE files SET offset = ?, last_prompt_id = COALESCE(?, last_prompt_id), "
                      "state = COALESCE(?, state), tools_offset = ? WHERE path = ?",
-                     (size, tail_prompt, json.dumps(tail_state) if tail_state else None, tools_at, key))
+                     (size, clean(tail_prompt), json.dumps(tail_state) if tail_state else None, tools_at, key))
         return
     with open(path, "rb") as fh:
         fh.seek(offset)
         data = fh.read(size - offset)
     end = data.rfind(b"\n")
-    if end < 0:
-        return                 # no complete line yet
+    if end < 0:                # no complete line yet; keep what a tool backfill above did
+        conn.execute("UPDATE files SET offset = ?, tools_offset = ? WHERE path = ?", (offset, tools_at, key))
+        return
     chunk = data[: end + 1]
     stats.files += 1
     stats.bytes += len(chunk)
@@ -234,10 +394,11 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
     if want_tools and tools_at >= offset:   # no gap before this chunk: tool calls are complete up to its end
         tools_at = offset + len(chunk)
     conn.execute("UPDATE files SET offset = ?, last_prompt_id = ?, state = ?, tools_offset = ? WHERE path = ?",
-                 (offset + len(chunk), prompt_id, json.dumps(state) if state else None, tools_at, key))
+                 (offset + len(chunk), clean(prompt_id), json.dumps(state) if state else None, tools_at, key))
 
 
-def _backfill_tools(conn, session_id: str, path: Path, file_agent_id: str, start: int, upto: int) -> None:
+def _backfill_tools(conn, session_id: str, path: Path, file_agent_id: str, start: int, upto: int,
+                    stats: Optional[Stats] = None) -> None:
     """Tool calls in bytes start..upto, read without them: while log.depth was
     below calls (the default before 0.11.7), or by an older Tally's hook that
     is still running. Lines before `start` only give the prompt in effect."""
@@ -258,20 +419,26 @@ def _backfill_tools(conn, session_id: str, path: Path, file_agent_id: str, start
             err = b'"tool_result"' in line and _TOOL_ERROR_RE.search(line) is not None
             if not (use or err):
                 continue
-            rec = _loads(line)
-            if rec is None:
-                continue
-            if use and rec.get("type") == "assistant":
-                row = _usage_row(rec, session_id, file_agent_id, prompt_id)
-                if row:
-                    rows.extend(_tool_uses(rec, session_id, row[2], prompt_id, row[3]))
-            elif err and rec.get("type") == "user":
-                if rows:                          # the failed call comes before its result
-                    _insert_tools(conn, rows)
-                    rows = []
-                _mark_tool_errors(conn, rec)
+            try:
+                rec = _loads(line)
+                if rec is None:
+                    continue
+                if use and rec.get("type") == "assistant":
+                    row = _usage_row(rec, session_id, file_agent_id, prompt_id)
+                    if row:
+                        rows.extend(_tool_uses(rec, session_id, row[2], prompt_id, row[3]))
+                elif err and rec.get("type") == "user":
+                    if rows:                          # the failed call comes before its result
+                        _insert_tools(conn, rows, stats)
+                        rows = []
+                    _mark_tool_errors(conn, rec)
+            except Exception as exc:
+                if not _skippable(exc):
+                    raise
+                if stats is not None:
+                    stats.skip()
     if rows:
-        _insert_tools(conn, rows)
+        _insert_tools(conn, rows, stats)
 
 
 def _last_prompt_in_tail(path: Path, size: int, tail: int = 512 * 1024) -> Optional[str]:
@@ -281,12 +448,20 @@ def _last_prompt_in_tail(path: Path, size: int, tail: int = 512 * 1024) -> Optio
             data = fh.read(min(size, tail))
     except OSError:
         return None
-    found = None
-    for line in data.split(b"\n"):
-        m = _PROMPT_RE.search(line, 0, _PROMPT_SCAN)
+    # the last line with a promptId among its first bytes, searched from the end
+    # (a task start reads the tail of every file of the session)
+    pos = len(data)
+    while pos > 0:
+        pos = data.rfind(b'"promptId"', 0, pos)
+        if pos < 0:
+            return None
+        ls = data.rfind(b"\n", 0, pos) + 1
+        le = data.find(b"\n", ls)
+        m = _PROMPT_RE.search(data, ls, min(le if le >= 0 else len(data), ls + _PROMPT_SCAN))
         if m:
-            found = m.group(1).decode("ascii", "ignore")
-    return found
+            return m.group(1).decode("ascii", "ignore")
+        pos = ls
+    return None
 
 
 def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stats: Stats,
@@ -316,64 +491,100 @@ def _process_chunk(conn, session_id: str, file_agent_id: str, chunk: bytes, stat
         if not ((b'"usage"' in line and b'"assistant"' in line) or b'"turn_duration"' in line
                 or (b'"workflowName"' in line and b'"runId"' in line) or tool_error):
             continue
-        rec = _loads(line)
-        if rec is None:
-            continue
-        typ = rec.get("type")
-        if typ == "assistant":
-            row = _usage_row(rec, session_id, file_agent_id, prompt_id)
-            if row:
-                usage_rows.append(row)
-                if want_tools:
-                    tool_rows.extend(_tool_uses(rec, session_id, row[2], prompt_id, row[3]))
-        elif typ == "user" and tool_error:
-            if tool_rows:                     # the failed call may be in this same chunk
-                _insert_tools(conn, tool_rows)
-                tool_rows = []
-            _mark_tool_errors(conn, rec)
-        elif typ == "system" and rec.get("subtype") == "turn_duration":
-            ts = parse_ts(rec.get("timestamp"))
-            dur = rec.get("durationMs")
-            if (ts is not None and isinstance(dur, (int, float)) and not file_agent_id
-                    and not rec.get("isSidechain")):
-                conn.execute(
-                    "INSERT OR REPLACE INTO turns(uuid, session_id, ts_end, duration_ms) VALUES(?,?,?,?)",
-                    (rec.get("uuid") or "%s:%s" % (session_id, ts), session_id, ts, int(dur)),
-                )
-                stats.turns += 1
-        res = rec.get("toolUseResult")
-        if isinstance(res, dict) and res.get("runId") and res.get("workflowName"):
-            _upsert_workflow(conn, session_id, res, parse_ts(rec.get("timestamp")))
+        try:
+            rec = _loads(line)
+            if rec is None:
+                continue
+            typ = rec.get("type")
+            if typ == "assistant":
+                row = _usage_row(rec, session_id, file_agent_id, prompt_id)
+                if row:
+                    usage_rows.append(row)
+                    if want_tools:
+                        tool_rows.extend(_tool_uses(rec, session_id, row[2], prompt_id, row[3]))
+            elif typ == "user" and tool_error:
+                if tool_rows:                     # the failed call may be in this same chunk
+                    _insert_tools(conn, tool_rows, stats)
+                    tool_rows = []
+                _mark_tool_errors(conn, rec)
+            elif typ == "system" and rec.get("subtype") == "turn_duration":
+                ts = parse_ts(rec.get("timestamp"))
+                dur = rec.get("durationMs")
+                if (ts is not None and isinstance(dur, (int, float)) and not file_agent_id
+                        and not rec.get("isSidechain")):
+                    conn.execute(
+                        "INSERT OR REPLACE INTO turns(uuid, session_id, ts_end, duration_ms) VALUES(?,?,?,?)",
+                        _bind((rec.get("uuid") or "%s:%s" % (session_id, ts), session_id, ts, int(dur))),
+                    )
+                    stats.turns += 1
+            res = rec.get("toolUseResult")
+            if isinstance(res, dict) and res.get("runId") and res.get("workflowName"):
+                _upsert_workflow(conn, session_id, res, parse_ts(rec.get("timestamp")))
+        except Exception as exc:
+            if not _skippable(exc):
+                raise
+            stats.skip()
     if usage_rows:
-        conn.executemany(
-            USAGE_INSERT, [r + (None,) if len(r) == 13 else r for r in usage_rows],
-        )
-        stats.usage_rows += len(usage_rows)
+        stats.usage_rows += insert_usage(conn, [r + (None,) if len(r) == 13 else r for r in usage_rows], stats)
     if tool_rows:
-        _insert_tools(conn, tool_rows)
+        _insert_tools(conn, tool_rows, stats)
     if file_agent_id and first_ts is not None:
         conn.execute(
             "INSERT INTO agents(session_id, agent_id, first_ts, last_ts) VALUES(?,?,?,?) "
             "ON CONFLICT(session_id, agent_id) DO UPDATE SET "
             "first_ts = MIN(COALESCE(agents.first_ts, excluded.first_ts), excluded.first_ts), "
             "last_ts = MAX(COALESCE(agents.last_ts, excluded.last_ts), excluded.last_ts)",
-            (session_id, file_agent_id, first_ts, last_ts),
+            _bind((session_id, file_agent_id, first_ts, last_ts)),
         )
     return prompt_id
 
 
-def insert_tools(conn, rows: list) -> None:
-    _insert_tools(conn, rows)
+def _store_rows(conn, sql: str, rows: list, stats: Optional[Stats] = None) -> int:
+    """executemany; if a row cannot be stored, the others are stored one by one
+    and the bad one is skipped. Returns the number of rows stored."""
+    rows = [_bind(r) for r in rows]
+    try:
+        conn.executemany(sql, rows)
+        return len(rows)
+    except Exception as exc:
+        if not _skippable(exc):
+            raise
+    stored = 0
+    for r in rows:               # rows before the bad one are stored again: both statements are idempotent
+        try:
+            conn.execute(sql, r)
+            stored += 1
+        except Exception as exc:
+            if not _skippable(exc):
+                raise
+            if stats is not None:
+                stats.skip()
+    return stored
 
 
-def _insert_tools(conn, rows: list) -> None:
-    conn.executemany(
-        "INSERT OR IGNORE INTO tool_calls(id, session_id, agent_id, prompt_id, ts, tool) VALUES(?,?,?,?,?,?)", rows)
+def insert_usage(conn, rows: list, stats: Optional[Stats] = None) -> int:
+    """Usage rows (14 values, see USAGE_INSERT). Returns the number stored."""
+    return _store_rows(conn, USAGE_INSERT, rows, stats)
+
+
+def insert_tools(conn, rows: list, stats: Optional[Stats] = None) -> None:
+    _insert_tools(conn, rows, stats)
+
+
+def _insert_tools(conn, rows: list, stats: Optional[Stats] = None) -> None:
+    _store_rows(conn, "INSERT OR IGNORE INTO tool_calls(id, session_id, agent_id, prompt_id, ts, tool) "
+                "VALUES(?,?,?,?,?,?)", rows, stats)
+
+
+def _content(rec: dict):
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    return content if isinstance(content, list) else None
 
 
 def _tool_uses(rec: dict, session_id: str, agent_id: str, prompt_id: Optional[str], ts: float) -> list:
-    content = (rec.get("message") or {}).get("content")
-    if not isinstance(content, list):
+    content = _content(rec)
+    if content is None:
         return []
     return [(c["id"], session_id, agent_id, prompt_id, ts, str(c.get("name") or "?"))
             for c in content
@@ -381,18 +592,18 @@ def _tool_uses(rec: dict, session_id: str, agent_id: str, prompt_id: Optional[st
 
 
 def _mark_tool_errors(conn, rec: dict) -> None:
-    content = (rec.get("message") or {}).get("content")
-    if not isinstance(content, list):
+    content = _content(rec)
+    if content is None:
         return
     for c in content:
         if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("is_error") and c.get("tool_use_id"):
-            conn.execute("UPDATE tool_calls SET is_error = 1 WHERE id = ?", (c["tool_use_id"],))
+            conn.execute("UPDATE tool_calls SET is_error = 1 WHERE id = ?", (clean(c["tool_use_id"]),))
 
 
 def _loads(line: bytes):
     try:
         rec = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     return rec if isinstance(rec, dict) else None
 
@@ -451,8 +662,10 @@ def _load_agent_meta(conn, session_id, path: Path, agent_id: str, run_id: Option
             with open(meta_path) as fh:
                 meta = json.load(fh) or {}
             loaded = True
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
     conn.execute(
         "INSERT INTO agents(session_id, agent_id, agent_type, description, parent_agent_id, tool_use_id, "
         "workflow_run_id, workflow_phase, model, spawn_depth, is_fork, transcript_path) "
@@ -468,7 +681,7 @@ def _load_agent_meta(conn, session_id, path: Path, agent_id: str, run_id: Option
         "spawn_depth = COALESCE(excluded.spawn_depth, agents.spawn_depth), "
         "is_fork = COALESCE(excluded.is_fork, agents.is_fork), "
         "transcript_path = excluded.transcript_path",
-        (
+        _bind((
             session_id, agent_id,
             meta.get("agentType") or ("workflow-subagent" if run_id else None),
             meta.get("description"),
@@ -480,11 +693,11 @@ def _load_agent_meta(conn, session_id, path: Path, agent_id: str, run_id: Option
             meta.get("spawnDepth"),
             1 if meta.get("isFork") else None,
             str(path),
-        ),
+        )),
     )
     if run_id:
         conn.execute(
-            "INSERT OR IGNORE INTO workflows(session_id, run_id) VALUES(?, ?)", (session_id, run_id)
+            "INSERT OR IGNORE INTO workflows(session_id, run_id) VALUES(?, ?)", _bind((session_id, run_id))
         )
     return loaded
 
@@ -501,16 +714,16 @@ def _upsert_workflow(conn, session_id, res: dict, ts: Optional[float]) -> None:
         "started_at = COALESCE(workflows.started_at, excluded.started_at), "
         "duration_ms = COALESCE(excluded.duration_ms, workflows.duration_ms), "
         "reported_total_tokens = COALESCE(excluded.reported_total_tokens, workflows.reported_total_tokens)",
-        (
+        _bind((
             session_id, res.get("runId"), res.get("workflowName"),
             (res.get("summary") or None), res.get("status"), started,
             res.get("durationMs") if isinstance(res.get("durationMs"), int) else None,
             res.get("totalTokens") if isinstance(res.get("totalTokens"), int) else None,
-        ),
+        )),
     )
 
 
-def _load_workflow_records(conn, session_id: str, sdir: Path) -> None:
+def _load_workflow_records(conn, session_id: str, sdir: Path, stats: Optional[Stats] = None) -> None:
     """Pick up workflows/<run>.json records (written by Claude Code) once complete."""
     wdir = sdir / "workflows"
     if not wdir.is_dir():
@@ -530,11 +743,17 @@ def _load_workflow_records(conn, session_id: str, sdir: Path) -> None:
         try:
             with open(p) as fh:
                 rec = json.load(fh)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
         if isinstance(rec, dict):
             rec.setdefault("runId", run_id)
-            _upsert_workflow(conn, session_id, rec, None)
+            try:
+                _upsert_workflow(conn, session_id, rec, None)
+            except Exception as exc:
+                if not _skippable(exc):
+                    raise
+                if stats is not None:
+                    stats.skip()
 
 
 def ingest_sessions(conn, session_ids: Iterable[str]) -> Stats:

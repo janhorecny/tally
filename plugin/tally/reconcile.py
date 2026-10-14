@@ -54,12 +54,14 @@ def scan_session_totals(main: Path, until_ts: float, pricer: Optional[Pricer] = 
         if ts > until_ts:
             continue
         m = normalize_model(model) or "unknown"
-        d = out.setdefault(m, dict(_zero(), cost=0.0))
+        d = out.setdefault(m, dict(_zero(), cost=0.0, web_search=0))
         vals = {"input": r[6], "output": r[7], "cache_read": r[8], "cache_write": r[9] + r[10]}
         for k in _FIELDS:
             d[k] += vals[k]
             out["_total"][k] += vals[k]
-        c = pricer.cost(model, r[6], r[7], r[8], r[9], r[10], r[5]) or 0.0
+        d["web_search"] += r[11]
+        # web searches are priced like the reports price them; Claude Code's costUSD includes them too
+        c = pricer.cost(model, r[6], r[7], r[8], r[9], r[10], r[5], web_search=r[11]) or 0.0
         d["cost"] += c
         out["_total"]["cost"] += c
     return out
@@ -195,8 +197,12 @@ def estimate(conn, windows, pricer) -> dict:
                 # account for: right even when its own calls hit per-call tiers.
                 c = max(0.0, float(u["costUSD"]) - lg_cost)
             else:
+                # searches logged per model only in records stored since web searches are priced
+                ws_logged = lg.get("web_search") if m in logged else 0
+                searches = (max(0, int(u.get("webSearchRequests") or 0) - ws_logged)
+                            if isinstance(ws_logged, int) else 0)
                 c = pricer.cost(model, delta["input"], delta["output"], delta["cache_read"],
-                                delta["cache_write"], 0, tiers=False) or 0.0
+                                delta["cache_write"], 0, tiers=False, web_search=searches) or 0.0
             cost += c * share
         sessions_done += 1
         if b > cs_ts + 60:
