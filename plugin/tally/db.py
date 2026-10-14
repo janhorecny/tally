@@ -8,7 +8,7 @@ from typing import Optional
 
 from . import paths
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS files (
     offset           INTEGER NOT NULL DEFAULT 0,
     meta_loaded      INTEGER NOT NULL DEFAULT 0,
     last_prompt_id   TEXT,                                -- prompt the next lines belong to
-    state            TEXT                                 -- reader state carried between reads (JSON)
+    state            TEXT,                                -- reader state carried between reads (JSON)
+    tools_offset     INTEGER                              -- tool calls are recorded (or skipped) up to here
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -289,6 +290,7 @@ _ADDED_COLUMNS = [
     ("usage", "cost", "REAL"),
     ("files", "state", "TEXT"),
     ("todos", "rank", "REAL"),
+    ("files", "tools_offset", "INTEGER"),
 ]
 
 

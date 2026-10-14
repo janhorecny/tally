@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.7 (2026-10-14)
+
+- **Which tools the agent used, by default:** `log.depth` now defaults to `calls`, so every task report shows its tool calls (Bash, Read, Edit, Skill, MCP tools …), how often and how many failed, per task and per prompt, in `/tally:stats` and the dashboard. Only tool names are stored, never their input. A setting you chose yourself stays.
+- **Calls made before that are filled in:** a running task, or one where you switch `log.depth` to `calls` later, gets the tool calls it made so far from its transcript, once per file. This also covers a session still running an older Tally's hook. The sessions overview does not reread old transcripts for this.
+- MCP tools read `Firecrawl: firecrawl_scrape` instead of `mcp__claude_ai_Firecrawl__firecra…`, which looked the same for every tool of a server.
+
 ## 0.11.6 (2026-10-14)
 
 - **A command could still run twice in a fresh session:** besides the hook, Claude Code sometimes also runs the fallback in the command file (`tally slash`, meant for when the hook did not run), even though the hook then blocks the prompt. `/tally:start x` then started task #1 and at once ended it for #2, and `/tally:todo` added the todo twice. The hook and the fallback now share one guard: whichever comes second within 3 seconds gives the first one's answer, for every command. Arguments are compared without the quotes the shell removes. pi's commands go through the same guard.

@@ -141,7 +141,7 @@ An active task's interval is open-ended, so a few milliseconds of clock skew bet
 
 ### Tool calls
 
-With `log.depth = calls`, every `tool_use` block in an assistant response becomes a `tool_calls` row. Every `tool_result` with `is_error: true` marks its call as failed. Both happen during the same incremental read, so they add no extra I/O.
+With `log.depth = calls`, every `tool_use` block in an assistant response becomes a `tool_calls` row. Every `tool_result` with `is_error: true` marks its call as failed. Both happen during the same incremental read, so they add no extra I/O. Bytes read without tool calls (while `log.depth` was lower, or by an older Tally's hook still running in a session) are read once more for them: `files.tools_offset` says how far the tool calls are complete. The sessions index skips this.
 
 ### Projects
 

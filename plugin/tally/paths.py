@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
         # summary: task totals and the agent tree
         # prompts: + per-prompt breakdown (tokens, cost, time, agents per prompt)
         # calls:   + tool-call statistics (which tools, how often, errors)
-        "depth": "prompts",
+        "depth": "calls",
         # full | preview (first 300 characters) | off (prompt text never stored)
         "prompts": "full",
     },

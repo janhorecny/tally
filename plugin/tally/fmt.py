@@ -383,7 +383,7 @@ def render_stats(rep: dict) -> str:
         width = max(t["calls"] for t in tools)
         for t in tools[:12]:
             bar = "█" * max(1, int(round(16 * t["calls"] / float(width))))
-            out.append(("%s: %d× %s%s" if APP else "    %-34s %5d  %-16s%s") % (_cut(t["tool"], 34), t["calls"], bar,
+            out.append(("%s: %d× %s%s" if APP else "    %-34s %5d  %-16s%s") % (_cut(tool_name(t["tool"]), 34), t["calls"], bar,
                                                   ("  %d errors" % t["errors"]) if t["errors"] else ""))
         if len(tools) > 12:
             out.append("    … %d more tools" % (len(tools) - 12))
@@ -391,6 +391,18 @@ def render_stats(rep: dict) -> str:
         out.append("")
         out.append("  tool statistics are off (log.depth = %s); /tally:settings log.depth calls" % st.get("depth"))
     return "\n".join(out)
+
+
+def tool_name(name: str) -> str:
+    """mcp__claude_ai_Firecrawl__firecrawl_scrape -> Firecrawl: firecrawl_scrape. MCP names are long and
+    start alike: cut to a column, they all looked the same."""
+    parts = name.split("__")
+    if len(parts) >= 3 and parts[0] == "mcp":
+        server = parts[1][len("claude_ai_"):] if parts[1].startswith("claude_ai_") else parts[1]
+        if server.startswith("plugin_"):
+            server = server.split("_")[-1]
+        return "%s: %s" % (server, "__".join(parts[2:]))
+    return name
 
 
 def render_todos(conn, rows: list, project: Optional[str], show_project: bool = False,

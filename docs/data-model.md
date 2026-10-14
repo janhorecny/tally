@@ -117,7 +117,7 @@ Every prompt submitted while a task was active, with its `prompt_id`. This is th
 
 ### `tool_calls`
 
-One row per `tool_use` block, stored when `log.depth = calls`: `id` (the tool_use id), `session_id`, `agent_id`, `prompt_id`, `ts`, `tool`, and `is_error`. `is_error` is set from the matching `tool_result`.
+One row per `tool_use` block, stored when `log.depth = calls` (the default): `id` (the tool_use id), `session_id`, `agent_id`, `prompt_id`, `ts`, `tool`, and `is_error`. `is_error` is set from the matching `tool_result`.
 
 ### `task_snapshots`
 

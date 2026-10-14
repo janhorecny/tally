@@ -404,7 +404,7 @@ def _index_one(conn, s: dict, project: Optional[str], pricer: Pricer) -> None:
             (sid, str(s["path"]), s["cwd"], now, now, project, s["agent"]))
         conn.execute("INSERT INTO indexed(session_id, agent, path) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING",
                      (sid, s["agent"], str(s["path"])))
-    ingest.ingest_session(conn, sid, str(s["path"]))
+    ingest.ingest_session(conn, sid, str(s["path"]), backfill_tools=False)
     _scan_prompts(conn, sid, s["agent"], s["path"])
     if s["agent"] == "claude":
         from . import reconcile

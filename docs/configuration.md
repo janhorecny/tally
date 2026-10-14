@@ -29,7 +29,7 @@ Per-project tracking modes (`track`, `tasks`, `off`) are stored in the database,
 
 | Key | Default | Meaning |
 |---|---|---|
-| `log.depth` | `"prompts"` | **Logging depth.** `summary`: task totals and the agent tree. `prompts`: adds the per-prompt breakdown. `calls`: adds tool-call statistics (each tool, how often, errors). |
+| `log.depth` | `"calls"` | **Logging depth.** `summary`: task totals and the agent tree. `prompts`: adds the per-prompt breakdown. `calls`: adds tool-call statistics (each tool, how often, errors). Switched to `calls` mid-task, the calls made so far are read from the transcript. |
 | `log.prompts` | `"full"` | **Logging type for prompt text.** `full`, `preview` (first 300 characters) or `off` (never stored; prompts are still counted). |
 | `todos.reminder` | `true` | Show the project's open todos when a session starts. |
 | `todos.reminder_limit` | `5` | How many todos the reminder lists. |

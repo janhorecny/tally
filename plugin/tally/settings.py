@@ -127,8 +127,8 @@ def describe() -> List[Tuple[str, Any, str, Any]]:
 
 def depth_at_least(level: str, cfg: dict = None) -> bool:
     order = ("summary", "prompts", "calls")
-    cur = get("log.depth", cfg) or "prompts"
-    return order.index(cur if cur in order else "prompts") >= order.index(level)
+    cur = get("log.depth", cfg) or "calls"
+    return order.index(cur if cur in order else "calls") >= order.index(level)
 
 
 def store_prompt(text: str, cfg: dict = None):

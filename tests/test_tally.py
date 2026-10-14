@@ -890,6 +890,49 @@ class TodosAndStats(unittest.TestCase):
         self.assertIsNone(rep["prompts"])
         self.assertIsNone(rep["stats"]["tools"])
 
+    def test_tool_calls_read_before_depth_calls_are_filled_in(self):
+        """Tool statistics are on by default; calls read while they were off come from the transcript
+        once log.depth is calls (an upgrade from 0.11.6, or the setting switched on mid-task)."""
+        e = self.env
+        from tally import db, report, settings, tasks
+        self.assertEqual(settings.get("log.depth"), "calls")
+        settings.set_value("log.depth", "prompts")
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/tally:start tools")
+        t = time.time() + 0.01
+        e.append(e.main(),
+                 user(t, "do it", prompt_id="P1"),
+                 assistant(t + 0.01, "m1", "r1", content=[{"type": "tool_use", "id": "tu1", "name": "Bash", "input": {}},
+                                                          {"type": "tool_use", "id": "tu2", "name": "Read", "input": {}}]),
+                 user(t + 0.02, prompt_id="P1", content=[{"type": "tool_result", "tool_use_id": "tu1", "is_error": True,
+                                                         "content": "boom"}]),
+                 assistant(t + 0.03, "m2", "r2", content=[{"type": "tool_use", "id": "tu3", "name": "Bash", "input": {}}]))
+        e.hook("Stop")
+        conn = db.connect()
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0], 0)
+        settings.set_value("log.depth", "calls")
+        e.append(e.main(), user(t + 0.04, "more", prompt_id="P2"),
+                 assistant(t + 0.05, "m3", "r3", content=[{"type": "tool_use", "id": "tu4", "name": "Edit", "input": {}}]))
+        e.hook("Stop")
+        e.hook("Stop")                                                         # read once, not twice
+        rep = report.build(conn, tasks.get(conn, 1))
+        tools = {x["tool"]: (x["calls"], x["errors"]) for x in rep["stats"]["tools"]}
+        self.assertEqual(tools, {"Bash": (2, 1), "Read": (1, 0), "Edit": (1, 0)})
+        self.assertEqual(dict(conn.execute("SELECT prompt_id, COUNT(*) FROM tool_calls GROUP BY prompt_id").fetchall()),
+                         {"P1": 3, "P2": 1})
+        settings.set_value("log.depth", "prompts")                            # a gap read without tool calls
+        e.append(e.main(), assistant(t + 0.06, "m4", "r4", content=[{"type": "tool_use", "id": "tu5", "name": "Write",
+                                                                     "input": {}}]))
+        e.hook("Stop")                                                         # (as an older Tally's hook does)
+        settings.set_value("log.depth", "calls")
+        e.append(e.main(), assistant(t + 0.07, "m5", "r5", content=[{"type": "tool_use", "id": "tu6", "name": "Grep",
+                                                                     "input": {}}]))
+        e.hook("Stop")
+        rep = report.build(conn, tasks.get(conn, 1))
+        tools = {x["tool"]: x["calls"] for x in rep["stats"]["tools"]}
+        self.assertEqual(tools, {"Bash": 2, "Read": 1, "Edit": 1, "Write": 1, "Grep": 1})
+        self.assertEqual(conn.execute("SELECT prompt_id FROM tool_calls WHERE id = 'tu5'").fetchone()[0], "P2")
+
     def test_prompt_storage_modes(self):
         e = self.env
         from tally import db, settings
@@ -2221,9 +2264,9 @@ class Onboarding(unittest.TestCase):
 
     def test_ctrl_d_saves_nothing(self):
         from tally import onboarding, settings
-        self.assertFalse(self.run_setup("off", "calls", EOFError))
+        self.assertFalse(self.run_setup("off", "summary", EOFError))
         self.assertEqual(settings.get("log.prompts"), "full")
-        self.assertEqual(settings.get("log.depth"), "prompts")
+        self.assertEqual(settings.get("log.depth"), "calls")
         self.assertFalse(onboarding.done())
         self.assertFalse(self.settings_json.exists())
 
@@ -2309,10 +2352,10 @@ class Onboarding(unittest.TestCase):
         from tally import settings
         tally = [sys.executable, str(PLUGIN / "bin" / "tally"), "setup"]
         right, left = "\x1b[C", "\x1b[D"
-        run_in_pty(tally, answers=[right + right + left, right, "3", "", "", "", ""],
+        run_in_pty(tally, answers=[right + right + left, left, "3", "", "", "", ""],
                    env={"NO_COLOR": "1", "PATH": "/usr/bin:/bin"})              # no agent: no more questions
         self.assertEqual(settings.get("log.prompts"), "preview")             # full → off → preview
-        self.assertEqual(settings.get("log.depth"), "calls")                 # prompts → calls
+        self.assertEqual(settings.get("log.depth"), "prompts")               # calls → prompts
         self.assertEqual(settings.get("projects.default_mode"), "tasks")     # its number
         out = run_in_pty(tally, answers=["\x03"], env={"NO_COLOR": "1"})      # Ctrl-C: nothing saved, no traceback
         self.assertIn("Setup skipped; nothing changed", out)

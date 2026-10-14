@@ -332,7 +332,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         "tool_errors": sum(t["errors"] for t in tools) if tools is not None else None,
         "tools": tools,
         "automatic": automatic,
-        "depth": settings.get("log.depth", cfg) or "prompts",
+        "depth": settings.get("log.depth", cfg) or "calls",
     }
     if not settings.depth_at_least("prompts", cfg):
         prompt_rows = None

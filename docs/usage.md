@@ -198,7 +198,7 @@ The `span`, `prm` (prompts) and `models` columns and the active time in the firs
 - **Per prompt:** tokens, output, cost, duration, API calls, subagents and tool calls for every prompt of the task.
   - **Exact attribution:** every API call carries the id of the user prompt that caused it, and subagents inherit the prompt that spawned them.
   - **Automatic turns:** turns Claude Code starts on its own, for example when a background agent finishes, are listed separately.
-- **Tools:** calls and errors per tool, including MCP tools. This needs `log.depth calls`.
+- **Tools:** calls and errors per tool, including MCP tools (`log.depth calls`, the default).
 
 The same appears in the dashboard's task detail: summary tiles, a per-prompt table and a tools table.
 

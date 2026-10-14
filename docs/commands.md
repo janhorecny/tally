@@ -142,7 +142,7 @@ Adds the following to the report:
 
 - **Averages:** prompts, automatic turns, subagents, workflows, average and longest turn, cache hit rate, output tokens per active minute.
 - **Per prompt:** tokens, output, cost, duration, API calls, subagents and tool calls of every prompt.
-- **Tools:** calls and errors per tool, including MCP tools. Needs [`log.depth`](configuration.md) `calls`.
+- **Tools:** calls and errors per tool, including MCP tools. Shown with [`log.depth`](configuration.md) `calls`, the default.
 
 ```
 /tally:stats
@@ -485,7 +485,7 @@ Show or change settings.
 
 | Group | Key | Values |
 |---|---|---|
-| Logging | `log.depth` | `summary`, `prompts` (default) or `calls` |
+| Logging | `log.depth` | `summary`, `prompts` or `calls` (default) |
 | Logging | `log.prompts` | `full` (default), `preview` or `off` |
 | Projects and tasks | `projects.default_mode` | `ask` (default), `track` or `tasks`: the mode a new project gets |
 | Projects and tasks | `sessions.scope` | `enabled` (default) or `all`: which sessions the sessions overview reads |

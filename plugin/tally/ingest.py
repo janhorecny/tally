@@ -125,11 +125,13 @@ class Stats:
 
 
 def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
-                   skip_existing: bool = False) -> Stats:
+                   skip_existing: bool = False, backfill_tools: bool = True) -> Stats:
     """Read new transcript bytes for a session (main + all agents).
 
     skip_existing=True moves every file's offset to its current end without
     parsing; used when a task starts so history before the task is not read.
+    backfill_tools=False: bytes read before tool calls were wanted stay without
+    them (the sessions index, which would otherwise reread every transcript).
     """
     from . import settings
     stats = Stats()
@@ -148,7 +150,8 @@ def ingest_session(conn, session_id: str, transcript_path: Optional[str] = None,
         else:
             files = [(main, "", None)]
         for path, agent_id, run_id in files:
-            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools, agent)
+            _ingest_file(conn, session_id, path, agent_id, run_id, skip_existing, stats, want_tools, agent,
+                         backfill_tools)
         if agent == "claude":
             _load_workflow_records(conn, session_id, sdir)
     return stats
@@ -160,9 +163,10 @@ def session_agent(conn, session_id: str) -> str:
 
 
 def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[str],
-                 skip_existing: bool, stats: Stats, want_tools: bool = False, agent: str = "claude") -> None:
+                 skip_existing: bool, stats: Stats, want_tools: bool = False, agent: str = "claude",
+                 backfill_tools: bool = True) -> None:
     key = str(path)
-    row = conn.execute("SELECT offset, meta_loaded, last_prompt_id, state FROM files WHERE path = ?",
+    row = conn.execute("SELECT offset, meta_loaded, last_prompt_id, state, tools_offset FROM files WHERE path = ?",
                        (key,)).fetchone()
     try:
         size = path.stat().st_size
@@ -171,22 +175,30 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
     if row is None:
         offset = size if skip_existing else 0
         conn.execute(
-            "INSERT INTO files(path, session_id, agent_id, workflow_run_id, offset) VALUES(?,?,?,?,?)",
-            (key, session_id, agent_id, run_id, 0),
+            "INSERT INTO files(path, session_id, agent_id, workflow_run_id, offset, tools_offset) VALUES(?,?,?,?,?,?)",
+            (key, session_id, agent_id, run_id, 0, 0),
         )
         meta_loaded = 0
+        tools_at = 0
     else:
         offset = row["offset"]
         meta_loaded = row["meta_loaded"]
+        tools_at = row["tools_offset"] or 0
+        if (want_tools and tools_at < offset <= size and not skip_existing and backfill_tools
+                and agent == "claude"):
+            _backfill_tools(conn, session_id, path, agent_id, tools_at, offset)
+            tools_at = offset
         if skip_existing:
             offset = max(offset, size)
     if agent_id and not meta_loaded:
         if _load_agent_meta(conn, session_id, path, agent_id, run_id):
             conn.execute("UPDATE files SET meta_loaded = 1 WHERE path = ?", (key,))
     if size < offset:          # file was rewritten; start over
-        offset = 0
+        offset = tools_at = 0
+    if skip_existing and want_tools:
+        tools_at = max(tools_at, size)      # skipped on purpose: nothing to fill in later
     if size == offset:
-        conn.execute("UPDATE files SET offset = ? WHERE path = ?", (offset, key))
+        conn.execute("UPDATE files SET offset = ?, tools_offset = ? WHERE path = ?", (offset, tools_at, key))
         return
     if skip_existing:
         # Skipped bytes are not parsed, but lines appended later still need to
@@ -197,8 +209,8 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
         else:
             tail_prompt, tail_state = adapters.tail_state(agent, path, size)
         conn.execute("UPDATE files SET offset = ?, last_prompt_id = COALESCE(?, last_prompt_id), "
-                     "state = COALESCE(?, state) WHERE path = ?",
-                     (size, tail_prompt, json.dumps(tail_state) if tail_state else None, key))
+                     "state = COALESCE(?, state), tools_offset = ? WHERE path = ?",
+                     (size, tail_prompt, json.dumps(tail_state) if tail_state else None, tools_at, key))
         return
     with open(path, "rb") as fh:
         fh.seek(offset)
@@ -219,8 +231,47 @@ def _ingest_file(conn, session_id, path: Path, agent_id: str, run_id: Optional[s
             state = {}
     prompt_id = process(conn, session_id, agent_id, chunk, stats,
                         row["last_prompt_id"] if row is not None else None, want_tools, state)
-    conn.execute("UPDATE files SET offset = ?, last_prompt_id = ?, state = ? WHERE path = ?",
-                 (offset + len(chunk), prompt_id, json.dumps(state) if state else None, key))
+    if want_tools and tools_at >= offset:   # no gap before this chunk: tool calls are complete up to its end
+        tools_at = offset + len(chunk)
+    conn.execute("UPDATE files SET offset = ?, last_prompt_id = ?, state = ?, tools_offset = ? WHERE path = ?",
+                 (offset + len(chunk), prompt_id, json.dumps(state) if state else None, tools_at, key))
+
+
+def _backfill_tools(conn, session_id: str, path: Path, file_agent_id: str, start: int, upto: int) -> None:
+    """Tool calls in bytes start..upto, read without them: while log.depth was
+    below calls (the default before 0.11.7), or by an older Tally's hook that
+    is still running. Lines before `start` only give the prompt in effect."""
+    rows = []
+    prompt_id = None
+    pos = 0
+    with open(path, "rb") as fh:
+        for line in fh:
+            pos += len(line)
+            if pos > upto:
+                break
+            pm = _PROMPT_RE.search(line, 0, _PROMPT_SCAN)
+            if pm:
+                prompt_id = pm.group(1).decode("ascii", "ignore")
+            if pos <= start:
+                continue
+            use = b'"tool_use"' in line and b'"usage"' in line
+            err = b'"tool_result"' in line and _TOOL_ERROR_RE.search(line) is not None
+            if not (use or err):
+                continue
+            rec = _loads(line)
+            if rec is None:
+                continue
+            if use and rec.get("type") == "assistant":
+                row = _usage_row(rec, session_id, file_agent_id, prompt_id)
+                if row:
+                    rows.extend(_tool_uses(rec, session_id, row[2], prompt_id, row[3]))
+            elif err and rec.get("type") == "user":
+                if rows:                          # the failed call comes before its result
+                    _insert_tools(conn, rows)
+                    rows = []
+                _mark_tool_errors(conn, rec)
+    if rows:
+        _insert_tools(conn, rows)
 
 
 def _last_prompt_in_tail(path: Path, size: int, tail: int = 512 * 1024) -> Optional[str]:
