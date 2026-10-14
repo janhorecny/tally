@@ -21,6 +21,7 @@ import io
 import json
 import re
 import time
+import unicodedata
 from typing import Optional, Tuple
 
 from . import db, fmt, projects, report, sessions, tasks
@@ -62,15 +63,18 @@ def export(scope: str, fmt_name: str, ref: Optional[str] = None, project: Option
             {"task": "12", "project": "web-app", "session": "3f9c2a1b"}[scope]))
     conn = conn or db.connect()
     content, label = globals()["_" + scope](conn, fmt_name, ref=ref, project=project, days=days, agent=agent)
-    name = "tally-%s%s-%s.%s" % (scope, ("-" + _slug(label)) if label else "", time.strftime("%Y-%m-%d"),
-                                 EXT[fmt_name])
+    slug = _slug(label) if label else ""
+    name = "tally-%s%s-%s.%s" % (scope, ("-" + slug) if slug else "", time.strftime("%Y-%m-%d"), EXT[fmt_name])
     return content, name
 
 
 # ------------------------------------------------------------------ helpers
 
 def _slug(text: str) -> str:
-    keep = "".join(c if c.isalnum() else "-" for c in str(text).lower())
+    """File-name part in ASCII ('Oprava účtovníctva' -> 'oprava-uctovnictva'):
+    the dashboard sends the name in an HTTP header, which takes Latin-1 only."""
+    text = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode("ascii")
+    keep = "".join(c if c.isalnum() else "-" for c in text.lower())
     return "-".join(p for p in keep.split("-") if p)[:48]
 
 
@@ -91,6 +95,11 @@ def _num(x) -> str:
     return "{:,}".format(int(x or 0))
 
 
+def _count(x, word: str) -> str:
+    """'1 API call', '76,781 API calls'."""
+    return "%s %s%s" % (_num(x), word, "" if int(x or 0) == 1 else "s")
+
+
 def hours(seconds) -> str:
     return "" if seconds is None else "%.2f" % (seconds / 3600.0)
 
@@ -99,8 +108,13 @@ def _csv(header, rows) -> str:
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(header)
-    w.writerows(rows)
+    w.writerows([_csv_text(c) for c in r] for r in rows)
     return out.getvalue()
+
+
+def _csv_text(cell):
+    """Text starting with = + - @ is a formula to Excel and Sheets: quote it with '."""
+    return "'" + cell if isinstance(cell, str) and cell.startswith(("=", "+", "-", "@")) else cell
 
 
 def _cell(text) -> str:
@@ -149,22 +163,31 @@ def _task_csv_row(t, rep) -> list:
             hm(tm["wall_s"]), hm(tm["active_s"]), hours(tm["wall_s"]), hours(tm["active_s"]), task.get("end_note") or ""]
 
 
+def _span(start, end) -> str:
+    """'2026-10-01 10:00–11:30'; the end with its date when it is another day."""
+    out = fmt.when(start, "%Y-%m-%d %H:%M")
+    if end:
+        same = fmt.when(end, "%Y-%m-%d") == fmt.when(start, "%Y-%m-%d")
+        out += "–" + fmt.when(end, "%H:%M" if same else "%Y-%m-%d %H:%M")
+    return out
+
+
+def _line(parts) -> str:
+    """Parts joined into one line: a newline in a note or name would split it."""
+    return " · ".join(" ".join(str(p).split()) for p in parts)
+
+
 def task_line(rep) -> str:
     """One line for a time tracker: name, project, when, active and wall time, tokens, cost."""
     t, tm, tot = rep["task"], rep["time"], rep["totals"]
-    start = fmt.when(t["started_at"], "%Y-%m-%d %H:%M")
-    end = ""
-    if t.get("ended_at"):
-        same = fmt.when(t["ended_at"], "%Y-%m-%d") == fmt.when(t["started_at"], "%Y-%m-%d")
-        end = "–" + fmt.when(t["ended_at"], "%H:%M" if same else "%Y-%m-%d %H:%M")
     parts = ["%s (#%s)" % (t["name"], t["id"]) if t.get("id") else t["name"]]
     if t.get("project"):
         parts.append(t["project"])
-    parts += [start + end, "active %s" % fmt.duration(tm["active_s"]), "wall %s" % fmt.duration(tm["wall_s"]),
-              "%s tokens" % fmt.tokens(tot["total"]), fmt.money(tot)]
+    parts += [_span(t["started_at"], t.get("ended_at")), "active %s" % fmt.duration(tm["active_s"]),
+              "wall %s" % fmt.duration(tm["wall_s"]), "%s tokens" % fmt.tokens(tot["total"]), fmt.money(tot)]
     if t.get("end_note"):
         parts.append(t["end_note"])
-    return " · ".join(parts)
+    return _line(parts)
 
 
 def _tasks(conn, f, project=None, **_):
@@ -181,10 +204,11 @@ def _tasks(conn, f, project=None, **_):
     wall = sum(rep["time"]["wall_s"] or 0 for _, rep in rows)
     active = sum(rep["time"]["active_s"] or 0 for _, rep in rows)
     tok = sum(rep["totals"]["total"] for _, rep in rows)
-    cost = sum(rep["totals"]["cost"] or 0 for _, rep in rows)
-    body.append(["", "**Total**", "", "", hm(wall), hm(active), fmt.tokens(tok), fmt.money({"cost": cost})])
+    cost = {"cost": sum(rep["totals"]["cost"] or 0 for _, rep in rows),
+            "cost_partial": any(rep["totals"].get("cost_partial") for _, rep in rows)}
+    body.append(["", "**Total**", "", "", hm(wall), hm(active), fmt.tokens(tok), fmt.money(cost)])
     title = "# Tally tasks" + (" · " + project if project else "")
-    return "\n".join([title, "", "%s tasks · exported %s" % (_num(len(rows)), _when(time.time())), "",
+    return "\n".join([title, "", "%s · exported %s" % (_count(len(rows), "task"), _when(time.time())), "",
                       _md_table(["#", "Task", "Project", "Started", "Wall (h:mm)", "Active (h:mm)", "Tokens", "Cost"],
                                 body), ""]), project
 
@@ -229,12 +253,13 @@ def report_md(rep) -> str:
     if t.get("todo"):
         facts.append(("Todo", "#%d %s (%s)" % (t["todo"]["id"], t["todo"]["title"], t["todo"]["status"])))
     facts += [("When", _when(t["started_at"]) + end),
-              ("Active time", "%s (%s, %d turns)" % (fmt.duration(tm["active_s"]), hm(tm["active_s"]), tm["turns"])),
+              ("Active time", "%s (%s, %s)" % (fmt.duration(tm["active_s"]), hm(tm["active_s"]),
+                                               _count(tm["turns"], "turn"))),
               ("Wall time", "%s (%s)" % (fmt.duration(tm["wall_s"]), hm(tm["wall_s"]))),
               ("Tokens", "%s · in %s · out %s · cache write %s · cache read %s" % (
                   fmt.tokens(tot["total"]), fmt.tokens(tot["input"]), fmt.tokens(tot["output"]),
                   fmt.tokens(tot["cache_write"]), fmt.tokens(tot["cache_read"]))),
-              ("Cost", "%s at API list price · %s API calls" % (fmt.money(tot), _num(tot["calls"])))]
+              ("Cost", "%s at API list price · %s" % (fmt.money(tot), _count(tot["calls"], "API call")))]
     un = rep.get("unlogged") or {}
     if un.get("status") in ("estimated", "partial") and un.get("cost"):
         facts.append(("Unlogged", "≈ +%s tokens · +%s (Claude Code's own calls, estimated)" % (
@@ -307,15 +332,16 @@ def _project(conn, f, ref=None, **_):
                     [[d["day"], d["total"], d["output"], d["cost"]] for d in st["daily"]]), ref
     m, tk, td = st["last_30d"], st["tasks"], st["todos"]
     facts = [("Tracking", st["mode"] if st.get("registered") else "not set up"),
-             ("Last 30 days", "%s tokens · %s · %s API calls · %s sessions" % (
-                 fmt.tokens(m["total"]), fmt.money(m), _num(m.get("calls", 0)), _num(st["sessions"]))),
+             ("Last 30 days", "%s tokens · %s · %s · %s" % (
+                 fmt.tokens(m["total"]), fmt.money(m), _count(m.get("calls", 0), "API call"),
+                 _count(st["sessions"], "session"))),
              ("Last 7 days", "%s tokens · %s" % (fmt.tokens(st["last_7d"]["total"]), fmt.money(st["last_7d"]))),
              ("Kept by Tally", "%s tokens · %s" % (fmt.tokens(st["tracked"]["total"]), fmt.money(st["tracked"]))),
              ("Tasks", "%d (%d active)" % (tk["count"], tk["active"])),
              ("Todos", "%d open · %d done" % (td["todo"] + td["doing"] + td["blocked"], td["done"]))]
     if st["not_tracked"]["sessions"]:
-        facts.insert(2, ("Not tracked", "%s sessions, not read (set the project to track or tasks)"
-                         % _num(st["not_tracked"]["sessions"])))
+        facts.insert(2, ("Not tracked", "%s, not read (set the project to track or tasks)"
+                         % _count(st["not_tracked"]["sessions"], "session")))
     if st.get("path"):
         facts.insert(0, ("Path", st["path"]))
     out = ["# %s" % _cell(st["project"]), "", "| Item | Value |", "|---|---|"] + ["| %s | %s |" % (k, _cell(v)) for k, v in facts]
@@ -359,9 +385,10 @@ def _sessions(conn, f, project=None, days=30, agent=None, **_):
             for s in ov["sessions"]]
     head = "# Tally sessions · %s%s" % (span, (" · " + project) if project else "")
     rest = ov["not_tracked"]["sessions"]
-    return "\n".join([head, "", "%s sessions · %s tokens · %s · %s prompts · active %s.%s Exported %s." % (
-        _num(t["sessions"]), fmt.tokens(t["total"]), fmt.money(t), _num(t["prompts"]), fmt.duration(t["active_s"]),
-        (" Not listed: %s sessions of projects that are not tracked." % _num(rest)) if rest else "",
+    return "\n".join([head, "", "%s · %s tokens · %s · %s · active %s.%s Exported %s." % (
+        _count(t["sessions"], "session"), fmt.tokens(t["total"]), fmt.money(t), _count(t["prompts"], "prompt"),
+        fmt.duration(t["active_s"]),
+        (" Not listed: %s of projects that are not tracked." % _count(rest, "session")) if rest else "",
         _when(time.time())), "",
         _md_table(["Last activity", "Agent", "Project", "Session", "Active (h:mm)", "Prompts", "Tokens", "Cost"],
                   body), ""]), label
@@ -374,10 +401,10 @@ def session_line(rep) -> str:
     parts = [s.get("title") or "Session " + s["session_id"], fmt.AGENT_NAMES.get(s["agent"], s["agent"])]
     if s.get("project"):
         parts.append(s["project"])
-    parts += [_when(rep["task"]["started_at"]) + "–" + fmt.when(rep["task"]["ended_at"], "%H:%M"),
+    parts += [_span(rep["task"]["started_at"], rep["task"]["ended_at"]),
               "active %s" % fmt.duration(tm["active_s"]), "%s tokens" % fmt.tokens(tot["total"]),
-              fmt.money({"cost": cost})]
-    return " · ".join(parts)
+              fmt.money({"cost": cost, "cost_partial": tot.get("cost_partial")})]
+    return _line(parts)
 
 
 def _session(conn, f, ref=None, **_):
@@ -442,12 +469,12 @@ def _summary(conn, f, days=30, **_):
            "| Sessions | %s |" % _num(t["sessions"]),
            "| Tokens | %s (%s output) |" % (fmt.tokens(t["total"]), fmt.tokens(t["output"])),
            "| Cost | %s |" % fmt.money(t),
-           "| Prompts | %s · %s API calls |" % (_num(t["prompts"]), _num(t["calls"])),
+           "| Prompts | %s · %s |" % (_num(t["prompts"]), _count(t["calls"], "API call")),
            "| Active time | %s (%s) |" % (fmt.duration(t["active_s"]), hm(t["active_s"])),
            "| Tasks | %s · %s tokens · %s · active %s |" % (_num(tk["count"]), fmt.tokens(tk["total"]),
                                                         fmt.money({"cost": tk["cost"]}), hm(tk["active_s"])),
-           *(["| Not tracked | %s sessions in %s projects, not counted above |" % (
-               _num(rest["sessions"]), _num(rest["projects"]))] if rest["sessions"] else []),
+           *(["| Not tracked | %s in %s, not counted above |" % (
+               _count(rest["sessions"], "session"), _count(rest["projects"], "project"))] if rest["sessions"] else []),
            "", "## By agent", "",
            _md_table(["Agent", "Sessions", "Tokens", "Cost"], [
                [fmt.AGENT_NAMES.get(a["agent"], a["agent"]), _num(a["sessions"]), fmt.tokens(a["total"]), fmt.money(a)]

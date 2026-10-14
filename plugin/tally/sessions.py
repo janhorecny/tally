@@ -592,6 +592,7 @@ def overview(days: Optional[float] = 30, agent: Optional[str] = None, project: O
                 for k in ("total", "input", "output", "cache_read", "cache_write", "calls"):
                     d[k] += t[k]
                 d["cost"] += t.get("cost_with_unlogged", t["cost"])
+                d["cost_partial"] = d["cost_partial"] or bool(t.get("cost_partial"))
                 d["prompts"] += s["prompts"]
                 d["wall_s"] += s["wall_s"]
                 d["active_s"] += s["active_s"] or 0
@@ -713,7 +714,7 @@ def project_usage(days: float = 30, conn=None) -> dict:
 
 def _zero() -> dict:
     return {"sessions": 0, "total": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0,
-            "calls": 0, "cost": 0.0, "prompts": 0, "wall_s": 0.0, "active_s": 0.0}
+            "calls": 0, "cost": 0.0, "cost_partial": False, "prompts": 0, "wall_s": 0.0, "active_s": 0.0}
 
 
 def detail(session_id: str, conn=None) -> Optional[dict]:

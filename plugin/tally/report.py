@@ -5,8 +5,10 @@ import time
 from collections import OrderedDict
 from typing import Dict, List, Optional
 
-from . import paths, tasks
+from . import db, paths, tasks
 from .pricing import Pricer, normalize_model
+
+OPEN_TURN_IDLE_S = 600      # a turn still running counts until 10 minutes after the session's last API call
 
 
 class Tot:
@@ -82,6 +84,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
     agent_span: Dict[tuple, list] = {}
     agent_models: Dict[tuple, set] = {}
     active_ivals: List[tuple] = []
+    ivals_by_sid: Dict[str, List[tuple]] = {}
     turn_count = 0
     per_prompt: Dict[Optional[str], Tot] = {}
     prompt_agents: Dict[Optional[str], set] = {}
@@ -109,10 +112,14 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
             pspan[0] = min(pspan[0], r["ts"])
             pspan[1] = max(pspan[1], r["ts"])
         ivals = _turn_intervals(conn, sid, a, b)
+        running = _open_turn(conn, sid, a, b, now)
+        if running:
+            ivals.append(running)
         # the same turn may be measured twice (transcript turn_duration + hooks)
         n_hook = sum(1 for iv in ivals if iv[2])
         turn_count += max(n_hook, len(ivals) - n_hook)
         active_ivals.extend(ivals)
+        ivals_by_sid.setdefault(sid, []).extend(ivals)
 
     active_s = _union_length(active_ivals)
     head = _task_head(conn, task)
@@ -125,10 +132,10 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
             "unlogged": None,
         }
 
-    window_by_sid = {}
+    # a session's own windows: another task may have counted it in the gaps between them
+    windows_by_sid: Dict[str, List[tuple]] = {}
     for sid, a, b in windows:
-        lo, hi = window_by_sid.get(sid, (a, b))
-        window_by_sid[sid] = (min(lo, a), max(hi, b))
+        windows_by_sid.setdefault(sid, []).append((a, b))
 
     # ---------------------------------------------------------------- tree
     agent_meta = {}
@@ -205,12 +212,10 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         n = nodes[key]
         n["own"].add(tot)
         n["models"] = sorted(agent_models.get((sid, aid), ()))
-        lo, hi = window_by_sid[sid]
         meta = agent_meta.get((sid, aid))
         first = meta["first_ts"] if meta and meta["first_ts"] else agent_span[(sid, aid)][0]
         last = meta["last_ts"] if meta and meta["last_ts"] else agent_span[(sid, aid)][1]
-        n["first_ts"] = max(first, lo)
-        n["last_ts"] = min(last, hi)
+        n["first_ts"], n["last_ts"] = _clip_span(first, last, windows_by_sid[sid], agent_span[(sid, aid)])
 
     def finalize(key) -> Tot:
         n = nodes[key]
@@ -245,8 +250,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
         out["own"] = n["own"].as_dict()
         out["rollup"] = n["rollup_tot"].as_dict()
         if n["kind"] == "main":
-            lo, hi = window_by_sid[n["session_id"]]
-            out["duration_s"] = round(_main_active(conn, n["session_id"], lo, hi), 3)
+            out["duration_s"] = round(_union_length(ivals_by_sid.get(n["session_id"], [])), 3)
         elif n["first_ts"] is not None and n["last_ts"] is not None:
             out["duration_s"] = round(n["last_ts"] - n["first_ts"], 3)
         else:
@@ -295,7 +299,7 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
             for r in conn.execute(
                 "SELECT * FROM task_sessions WHERE task_id = ? ORDER BY attached_at", (task["id"],))
         ]
-        prompt_count = conn.execute("SELECT COUNT(*) FROM prompts WHERE task_id = ?", (task["id"],)).fetchone()[0]
+        prompt_count = _prompt_count(conn, task["id"])
     else:
         sessions = [{"session_id": s, "attached_at": a, "detached_at": b, "reason": "session"} for s, a, b in windows]
         prompt_count = None             # set from the session's prompts below
@@ -358,18 +362,28 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
 
 
 def _task_head(conn, task) -> dict:
-    head = {"id": task["id"], "name": task["name"], "project": None, "todo": None}
+    head = {"id": task["id"], "name": task["name"], "project": None, "todo": _todo_head(conn, task)}
     keys = task.keys() if hasattr(task, "keys") else []
     if "project" in keys:
         head["project"] = task["project"]
-    if "todo_id" in keys and task["todo_id"]:
-        t = conn.execute("SELECT id, title, status FROM todos WHERE id = ?", (task["todo_id"],)).fetchone()
-        if t:
-            head["todo"] = {"id": t["id"], "title": t["title"], "status": t["status"]}
     if task["id"]:
-        head["prompt_count"] = conn.execute("SELECT COUNT(*) FROM prompts WHERE task_id = ?",
-                                            (task["id"],)).fetchone()[0]
+        head["prompt_count"] = _prompt_count(conn, task["id"])
     return head
+
+
+def _todo_head(conn, task) -> Optional[dict]:
+    """The todo a task works on, with its current status."""
+    keys = task.keys() if hasattr(task, "keys") else []
+    if "todo_id" not in keys or not task["todo_id"]:
+        return None
+    t = conn.execute("SELECT id, title, status FROM todos WHERE id = ?", (task["todo_id"],)).fetchone()
+    return {"id": t["id"], "title": t["title"], "status": t["status"]} if t else None
+
+
+def _prompt_count(conn, task_id: int) -> int:
+    """Prompts of a task; one stored twice (the hook registered twice) counts once."""
+    return conn.execute("SELECT COUNT(DISTINCT COALESCE(prompt_id, '#' || id)) FROM prompts WHERE task_id = ?",
+                        (task_id,)).fetchone()[0]
 
 
 def _tool_stats(conn, windows) -> list:
@@ -408,10 +422,14 @@ def _prompt_rows(conn, task, windows, per_prompt, prompt_agents, prompt_span, to
         for sid, a, b in windows:
             prompt_list.extend(conn.execute("SELECT * FROM prompts WHERE task_id IS NULL AND session_id = ? "
                                             "AND ts >= ? AND ts <= ? ORDER BY ts, id", (sid, a, b)).fetchall())
-    for i, p in enumerate(prompt_list, 1):
+    i = 0
+    for p in prompt_list:
         pid = p["prompt_id"]
         if pid:
+            if pid in known:
+                continue            # stored twice (the hook registered twice): one prompt
             known.add(pid)
+        i += 1
         tot = per_prompt.get(pid) if pid else None
         if pid in by_prompt_turns:
             dur = _union_length(by_prompt_turns[pid])
@@ -429,7 +447,11 @@ def _prompt_rows(conn, task, windows, per_prompt, prompt_agents, prompt_span, to
         auto.add(per_prompt[pid])
     if None in per_prompt:
         auto.add(per_prompt[None])
-    automatic = dict(auto.as_dict(), turns=len(auto_ids)) if auto.calls else None
+    automatic = None
+    if auto.calls:
+        # calls without a prompt id belong to no turn: with no automatic turn, say so instead of '(0)'
+        automatic = dict(auto.as_dict(), turns=len(auto_ids),
+                         label=("automatic turns (%d)" % len(auto_ids)) if auto_ids else "unattributed")
     return rows, automatic
 
 
@@ -459,6 +481,37 @@ def _turn_intervals(conn, sid, a, b) -> List[tuple]:
     return out
 
 
+def _open_turn(conn, sid, a, b, now) -> Optional[tuple]:
+    """The turn running now (the hooks saw its prompt, no Stop yet) as a hook
+    turn interval, clipped to [a, b] and to now. It counts until 10 minutes
+    after the session's last API call at most, so a turn whose Stop never
+    comes does not grow forever."""
+    raw = db.kv_get(conn, "open_turn:" + sid)
+    if raw is None:
+        return None
+    try:
+        d = json.loads(raw)
+        t0, pid = (float(d["t0"]), d.get("prompt_id")) if isinstance(d, dict) else (float(d), None)
+    except (ValueError, TypeError, KeyError):
+        return None
+    last = conn.execute("SELECT MAX(ts) FROM usage WHERE session_id = ?", (sid,)).fetchone()[0]
+    lo = max(t0, a)
+    hi = min(b, now, max(t0, last or t0) + OPEN_TURN_IDLE_S)
+    return (lo, hi, True, pid) if hi > lo else None
+
+
+def _clip_span(first, last, wins, fallback) -> tuple:
+    """[first, last] cut to the windows of its session that it overlaps (not
+    to one span over all of them: another task may have run in between)."""
+    hit = [(a, b) for a, b in wins if b >= first and a <= last]
+    if not hit:
+        hit = [(a, b) for a, b in wins if b >= fallback[0] and a <= fallback[1]]
+        first, last = fallback
+    if not hit:
+        return first, last
+    return max(first, min(a for a, _ in hit)), min(last, max(b for _, b in hit))
+
+
 def _union_length(ivals: List[tuple]) -> float:
     total = 0.0
     cur_lo = cur_hi = None
@@ -472,10 +525,6 @@ def _union_length(ivals: List[tuple]) -> float:
     if cur_hi is not None:
         total += cur_hi - cur_lo
     return total
-
-
-def _main_active(conn, sid, a, b) -> float:
-    return _union_length(_turn_intervals(conn, sid, a, b))
 
 
 def save_snapshot(conn, task_id: int, rep: dict) -> None:
@@ -500,20 +549,31 @@ def _refresh_costs(conn, task) -> List[str]:
 
 def _fresh_snapshot(conn, task, sids, column: str):
     """Stored snapshot (report_json or summary_json) unless a session got a
-    newer cost record after it was computed."""
+    newer cost record after it was computed, or API calls of the task were
+    read after it (reading the transcripts failed when the task ended)."""
     from . import reconcile
     row = conn.execute("SELECT computed_at, %s FROM task_snapshots WHERE task_id = ?" % column,
                        (task["id"],)).fetchone()
     if row is None or row[1] is None or reconcile.updated_since(conn, sids, row["computed_at"]):
         return None
     data = json.loads(row[1])
+    if _usage_calls(conn, task) != (data.get("totals") or {}).get("calls"):
+        return None
     data["task"]["name"] = task["name"]
+    data["task"]["todo"] = _todo_head(conn, task)
     return data
+
+
+def _usage_calls(conn, task) -> int:
+    """API calls stored in the task's windows now (what build() would count)."""
+    return sum(conn.execute("SELECT COUNT(*) FROM usage WHERE session_id = ? AND ts >= ? AND ts <= ?",
+                            (sid, a, b)).fetchone()[0] for sid, a, b in tasks.task_windows(conn, task))
 
 
 def summary_for(conn, task, live: bool = True) -> dict:
     """Full report: frozen snapshot if ended (rebuilt when Claude Code has
-    since written a newer session cost record), fresh build if active."""
+    since written a newer session cost record, or API calls of the task were
+    read after it was frozen), fresh build if active."""
     sids = _refresh_costs(conn, task)
     if task["status"] != "active":
         rep = _fresh_snapshot(conn, task, sids, "report_json")

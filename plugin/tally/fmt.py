@@ -77,8 +77,8 @@ _KV = re.compile(r"^  ([a-z0-9][\w.]*(?: [\w.]+){0,2}) {2,}(\S.*)$")
 _GAP = re.compile(r"(?<=\S) {2,}(?=\S)")
 
 
-def _n(n: int, word: str) -> str:
-    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+def _n(n: int, word: str, plural: Optional[str] = None) -> str:
+    return "%d %s" % (n, word if n == 1 else plural or word + "s")
 
 
 def for_app(text: str) -> str:
@@ -135,9 +135,9 @@ def tokens(n: Optional[int]) -> str:
     n = int(n)
     if n < 1000:
         return str(n)
-    if n < 1_000_000:
+    if round(n / 1000.0, 1) < 1000:            # 999,950 is 1.00M, not 1000.0k
         return "%.1fk" % (n / 1000.0)
-    if n < 1_000_000_000:
+    if round(n / 1_000_000.0, 2) < 1000:
         return "%.2fM" % (n / 1_000_000.0)
     return "%.2fB" % (n / 1_000_000_000.0)
 
@@ -192,7 +192,7 @@ def node_label(n: dict) -> str:
     if kind == "main":
         return n["label"] + " (own)"
     if kind == "workflow":
-        return "workflow · %s (%d agents)" % (n["label"], n.get("agent_count", 0))
+        return "workflow · %s (%s)" % (n["label"], _n(n.get("agent_count", 0), "agent"))
     if kind == "phase":
         return "phase · %s (%d)" % (n["label"], n.get("agent_count", 0))
     atype = n.get("agent_type") or "agent"
@@ -235,10 +235,11 @@ def render_tree(tree: List[dict], max_children: int = 8, max_depth: int = 4) -> 
             walk(c, child_prefix, i == len(shown) - 1 and not hidden, depth + 1, False)
         if hidden:
             tot = sum(c["rollup"]["total"] for c in hidden)
-            cost = sum(c["rollup"]["cost"] for c in hidden)
+            cost = money({"cost": sum(c["rollup"]["cost"] for c in hidden),
+                          "cost_partial": any(c["rollup"].get("cost_partial") for c in hidden)})
             more = child_prefix + "└─ … %d more" % len(hidden)
-            lines.append("%s · %s tokens · $%.2f" % (more, tokens(tot), cost) if APP
-                         else COLS % (more, tokens(tot), "", "$%.2f" % cost, "", ""))
+            lines.append("%s · %s tokens · %s" % (more, tokens(tot), cost) if APP
+                         else COLS % (more, tokens(tot), "", cost, "", ""))
 
     for n in tree:
         walk(n, "", True, 0, True)
@@ -270,16 +271,18 @@ def render_report(rep: dict, detail: bool = True, title: Optional[str] = None, m
         out.append("  prompt   " + _cut(t["initial_prompt"], 90))
     started = when(t["started_at"])
     ended = (" → " + when(t["ended_at"], "%H:%M" if when(t["ended_at"], "%Y-%m-%d") == when(t["started_at"], "%Y-%m-%d") else "%Y-%m-%d %H:%M")) if t.get("ended_at") else ""
-    out.append("  time     %s wall · %s active (%d turns) · %s%s" % (
-        duration(tm["wall_s"]), duration(tm["active_s"]), tm["turns"], started, ended))
+    out.append("  time     %s wall · %s active (%s) · %s%s" % (
+        duration(tm["wall_s"]), duration(tm["active_s"]), _n(tm["turns"], "turn"), started, ended))
     out.append("  tokens   " + token_line(tot))
     st = rep.get("stats") or {}
     if st.get("prompts"):
         out.append("  prompts  %d · avg %s tokens · %s per prompt%s" % (
-            st["prompts"], tokens(st["tokens_per_prompt"]), money({"cost": st["cost_per_prompt"]}),
-            (" · +%d automatic turns" % st["automatic_turns"]) if st.get("automatic_turns") else ""))
-    out.append("  cost     ≈ %s at list price · %d API calls%s" % (
-        money(tot), tot["calls"], (" · %d web searches" % tot["web_search"]) if tot.get("web_search") else ""))
+            st["prompts"], tokens(st["tokens_per_prompt"]),
+            money({"cost": st["cost_per_prompt"], "cost_partial": tot.get("cost_partial")}),
+            (" · +" + _n(st["automatic_turns"], "automatic turn")) if st.get("automatic_turns") else ""))
+    out.append("  cost     ≈ %s at list price · %s%s" % (
+        money(tot), _n(tot["calls"], "API call"),
+        (" · " + _n(tot["web_search"], "web search", "web searches")) if tot.get("web_search") else ""))
     un = rep.get("unlogged") or {}
     if un.get("status") in ("estimated", "partial") and un.get("total"):
         out.append("  unlogged ≈ +%s tokens · +%s  Claude Code's own calls (agent summaries, suggestions, titles), "
@@ -303,8 +306,9 @@ def render_report(rep: dict, detail: bool = True, title: Optional[str] = None, m
                     out.append("%s: %s · %s tokens · %s" % (x["agent_type"], _n(x["agents"], "agent"),
                                                             tokens(x["total"]), money(x)))
                     continue
-                out.append("    %-26s %4s agents %9s %9s" % (
-                    _cut(x["agent_type"], 26), x["agents"], tokens(x["total"]), money(x)))
+                out.append("    %-26s %4s %-6s %9s %9s" % (
+                    _cut(x["agent_type"], 26), x["agents"], "agent" if x["agents"] == 1 else "agents",
+                    tokens(x["total"]), money(x)))
     else:
         out.append("")
         out.append("  No API usage recorded yet.")
@@ -339,14 +343,14 @@ def render_stats(rep: dict) -> str:
     """Detailed stats: header, averages, per-prompt table, tools."""
     out = [render_report(rep, detail=False), ""]
     st = rep.get("stats") or {}
-    out.append("  stats    %s prompts · %s automatic turns · %s subagents · %s workflows · %s models" % (
-        st.get("prompts", 0), st.get("automatic_turns", 0), st.get("subagents", 0), st.get("workflows", 0),
-        st.get("models", 0)))
+    out.append("  stats    %s · %s · %s · %s · %s" % (
+        _n(st.get("prompts", 0), "prompt"), _n(st.get("automatic_turns", 0), "automatic turn"),
+        _n(st.get("subagents", 0), "subagent"), _n(st.get("workflows", 0), "workflow"), _n(st.get("models", 0), "model")))
     out.append("           avg turn %s · longest %s · cache hit %s · %s output tokens / active min" % (
         duration(st.get("avg_turn_s")), duration(st.get("max_turn_s")), pct(st.get("cache_hit_ratio")),
         tokens(st.get("output_per_active_min"))))
     if st.get("tool_calls") is not None:
-        out.append("           %d tool calls · %d errors" % (st["tool_calls"], st["tool_errors"] or 0))
+        out.append("           %s · %s" % (_n(st["tool_calls"], "tool call"), _n(st["tool_errors"] or 0, "error")))
     prompts = rep.get("prompts")
     if prompts and APP:
         out.append("")
@@ -357,8 +361,8 @@ def render_stats(rep: dict) -> str:
                 " · " + _n(p["agents"], "agent") if p["agents"] else ""))
         auto = st.get("automatic")
         if auto:
-            out.append("automatic turns (%d) · %s tokens · %s output · %s · %s" % (
-                auto["turns"], tokens(auto["total"]), tokens(auto["output"]), money(auto), _n(auto["calls"], "call")))
+            out.append("%s · %s tokens · %s output · %s · %s" % (
+                auto_label(auto), tokens(auto["total"]), tokens(auto["output"]), money(auto), _n(auto["calls"], "call")))
     elif prompts:
         out.append("")
         out.append("  %3s  %-5s %-34s %8s %8s %8s %8s %5s %6s" % (
@@ -371,11 +375,11 @@ def render_stats(rep: dict) -> str:
         auto = st.get("automatic")
         if auto:
             out.append("  %3s  %-5s %-34s %8s %8s %8s %8s %5s" % (
-                "", "", "automatic turns (%d)" % auto["turns"], tokens(auto["total"]), tokens(auto["output"]),
+                "", "", auto_label(auto), tokens(auto["total"]), tokens(auto["output"]),
                 money(auto), "", auto["calls"]))
     elif prompts is None:
         out.append("")
-        out.append("  per-prompt breakdown is off (log.depth = summary); /tally:settings log.depth prompts")
+        out.append(_depth_off("per-prompt breakdown is off", "prompts", st))
     tools = st.get("tools")
     if tools:
         out.append("")
@@ -383,14 +387,34 @@ def render_stats(rep: dict) -> str:
         width = max(t["calls"] for t in tools)
         for t in tools[:12]:
             bar = "█" * max(1, int(round(16 * t["calls"] / float(width))))
-            out.append(("%s: %d× %s%s" if APP else "    %-34s %5d  %-16s%s") % (_cut(tool_name(t["tool"]), 34), t["calls"], bar,
-                                                  ("  %d errors" % t["errors"]) if t["errors"] else ""))
+            out.append(("%s · %d× %s%s" if APP else "    %-34s %5d  %-16s%s") % (_cut(tool_name(t["tool"]), 34), t["calls"], bar,
+                                                  ("  " + _n(t["errors"], "error")) if t["errors"] else ""))
         if len(tools) > 12:
-            out.append("    … %d more tools" % (len(tools) - 12))
+            out.append("    … " + _n(len(tools) - 12, "more tool"))
     elif tools is None and st:
         out.append("")
-        out.append("  tool statistics are off (log.depth = %s); /tally:settings log.depth calls" % st.get("depth"))
+        out.append(_depth_off("tool statistics are off", "calls", st))
     return "\n".join(out)
+
+
+def auto_label(auto: dict) -> str:
+    """'automatic turns (2)', or 'unattributed' for calls that belong to no turn (no prompt id)."""
+    if auto.get("label"):
+        return auto["label"]
+    return "automatic turns (%d)" % auto["turns"] if auto.get("turns") else "unattributed"
+
+
+def _depth_off(what: str, level: str, st: dict) -> str:
+    """Why a part of the stats is missing. A report frozen when the task ended
+    keeps the log.depth it was recorded at: changing the setting now does not
+    fill it in, so no settings hint then."""
+    from . import settings
+    depth = st.get("depth")
+    if depth and depth == (settings.get("log.depth") or "calls"):
+        return "  %s (log.depth = %s); /tally:settings log.depth %s" % (what, depth, level)
+    if depth:
+        return "  %s (recorded at log.depth = %s while the task ran)" % (what, depth)
+    return "  %s (not recorded while the task ran)" % what
 
 
 def tool_name(name: str) -> str:
@@ -530,9 +554,9 @@ def render_project(st: dict, cli: bool = False, series: int = 14) -> str:
         out.append("  %s" % st["path"])
     m, w, k = st["last_30d"], st["last_7d"], st.get("tracked") or st["totals"]
     if read or m["total"]:
-        out.append("  last 30d  %s tokens · %s · %s API calls · %d session%s%s" % (
-            tokens(m["total"]), money(m), "{:,}".format(m.get("calls", 0)), st["sessions"],
-            "" if st["sessions"] == 1 else "s", "" if read else " added one by one"))
+        out.append("  last 30d  %s tokens · %s · %s API call%s · %d session%s%s" % (
+            tokens(m["total"]), money(m), "{:,}".format(m.get("calls", 0)), "" if m.get("calls", 0) == 1 else "s",
+            st["sessions"], "" if st["sessions"] == 1 else "s", "" if read else " added one by one"))
         out.append("  last 7d   %s tokens · %s" % (tokens(w["total"]), money(w)))
     if st["mode"] in ("track", "tasks"):
         out.append("  kept      %s tokens · %s  (%s)" % (
@@ -553,10 +577,10 @@ def render_project(st: dict, cli: bool = False, series: int = 14) -> str:
     days = st["daily"][-series:] if series else []
     if any(d["total"] for d in days):
         peak = max(d["total"] for d in days)
-        blocks = " ▁▂▃▄▅▆▇█"
+        blocks = ("·" if APP else " ") + "▁▂▃▄▅▆▇█"      # the app collapses spaces: an empty day must show
         spark = "".join(blocks[0 if not d["total"] else max(1, int(round(8 * d["total"] / float(peak))))]
                         for d in days)
-        out.append("  %-9s %s  (peak %s)" % ("%d days" % len(days), spark, tokens(peak)))
+        out.append("  %-9s %s  (peak %s)" % (_n(len(days), "day"), spark, tokens(peak)))
     if tk["recent"]:
         out.append("")
         for x in tk["recent"][:5]:
@@ -584,8 +608,8 @@ def _short_model(m: str) -> str:
 def render_sessions(ov: dict, limit: Optional[int] = 40) -> str:
     t = ov["totals"]
     span = ("last %g day%s" % (ov["days"], "" if ov["days"] == 1 else "s")) if ov["days"] else "all time"
-    out = [head("Sessions, %s: %d · %s tokens · %s · %d prompts · active %s" % (
-        span, t["sessions"], tokens(t["total"]), money(t), t["prompts"], duration(t["active_s"])))]
+    out = [head("Sessions, %s: %d · %s tokens · %s · %s · active %s" % (
+        span, t["sessions"], tokens(t["total"]), money(t), _n(t["prompts"], "prompt"), duration(t["active_s"])))]
     if len(ov["by_agent"]) > 1 and APP:
         out += ["%s: %s · %s tokens · %s" % (AGENT_NAMES.get(a["agent"], a["agent"]), _n(a["sessions"], "session"),
                                             tokens(a["total"]), money(a)) for a in ov["by_agent"]]
