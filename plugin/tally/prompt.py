@@ -246,9 +246,12 @@ def settings_editor(color: bool = False) -> List[tuple]:
                 row = (row - 1) % len(keys)
             elif k in ("right", "left") and opts:
                 i = opts.index(value_of(key)) if value_of(key) in opts else 0
-                v = settings.set_value(key, opts[(i + (1 if k == "right" else -1)) % len(opts)])
-                changed.append((key, v))
-                note = "✓ saved"
+                try:
+                    v = settings.set_value(key, opts[(i + (1 if k == "right" else -1)) % len(opts)])
+                    changed.append((key, v))
+                    note = "✓ saved"
+                except ValueError as e:
+                    note = str(e)
             elif k.isdigit() and not opts:
                 number = k
         out.write("\033[%dF\033[J" % shown)

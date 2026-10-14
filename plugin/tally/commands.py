@@ -452,11 +452,15 @@ def run(conn, session_id: str, cmd: str, args: str, cwd: Optional[str] = None,
         from . import paths, server
         if args.strip() == "stop":
             cfg = paths.load_config()
-            host, port = cfg.get("dashboard_host", "127.0.0.1"), int(cfg.get("dashboard_port", 8765))
+            from . import settings
+            host, port = cfg.get("dashboard_host", "127.0.0.1"), int(settings.get("dashboard_port", cfg) or 8765)
             if server.stop(host, port):
                 return Result(fmt.head("Dashboard stopped", "■") + "\n" + fmt.hints("/tally:dashboard starts it again"))
             return Result(fmt.head("No dashboard is running") + "\n" + fmt.hints("/tally:dashboard starts it"))
-        url, started = server.ensure_running(open_browser=True)
+        try:
+            url, started = server.ensure_running(open_browser=True)
+        except (RuntimeError, OSError) as e:
+            return Result(fmt.error(str(e), "tally doctor in a terminal"))
         return Result(fmt.head("Dashboard %s at %s" % ("started" if started else "running", url), "✓"))
 
     return Result(help_text())
@@ -556,7 +560,7 @@ def _todo_command(conn, session_id, cmd, args, cwd, transcript_path, prompt_id) 
         if st["tasks"]:
             out.insert(1, "  total over %d task%s: %s tokens · %s · %s active" % (
                 st["tasks"], "" if st["tasks"] == 1 else "s", fmt.tokens(st["total"]),
-                fmt.money({"cost": st["cost"]}), fmt.duration(st["active_s"])))
+                fmt.money({"cost": st["cost"], "cost_partial": st.get("cost_partial")}), fmt.duration(st["active_s"])))
         return Result("\n".join(out))
 
     if cmd == "mark":

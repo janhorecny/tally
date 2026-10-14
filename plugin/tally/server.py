@@ -424,7 +424,8 @@ def _is_dashboard(args: list) -> bool:
 def _dashboard_pids(port: int) -> list:
     """Processes started as `tally dashboard ... --port <port>` (versions before
     0.6 do not report their pid in /api/health)."""
-    default_port = int(paths.load_config().get("dashboard_port", 8765))
+    from . import settings
+    default_port = int(settings.get("dashboard_port") or 8765)       # a bad hand-edited value: the default
     pids = []
     for pid, args in _processes():
         if not _is_dashboard(args):
@@ -512,7 +513,8 @@ def _log_tail(path: Path, since: int) -> str:
 def ensure_running(open_browser: bool = False):
     cfg = paths.load_config()
     host = cfg.get("dashboard_host", "127.0.0.1")
-    port = int(cfg.get("dashboard_port", 8765))
+    from . import settings
+    port = int(settings.get("dashboard_port", cfg) or 8765)
     idle = cfg.get("dashboard_idle_minutes", 120)
     url = "http://%s:%d/" % (host, port)
     started = False

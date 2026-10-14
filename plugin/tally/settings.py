@@ -177,6 +177,10 @@ def store_prompt(text: str, cfg: dict = None):
     mode = get("log.prompts", cfg) or "full"
     if text is None or mode == "off":
         return None
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:              # a lone surrogate (half an emoji): SQLite cannot store it
+        text = text.encode("utf-8", "replace").decode("utf-8")
     if mode == "preview" and len(text) > PREVIEW_CHARS:
         return text[: PREVIEW_CHARS - 1] + "…"
     return text

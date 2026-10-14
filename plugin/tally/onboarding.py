@@ -263,8 +263,13 @@ def run(interactive: bool, agents: Optional[List[str]] = None, ask: Optional[Cal
         say("")
         say(paint(fmt.error("Setup skipped; nothing changed", "tally setup asks again")))
         return False
-    for key, value in answers:                 # saved only once every question is answered
-        settings.set_value(key, value)
+    try:
+        for key, value in answers:             # saved only once every question is answered
+            settings.set_value(key, value)
+    except ValueError as e:                    # config.json does not parse: left as it is
+        say("")
+        say(paint(fmt.error(str(e), "fix or delete it, then run tally setup again")))
+        return False
     changed = ["%s = %s" % (key, settings.show(value)) for key, value in answers]
     if install:
         changed += _install(install)

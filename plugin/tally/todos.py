@@ -225,7 +225,7 @@ def list_todos(conn, project: Optional[str] = None, statuses=OPEN, top_level: bo
     rows.sort(key=lambda r: (
         STATUS_ORDER.get(r["status"], 9),
         0 if (r["due_at"] and r["due_at"] < now and r["status"] in OPEN) else 1,
-        -(r["priority"] or 0),
+        -_prio(r),
         r["due_at"] or 1e18,
         r["position"] if r["position"] is not None else 1e9,
         r["id"],
@@ -271,13 +271,15 @@ def reorder(conn, ids: list) -> None:
 def linked_stats(conn, todo_id: int) -> dict:
     """Tokens, cost and time of all tasks that worked on this todo."""
     from . import report
-    out = {"tasks": 0, "total": 0, "output": 0, "cost": 0.0, "active_s": 0.0, "wall_s": 0.0, "active_task": None}
+    out = {"tasks": 0, "total": 0, "output": 0, "cost": 0.0, "cost_partial": False, "active_s": 0.0, "wall_s": 0.0,
+           "active_task": None}
     for t in conn.execute("SELECT * FROM tasks WHERE todo_id = ? ORDER BY id", (todo_id,)).fetchall():
         s = report.summary(conn, t)
         out["tasks"] += 1
         out["total"] += s["totals"]["total"]
         out["output"] += s["totals"]["output"]
         out["cost"] += s["totals"]["cost"]
+        out["cost_partial"] = out["cost_partial"] or bool(s["totals"].get("cost_partial"))
         out["active_s"] += s["time"]["active_s"]
         out["wall_s"] += s["time"]["wall_s"]
         if t["status"] == "active":
@@ -389,11 +391,20 @@ def due_label(due_at: Optional[float], now: Optional[float] = None) -> str:
     return "due %s" % d.strftime("%a %d.%m.")
 
 
+def _prio(r) -> int:
+    """A todo's priority as 0-3, also for a value stored before priorities were checked."""
+    try:
+        p = int(r["priority"] or 0)
+    except (TypeError, ValueError):
+        return 0
+    return p if 0 <= p <= 3 else 0
+
+
 def line_for(r, now: Optional[float] = None, show_project: bool = False) -> str:
     mark = {"doing": "▶", "todo": "○", "blocked": "⏸", "done": "✓", "dropped": "✗"}.get(r["status"], "·")
     parts = ["%s #%d" % (mark, r["id"]), r["title"]]
-    if PRIORITY_MARK.get(r["priority"] or 0):
-        parts.append(PRIORITY_MARK[r["priority"]])
+    if PRIORITY_MARK.get(_prio(r)):
+        parts.append(PRIORITY_MARK[_prio(r)])
     if show_project and r["project"]:
         parts.append("@" + r["project"])
     label = due_label(r["due_at"], now) if r["status"] in OPEN else ""

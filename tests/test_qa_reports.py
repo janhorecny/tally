@@ -382,3 +382,28 @@ class Exports(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RereadQA(unittest.TestCase):
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def test_a_task_ended_while_reading_failed_is_read_again(self):
+        """tasks.end could not read the transcripts (today: a schema bug made every read fail):
+        the next report reads them and the frozen numbers are corrected."""
+        from tally import db, ingest, report, tasks
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/tally:start reread")
+        t = time.time() + 0.01
+        e.append(e.main(), user(t, "go", prompt_id="P1"), assistant(t + 0.01, "m1", "r1", out=500))
+        conn = db.connect()
+        with unittest.mock.patch.object(ingest, "ingest_sessions", side_effect=RuntimeError("boom")):
+            tasks.end(conn, 1, now=t + 5)
+        self.assertIsNotNone(db.kv_get(conn, "reread:1"))
+        rep = report.summary_for(conn, tasks.get(conn, 1))
+        self.assertEqual(rep["totals"]["output"], 500)
+        self.assertIsNone(db.kv_get(conn, "reread:1"))

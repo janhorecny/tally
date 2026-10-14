@@ -293,12 +293,18 @@ def build(conn, task, pricer: Optional[Pricer] = None, windows: Optional[list] =
     workflows.sort(key=lambda d: -d["total"])
 
     if task["id"]:
-        sessions = [
-            {"session_id": r["session_id"], "attached_at": r["attached_at"], "detached_at": r["detached_at"],
-             "reason": r["reason"]}
-            for r in conn.execute(
-                "SELECT * FROM task_sessions WHERE task_id = ? ORDER BY attached_at", (task["id"],))
-        ]
+        sessions = []
+        latest = {}         # session -> its last listed interval: two attaches that raced are listed once
+        for r in conn.execute("SELECT * FROM task_sessions WHERE task_id = ? ORDER BY attached_at", (task["id"],)):
+            prev = latest.get(r["session_id"])
+            if prev is not None and (prev["detached_at"] is None or r["attached_at"] <= prev["detached_at"]):
+                if prev["detached_at"] is not None:
+                    prev["detached_at"] = None if r["detached_at"] is None else max(prev["detached_at"],
+                                                                                    r["detached_at"])
+                continue
+            latest[r["session_id"]] = {"session_id": r["session_id"], "attached_at": r["attached_at"],
+                                       "detached_at": r["detached_at"], "reason": r["reason"]}
+            sessions.append(latest[r["session_id"]])
         prompt_count = _prompt_count(conn, task["id"])
     else:
         sessions = [{"session_id": s, "attached_at": a, "detached_at": b, "reason": "session"} for s, a, b in windows]
@@ -576,6 +582,7 @@ def summary_for(conn, task, live: bool = True) -> dict:
     read after it was frozen), fresh build if active."""
     sids = _refresh_costs(conn, task)
     if task["status"] != "active":
+        _reread(conn, task)
         rep = _fresh_snapshot(conn, task, sids, "report_json")
         if rep is None:
             rep = build(conn, task)
@@ -593,6 +600,7 @@ def summary(conn, task) -> dict:
         _ingest(conn, tasks.session_ids(conn, task["id"]))
         return build(conn, task, detail=False)
     sids = _refresh_costs(conn, task)
+    _reread(conn, task)
     data = _fresh_snapshot(conn, task, sids, "summary_json")
     if data is None:
         rep = summary_for(conn, task)
@@ -600,6 +608,21 @@ def summary(conn, task) -> dict:
         conn.execute("UPDATE task_snapshots SET summary_json = ? WHERE task_id = ? AND summary_json IS NULL",
                      (json.dumps(data), task["id"]))      # backfill snapshots made before schema v3
     return data
+
+
+def _reread(conn, task) -> None:
+    """Reading the transcripts failed when the task ended (tasks._ingest_before_end):
+    read them now; the snapshot is then rebuilt, as its API calls differ."""
+    from . import ingest
+    key = "reread:%d" % task["id"]
+    if not db.kv_get(conn, key):
+        return
+    try:
+        ingest.ingest_sessions(conn, tasks.session_ids(conn, task["id"]))
+    except Exception:
+        return
+    with db.transaction(conn):
+        conn.execute("DELETE FROM kv WHERE key = ?", (key,))
 
 
 def _ingest(conn, sids) -> None:

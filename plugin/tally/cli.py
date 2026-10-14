@@ -254,12 +254,12 @@ def cmd_sessions(args):
 
 
 def cmd_dashboard(args):
-    from . import server
+    from . import server, settings
     cfg = paths.load_config()
     host = args.host or cfg.get("dashboard_host", "127.0.0.1")
     if args.port is not None and not 1 <= args.port <= 65535:
         _die("--port %d: the port must be between 1 and 65535" % args.port)
-    port = args.port if args.port is not None else int(cfg.get("dashboard_port", 8765))
+    port = args.port if args.port is not None else int(settings.get("dashboard_port", cfg) or 8765)
     if args.stop:
         if server.stop(host, port):
             _out(fmt.head("Dashboard stopped (http://%s:%d/)" % (host, port), "■"))
@@ -267,7 +267,10 @@ def cmd_dashboard(args):
             _out(fmt.head("No dashboard running at http://%s:%d/" % (host, port)))
         return
     if args.background:
-        url, started = server.ensure_running(open_browser=args.open)
+        try:
+            url, started = server.ensure_running(open_browser=args.open)
+        except (RuntimeError, OSError) as e:
+            _die(_cap(str(e)), "tally doctor")
         _out(fmt.head("Dashboard %s at %s" % ("started" if started else "already running", url), "✓"))
         return
     if server.stop_outdated(host, port):

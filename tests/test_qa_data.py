@@ -577,3 +577,22 @@ class ClearCarryOver(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PromptTextQA(unittest.TestCase):
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.cleanup()
+
+    def test_half_an_emoji_in_a_prompt_is_stored(self):
+        """A prompt with a lone surrogate (json.loads accepts "\\ud83d") must not make the hook fail."""
+        from tally import db, settings
+        e = self.env
+        e.append(e.main(), user(time.time() - 10))
+        e.hook("UserPromptSubmit", prompt="/tally:start emoji")
+        e.hook("UserPromptSubmit", prompt="fix the \ud83d label", prompt_id="P9")
+        row = db.connect().execute("SELECT prompt FROM prompts WHERE prompt_id = 'P9'").fetchone()
+        self.assertEqual(row[0], "fix the ? label")
+        self.assertEqual(settings.store_prompt("ok č"), "ok č")

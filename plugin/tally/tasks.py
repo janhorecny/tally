@@ -185,8 +185,12 @@ def _ingest_before_end(conn, rows) -> None:
     for r in rows:
         try:
             ingest.ingest_sessions(conn, session_ids(conn, r["id"]))
-        except Exception:
-            pass
+        except Exception:               # read again when the task's report is next shown (report._reread)
+            try:
+                with db.transaction(conn):
+                    db.kv_set(conn, "reread:%d" % r["id"], "1")
+            except Exception:
+                pass
 
 
 def _close(conn, task, note: Optional[str], now: float) -> None:
@@ -239,9 +243,8 @@ def _skip_history(conn, session_id: str, transcript_path: Optional[str], exclude
         "AND s.detached_at IS NULL AND t.status = 'active' AND t.id != ? LIMIT 1",
         (session_id, exclude_task),
     ).fetchone() or projects.session_tracked(conn, session_id)
-    # Codex token counts are cumulative: its history may only be skipped once ingest keeps the
-    # last total of the skipped bytes (files.state); until then it is read, as before.
-    skip = not other and ingest.session_agent(conn, session_id) != "codex"
+    # (Codex token counts are cumulative: a skip keeps the last total of the skipped bytes in files.state.)
+    skip = not other
     try:
         ingest.ingest_session(conn, session_id, transcript_path, skip_existing=skip)
     except Exception:
@@ -404,6 +407,9 @@ def list_tasks(conn, limit: int = 20, status: Optional[str] = None, project: Opt
 
 
 def prompts(conn, task_id: int) -> list:
+    """A task's prompts, each once (two hooks of one prompt stored it twice before 0.12)."""
     return conn.execute(
-        "SELECT session_id, ts, prompt FROM prompts WHERE task_id = ? ORDER BY ts", (task_id,)
+        "SELECT session_id, ts, prompt FROM prompts WHERE task_id = ? AND (prompt_id IS NULL OR id IN "
+        "(SELECT MIN(id) FROM prompts WHERE task_id = ? AND prompt_id IS NOT NULL GROUP BY prompt_id)) ORDER BY ts",
+        (task_id, task_id),
     ).fetchall()
