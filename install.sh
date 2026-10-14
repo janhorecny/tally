@@ -63,7 +63,9 @@ fi
 [ -L "$HOME/.local/bin/task-counter" ] && rm "$HOME/.local/bin/task-counter"
 
 chmod +x "$REPO/plugin/bin/tally"
-python3 "$REPO/plugin/bin/tally" install ${ARGS[@]+"${ARGS[@]}"}
+# one agent failing must not cost the others the CLI and the doctor: its code is the exit code at the end
+INSTALLED=0
+python3 "$REPO/plugin/bin/tally" install ${ARGS[@]+"${ARGS[@]}"} || INSTALLED=$?
 
 if [ "$WITH_CLI" = 1 ]; then
   mkdir -p "$HOME/.local/bin"
@@ -78,6 +80,8 @@ if [ "$WITH_CLI" = 1 ]; then
   esac
 fi
 echo
-python3 "$REPO/plugin/bin/tally" doctor | sed 's/^/  /'
+python3 "$REPO/plugin/bin/tally" doctor | sed 's/^/  /' || true
 echo
+[ "$INSTALLED" = 0 ] || echo "  ✗ Not every agent was installed (see the ✗ above); run the installer again once it is fixed"
 echo "  Update any time: tally update · remove: $REPO/uninstall.sh"
+exit "$INSTALLED"

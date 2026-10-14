@@ -62,6 +62,10 @@
 /* ---------------------------------------------------------------- base */
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+/* the page behind .viz-root (overscroll) and the scrollbars follow the theme too */
+html { background: #f6f6f3; color-scheme: light; }
+@media (prefers-color-scheme: dark) { html:where(:not([data-theme="light"])) { background: #0d0d0d; color-scheme: dark; } }
+html[data-theme="dark"] { background: #0d0d0d; color-scheme: dark; }
 body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
 .viz-root { background: var(--page); color: var(--text-primary); min-height: 100vh; }
 .num { font-variant-numeric: tabular-nums; }
@@ -667,6 +671,7 @@ function setView(v) {
   $$(".view").forEach(el => el.classList.toggle("on", el.id === "view-" + v));
   renderScope();
   closeMenus();
+  closeCardMenu();                                  // also on Back: a left-over ⋯ menu would stop the board's polling
   $$("nav.tabs a").forEach(a => { a.classList.toggle("on", a.dataset.view === v); a.toggleAttribute("aria-current", a.dataset.view === v); });
   if (v === "todos") guard(loadTodos());
   if (v === "settings") guard(loadSettings());
@@ -706,32 +711,52 @@ function renderScope() {
 }
 
 // ---------------------------------------------------------------- tasks
+// the newest TASK_LIMIT tasks; with more, the filter asks the server, which searches them all
+const TASK_LIMIT = 500;
+let taskTotal = 0, taskMatched = null, taskSeq = 0, taskQuery = null;
 async function loadTasks() {
-  const d = await getJSON("/api/tasks?limit=500" + (project ? "&project=" + encodeURIComponent(project) : ""));
+  const cut = taskTotal > TASK_LIMIT, filtered = cut && !!(taskFilter.q || taskFilter.st);
+  const q = {limit: TASK_LIMIT, project};
+  if (filtered) Object.assign(q, {q: taskFilter.q, status: taskFilter.st});
+  const seq = ++taskSeq;
+  const d = await getJSON("/api/tasks?" + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== "")));
+  if (seq !== taskSeq) return;                     // a newer request (typing, polling) answers instead
   tasks = d.tasks;
+  taskTotal = d.total ?? d.tasks.length;
+  taskMatched = filtered ? d.matched ?? null : null;
+  if (!filtered && taskTotal > TASK_LIMIT && (taskFilter.q || taskFilter.st)) return loadTasks();   // just got cut
   if (!selected && tasks.length) selected = tasks[0].id;
   renderTasks();
 }
-$("#tsearch").oninput = e => { taskFilter.q = e.target.value.trim().toLowerCase(); renderTasks(); };
+function filterTasks() {
+  renderTasks();                                   // at once on what is loaded
+  if (taskTotal <= TASK_LIMIT) return;
+  clearTimeout(taskQuery);
+  taskQuery = setTimeout(() => guard(loadTasks()), 250);
+}
+$("#tsearch").oninput = e => { taskFilter.q = e.target.value.trim().toLowerCase(); filterTasks(); };
 $$(".tasklist .seg button").forEach(b => b.onclick = () => {
   taskFilter.st = b.dataset.st;
   $$(".tasklist .seg button").forEach(x => x.classList.toggle("on", x === b));
-  renderTasks();
+  filterTasks();
 });
 function renderTasks() {
   const el = $("#tasks");
   const shown = tasks.filter(t => (!taskFilter.st || t.status === taskFilter.st) &&
     (!taskFilter.q || (("#" + t.id + " " + t.name).toLowerCase().includes(taskFilter.q))));
   const active = tasks.filter(t => t.status === "active").length;
-  $("#texport").innerHTML = tasks.length ? menu([
+  $("#texport").innerHTML = taskTotal ? menu([
     [null, [["Time sheet (CSV)", {scope: "tasks", project, format: "csv"}], ["Markdown table", {scope: "tasks", project, format: "md"}],
       ["JSON, full reports", {scope: "tasks", project, format: "json"}]]],
     ["Copy", [["One line per task", {scope: "tasks", project, format: "text"}, "copy"], ["Markdown table", {scope: "tasks", project, format: "md"}, "copy"]]],
   ]) : "";
-  $("#taskcount").textContent = tasks.length ? plural(tasks.length, "task") + (active ? " · " + active + " active" : "") : "";
-  $(".tasks-layout").classList.toggle("solo", !tasks.length);
-  $(".tasklist").classList.toggle("hide", !tasks.length);
-  if (!tasks.length) { renderWelcome(); return; }
+  const count = taskMatched !== null ? taskMatched + " of " + plural(taskTotal, "task") + " match"
+    : tasks.length < taskTotal ? tasks.length + " of " + plural(taskTotal, "task") : plural(taskTotal, "task");
+  $("#taskcount").textContent = taskTotal ? count + (active ? " · " + active + " active" : "") : "";
+  $("#taskcount").title = tasks.length < taskTotal && taskMatched === null ? "the newest " + tasks.length + " are listed; the filter searches all" : "";
+  $(".tasks-layout").classList.toggle("solo", !taskTotal);
+  $(".tasklist").classList.toggle("hide", !taskTotal);
+  if (!taskTotal) { renderWelcome(); return; }
   if (!shown.length) { el.innerHTML = '<div class="empty">No task matches the filter.</div>'; return; }
   el.innerHTML = shown.map(t => `
     <div class="trow ${t.id === selected ? "sel" : ""}" data-id="${t.id}" role="button" tabindex="0" aria-label="task ${t.id}: ${esc(t.name)}">
@@ -776,7 +801,7 @@ async function renderWelcome() {
 }
 
 async function loadDetail() {
-  if (!tasks.length) return;
+  if (!taskTotal) return;
   if (!selected) { $("#detail").innerHTML = '<div class="empty">Select a task.</div>'; return; }
   try {
     renderDetail(await getJSON("/api/tasks/" + selected));
@@ -1019,7 +1044,7 @@ function renderTodos() {
 }
 function card(t, now) {
   const [done, total] = t.progress, w = t.work;
-  return `<article class="tcard ${t.status} p${t.priority || 0}" draggable="true" tabindex="0" data-id="${t.id}" aria-label="todo ${t.id}: ${esc(t.title)}">
+  return `<article class="tcard ${t.status} p${Number(t.priority) || 0}" draggable="true" tabindex="0" data-id="${t.id}" aria-label="todo ${t.id}: ${esc(t.title)}">
     <button type="button" class="more" data-more="${t.id}" aria-label="actions for todo ${t.id}" title="move, copy, delete">⋯</button>
     <div class="ttl">${PRIO[t.priority] ? `<span class="prio">${PRIO[t.priority]}</span> ` : ""}${esc(t.title)}</div>
     <div class="meta"><span class="num">#${t.id}</span>${!project && t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}${dueLabel(t, now)}
@@ -1145,13 +1170,14 @@ async function openTodo(id, askDelete) {
   try { t = await getJSON("/api/todos/" + id); } catch (e) { editing = null; toast(e.message, true); return; }
   const box = $("#tmodalbox"), w = t.work || {};
   const [done, total] = t.progress;
+  const dueShown = t.due_at ? isoDay(t.due_at) : "";
   box.innerHTML = `<form id="tform" autocomplete="off">
     <div class="mhead"><span class="num">#${t.id}</span><span>${t.project ? esc(t.project) : "no project"}</span><span>${t.source ? "from " + esc(t.source) : ""}</span><span class="grow"></span><button type="button" class="ghost sm" data-close aria-label="Close">✕ Close</button></div>
     <input class="mtitle" name="title" value="${esc(t.title)}" required aria-label="title">
     <div class="seg" role="group" aria-label="status">${["todo", "doing", "blocked", "done", "dropped"].map(s => `<button type="button" data-st="${s}" class="${s === t.status ? "on" : ""}">${STATUS_LABEL[s]}</button>`).join("")}</div>
     <div class="grid3">
-      <label>Priority<select name="priority">${[[0, "none"], [1, "! low"], [2, "!! medium"], [3, "!!! high"]].map(([v, l]) => `<option value="${v}" ${v === (t.priority || 0) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-      <label>Due<input type="text" name="due" value="${t.due_at ? isoDay(t.due_at) : ""}" placeholder="fri, +3d, 2026-10-20"></label>
+      <label>Priority<select name="priority">${[[0, "none"], [1, "! low"], [2, "!! medium"], [3, "!!! high"]].map(([v, l]) => `<option value="${v}" ${v === (Number(t.priority) || 0) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Due<input type="text" name="due" value="${dueShown}" placeholder="fri, +3d, 2026-10-20"></label>
       <label>Project<input type="text" name="project" value="${esc(t.project || "")}" placeholder="none"></label>
     </div>
     <label>Notes<textarea name="notes" rows="4" placeholder="Details, links, acceptance criteria…">${esc(t.notes || "")}</textarea></label>
@@ -1169,7 +1195,10 @@ async function openTodo(id, askDelete) {
   let status = t.status;
   const close = () => { $("#tmodal").classList.add("hide"); editing = null; loadTodos().catch(() => {}); };
   $$("[data-close]", form).forEach(b => b.onclick = close);
-  $("#tmodal").onclick = e => { if (e.target.id === "tmodal") close(); };
+  // a click on the backdrop closes it, a text selection that only ends there does not
+  let downOnBackdrop = false;
+  $("#tmodal").onmousedown = e => { downOnBackdrop = e.target.id === "tmodal"; };
+  $("#tmodal").onclick = e => { if (e.target.id === "tmodal" && downOnBackdrop) close(); };
   form.onkeydown = e => { if (e.key === "Escape") close(); };
   $$("[data-st]", form).forEach(b => b.onclick = () => { status = b.dataset.st; $$("[data-st]", form).forEach(x => x.classList.toggle("on", x === b)); });
   $$("input[data-step]", form).forEach(el => el.onchange = () => guard(postJSON("/api/todos/" + el.dataset.step, {status: el.checked ? "done" : "todo"})
@@ -1193,7 +1222,8 @@ async function openTodo(id, askDelete) {
   form.onsubmit = e => {
     e.preventDefault();
     const f = new FormData(form);
-    const body = {title: f.get("title"), priority: Number(f.get("priority")), due: f.get("due"), project: f.get("project") || null, notes: f.get("notes") || null};
+    const body = {title: f.get("title"), priority: Number(f.get("priority")), project: f.get("project") || null, notes: f.get("notes") || null};
+    if (f.get("due") !== dueShown) body.due = f.get("due");     // shown as a day: unchanged, a "+4h" deadline keeps its hour
     if (status !== t.status) body.status = status;
     guard(postJSON("/api/todos/" + t.id, body).then(() => { toast("Todo #" + t.id + " saved"); close(); return loadProjects(); }));
   };
@@ -1249,8 +1279,8 @@ async function loadProjectsView() {
       <td class="num c-sess muted">${p.not_tracked.sessions ? plural(p.not_tracked.sessions, "session") + " not read" : "–"}${p.sessions ? ` <span class="chip" title="sessions added one by one">+${p.sessions} added</span>` : ""}</td>
       <td class="num c-size muted">${p.not_tracked.size ? fmtSize(p.not_tracked.size) : "–"}</td>
       <td class="num muted c-last">${p.last_activity ? fmtAgo(p.last_activity) : "–"}</td><td class="c-track">${modeSel(p)}</td></tr>`).join("")}</tbody></table>
-    <div class="note" style="padding:12px 10px 0">${ix.running ? `<b>Reading transcripts ${ix.done}/${ix.total || "…"}</b> · ` : ""}Choose <b>track</b> (every session read and kept for good) or <b>tasks</b> (sessions read, only the tasks you start kept) and Tally reads the project's sessions right away. <b>off</b> hides a project. Single sessions can be added in <a href="#sessions">Sessions</a>.</div>` : "";
-  if (ix.running) projPoll = setTimeout(() => { if (view === "projects") loadProjectsView().catch(() => {}); }, 1500);
+    <div class="note" style="padding:12px 10px 0">${ix.running ? `<b id="pindex">Reading transcripts ${ix.done}/${ix.total || "…"}</b> · ` : ""}Choose <b>track</b> (every session read and kept for good) or <b>tasks</b> (sessions read, only the tasks you start kept) and Tally reads the project's sessions right away. <b>off</b> hides a project. Single sessions can be added in <a href="#sessions">Sessions</a>.</div>` : "";
+  if (ix.running) projPoll = setTimeout(followIndexing, 1500);
   $$("select[data-mode]", $("#projlist")).forEach(el => { el.onclick = e => e.stopPropagation(); el.onchange = () =>
     guard(setMode(el.dataset.mode, el.value)); });
   $$("tr[data-p]", $("#projlist")).forEach(tr => {
@@ -1260,6 +1290,22 @@ async function loadProjectsView() {
   filterProjects();
   const back = projSel && $$("tr[data-p]", $("#projlist")).find(x => x.dataset.p === projSel);
   if (back) back.scrollIntoView({block: "nearest"});                  // back from a project: where you were
+}
+// transcripts are being read: only the progress line moves, the tables are drawn again once it is done
+// (redrawn every 1.5 s, they closed menus and mode dropdowns and cleared selected text)
+async function followIndexing() {
+  const here = () => view === "projects" && !parseHash().pname;
+  if (!here()) return;
+  const ix = await getJSON("/api/projects").then(d => d.indexing || {}, () => ({}));
+  if (!here()) return;
+  clearTimeout(projPoll);
+  if (ix.running || busy()) {
+    const el = $("#pindex");
+    if (el && ix.running) el.textContent = `Reading transcripts ${ix.done}/${ix.total || "…"}`;
+    projPoll = setTimeout(followIndexing, 1500);
+    return;
+  }
+  loadProjectsView().catch(() => {});
 }
 // the search box: every word must appear in the project's name (or its mode)
 function filterProjects() {
@@ -1294,7 +1340,11 @@ async function loadProjectDetail(name) {
   renderProjectDetail();
   clearTimeout(projPoll);                                        // its sessions are being read: follow along
   if ((projStats.indexing || {}).running)
-    projPoll = setTimeout(() => { if (view === "projects" && parseHash().pname === name) loadProjectDetail(name).catch(() => {}); }, 1500);
+    projPoll = setTimeout(function follow() {
+      if (view !== "projects" || parseHash().pname !== name) return;
+      if (busy()) { projPoll = setTimeout(follow, 1500); return; }      // an open menu, selected text: a bit later
+      loadProjectDetail(name).catch(() => {});
+    }, 1500);
 }
 function chart(daily, W) {
   const H = 170, top = 18, base = H - 22, peak = Math.max(...daily.map(x => x.total), 1), bw = W / daily.length;
@@ -1390,7 +1440,10 @@ async function loadSessions(force) {
   const ix = d.indexing || {};
   $("#sindex").textContent = ix.running ? `reading transcripts ${ix.done}/${ix.total || "…"}`
     : d.indexed_at ? "index updated " + TIME.format(new Date(d.indexed_at * 1000)) : "";
-  if (ix.running && view === "sessions") sessPoll = setTimeout(() => loadSessions().catch(() => {}), 1500);
+  if (ix.running && view === "sessions") sessPoll = setTimeout(function follow() {
+    if (busy()) { sessPoll = setTimeout(follow, 1500); return; }
+    loadSessions().catch(() => {});
+  }, 1500);
   if (sessSel && !sessView && !$("#sdetail")._rep) selectSession(sessSel, false);
 }
 function renderNotTracked(d) {
@@ -1495,6 +1548,14 @@ async function loadSettings() {
 }
 
 // ---------------------------------------------------------------- boot
+// a re-render now would undo what you are doing: an inline confirm ("End this task now?"),
+// an open menu, text you selected on the page
+function busy() {
+  if ($$(".confirm").some(el => el.getClientRects().length)) return true;
+  if ($$(".menu").some(m => !m.classList.contains("hide")) || $(".cardmenu")) return true;
+  const s = getSelection();
+  return !!(s && s.rangeCount && !s.isCollapsed && String(s).trim() && $(".viz-root").contains(s.anchorNode));
+}
 async function refreshAll() {
   try { await loadTasks(); await loadDetail(); }
   catch (e) { if (!$("#status").classList.contains("off")) toast(e.message, true); }
@@ -1514,13 +1575,22 @@ document.addEventListener("keydown", e => {
 });
 window.addEventListener("hashchange", () => {
   const h = parseHash();
-  if (h.view !== view) { setView(h.view); return; }             // a new tab loads what the address says
+  if (h.view !== view) {                                       // a new tab loads what the address says
+    if (h.view === "tasks" && h.id) selected = h.id;            // a link to a task (project, session, todo) opens it
+    setView(h.view); return;
+  }
   if (h.view === "tasks" && h.id && h.id !== selected) { selected = h.id; renderTasks(); guard(loadDetail()); }
   if (h.view === "sessions" && h.sid && h.sid !== sessSel) selectSession(h.sid, true);
   if (h.view === "projects") guard(loadProjectsView());          // the list, or one project
 });
 // a newer version: a chip next to the version; a click copies the command that updates it
+let pageVersion = null;                  // the version whose server this page's code came from
 function showUpdate(d) {
+  if (pageVersion === null) pageVersion = d.version;
+  else if (d.version !== pageVersion) {  // restarted as another version (tally update): load its page, unless you are typing
+    if (editing === null && !$("#dtop form")) location.reload();
+    return;
+  }
   $("#ver").textContent = "v" + d.version;
   const u = d.update || {}, b = $("#upd");
   b.classList.toggle("hide", !u.available);
@@ -1532,11 +1602,13 @@ function showUpdate(d) {
 getJSON("/api/health").then(showUpdate).catch(() => {});
 renderGlobalExport();
 loadProjects().catch(() => {}).then(() => setView(view));
-let ticks = 0;
+let lastPing = Date.now();
 setInterval(() => {
-  if (document.hidden || stopped) return;
-  if (++ticks % 12 === 0) getJSON("/api/health").then(showUpdate).catch(() => {});   // also keeps the server from its idle stop
-  if (view === "todos") { if (editing === null && dragId === null && !$(".cardmenu")) loadTodos().catch(() => {}); return; }
+  if (stopped) return;
+  // every minute, in a background tab too: an open page keeps the server from its idle stop
+  if (Date.now() - lastPing >= 60000) { lastPing = Date.now(); getJSON("/api/health").then(showUpdate).catch(() => {}); }
+  if (document.hidden || busy()) return;                        // nobody looks, or a re-render would undo your work
+  if (view === "todos") { if (editing === null && dragId === null) loadTodos().catch(() => {}); return; }
   if (view === "projects" || view === "settings") return;
   if (view === "sessions") { if (Date.now() - sessLoaded > 30000) loadSessions().catch(() => {}); return; }
   const cur = tasks.find(t => t.id === selected);

@@ -19,6 +19,9 @@ from . import __version__, commands, db, paths, report, tasks
 
 HTML = Path(__file__).with_name("dashboard.html")
 BIN = Path(__file__).resolve().parent.parent / "bin" / "tally"
+# the dashboard is on this machine: never through http_proxy / HTTP_PROXY (urllib does not
+# bypass 127.0.0.1 without no_proxy, so a proxy user's dashboard looked like a foreign program)
+_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -27,11 +30,17 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # quiet
         pass
 
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
+    def _send(self, code: int, body: bytes, ctype: str, headers: tuple = ()) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        # no other page may frame the dashboard: clicks inside a frame would pass the X-Tally
+        # and Origin checks (clickjacking). frame-ancestors only: the page's inline code stays allowed
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        for k, v in headers:
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -96,15 +105,8 @@ class Handler(BaseHTTPRequestHandler):
                 except export.ExportError as exc:
                     self._json({"error": str(exc)}, 404 if "not found" in str(exc) else 400)
                     return
-                body = content.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", export.MIME[f or export.FORMATS[scope][0]])
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                if arg("download") == "1":
-                    self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
-                self.end_headers()
-                self.wfile.write(body)
+                self._send(200, content.encode("utf-8"), export.MIME[f or export.FORMATS[scope][0]],
+                           (("Content-Disposition", _attachment(name)),) if arg("download") == "1" else ())
                 return
             if url.path == "/api/sessions":
                 from . import sessions
@@ -137,8 +139,9 @@ class Handler(BaseHTTPRequestHandler):
             conn = db.connect()
             try:
                 if url.path == "/api/tasks":
-                    rows = commands.list_rows(conn, int(arg("limit", "100")), project=arg("project") or None)
-                    self._json({"tasks": rows, "now": time.time()})
+                    rows, total, matched = _task_list(conn, int(arg("limit", "100")), arg("project") or None,
+                                                      arg("q"), arg("status"))
+                    self._json({"tasks": rows, "now": time.time(), "total": total, "matched": matched})
                     return
                 m = re.match(r"^/api/tasks/(\d+)$", url.path)
                 if m:
@@ -225,6 +228,13 @@ class Handler(BaseHTTPRequestHandler):
                         self._json({"deleted": tid})
                         return
                     fields = {k: body[k] for k in ("title", "notes", "project", "priority", "status") if k in body}
+                    if "priority" in fields:                 # stored as given, "x" broke every todo list
+                        try:
+                            fields["priority"] = int(fields["priority"])
+                        except (TypeError, ValueError):
+                            fields["priority"] = -1
+                        if not 0 <= fields["priority"] <= 3:
+                            raise ValueError("priority must be 0, 1, 2 or 3")
                     if "due" in body:
                         fields["due_at"] = todos.parse_due(body["due"]) if body["due"] else None
                     if fields.get("status") == "done":
@@ -305,6 +315,41 @@ class Handler(BaseHTTPRequestHandler):
         self._json(dict(tasks.get(conn, task_id)))
 
 
+def _attachment(name: str) -> str:
+    """Content-Disposition for a download: an ASCII filename every browser reads, and the
+    real one as filename* (RFC 6266). Never a character send_header cannot encode (Latin-1)."""
+    from urllib.parse import quote
+    plain = re.sub(r'[^\x20-\x7e]|["\\]', "_", name) or "tally-export"
+    return "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (plain, quote(name, safe=""))
+
+
+def _task_list(conn, limit: int, project=None, q=None, status=None):
+    """(rows, total, matched): the newest `limit` tasks (of a project, or all) whose
+    "#id name" contains q and whose status is status, how many tasks there are, and
+    how many match. The dashboard lists the newest 500 and filters here when there
+    are more, so an older task can still be found."""
+    q = (q or "").strip().lower()
+    status = status if status in ("active", "ended") else None
+    where, args = (" WHERE project = ?", [project]) if project else ("", [])
+    if not q and not status:
+        total = conn.execute("SELECT COUNT(*) FROM tasks" + where, args).fetchone()[0]
+        return commands.list_rows(conn, limit, project=project), total, total
+    found = conn.execute("SELECT id, name, status FROM tasks%s ORDER BY id DESC" % where, args).fetchall()
+    hits = [r["id"] for r in found if (not status or r["status"] == status)
+            and q in ("#%d %s" % (r["id"], r["name"])).lower()]
+    rows = []
+    for tid in hits[:limit] if limit else hits:              # the rows of commands.list_rows
+        t = tasks.get(conn, tid)
+        rep = report.summary(conn, t)
+        rows.append({
+            "id": t["id"], "name": t["name"], "status": t["status"], "started_at": t["started_at"],
+            "project": t["project"], "todo_id": t["todo_id"], "prompts": rep["task"].get("prompt_count"),
+            "ended_at": t["ended_at"], "wall_s": rep["time"]["wall_s"], "active_s": rep["time"]["active_s"],
+            **rep["totals"],
+        })
+    return rows, len(found), len(hits)
+
+
 def _todos(conn, project, status) -> list:
     """Top-level todos with progress and measured work. status: board (open +
     done in the last 14 days), open, done, all."""
@@ -357,7 +402,7 @@ def _stop_when_idle(httpd, limit_s: float) -> None:
 def health(host: str, port: int):
     """The running dashboard's {app, version, pid}, or None."""
     try:
-        with urllib.request.urlopen("http://%s:%d/api/health" % (host, port), timeout=0.5) as r:
+        with _LOCAL.open("http://%s:%d/api/health" % (host, port), timeout=0.5) as r:
             d = json.loads(r.read())
             return d if d.get("app") == "tally" else None
     except Exception:
@@ -416,9 +461,11 @@ def _processes():
 
 def stop_outdated(host: str, port: int) -> bool:
     """Stop a dashboard left running by an older Tally (its API would not match
-    the page). Returns True if one was stopped."""
+    the page). Returns True if one was stopped. A newer one stays: a session not
+    restarted since `tally update` must not put the old version back."""
+    from . import updates
     h = health(host, port)
-    if h is None or h.get("version") == __version__:
+    if h is None or not updates.newer(__version__, h.get("version")):
         return False
     return _terminate(host, port, h)
 
@@ -451,6 +498,17 @@ def _port_free(host: str, port: int) -> bool:
         return s.connect_ex((host, port)) != 0
 
 
+def _log_tail(path: Path, since: int) -> str:
+    """': <the last line the child wrote>' (its error), or ''."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(since)
+            lines = [l.strip() for l in fh.read().decode("utf-8", "replace").splitlines() if l.strip()]
+    except OSError:
+        return ""
+    return ": " + lines[-1][:200] if lines else ""
+
+
 def ensure_running(open_browser: bool = False):
     cfg = paths.load_config()
     host = cfg.get("dashboard_host", "127.0.0.1")
@@ -464,16 +522,20 @@ def ensure_running(open_browser: bool = False):
             raise RuntimeError("port %d is used by another program; set another with "
                                "`tally config dashboard_port 8766`" % port)
         paths.home().mkdir(parents=True, exist_ok=True)
-        with open(paths.home() / "dashboard.log", "a") as log:
-            subprocess.Popen(
+        log_path = paths.home() / "dashboard.log"
+        with open(log_path, "a") as log:
+            since = log.tell()
+            proc = subprocess.Popen(
                 [sys.executable, str(BIN), "dashboard", "--host", host, "--port", str(port),
                  "--idle-minutes", str(idle or 0)],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True,
             )
-        for _ in range(30):
+        for _ in range(100):                     # up to 10 s; a child that exits is not waited for
             time.sleep(0.1)
-            if is_running(host, port):
+            if is_running(host, port) or proc.poll() is not None:
                 break
+        if not is_running(host, port):           # never "started" with a URL nobody answers
+            raise RuntimeError("the dashboard did not start%s; see %s" % (_log_tail(log_path, since), log_path))
         started = True
     if open_browser:
         webbrowser.open(url)

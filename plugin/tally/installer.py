@@ -74,8 +74,14 @@ def _run(cmd: List[str]) -> subprocess.CompletedProcess:
 
 
 def _hook_cmd(event: str, agent: str) -> str:
-    return '"%s" "%s" hook %s --agent %s' % (sys.executable if os.path.isabs(sys.executable) else "python3",
-                                              BIN, event, agent)
+    """python3 from PATH, as the Claude Code plugin and pi run Tally: the absolute path of
+    this interpreter breaks every hook once it is removed (a Homebrew Python upgrade).
+    Without a python3 command (Windows): this interpreter."""
+    if os.name != "nt" and shutil.which("python3"):
+        python = "python3"
+    else:
+        python = '"%s"' % (sys.executable if os.path.isabs(sys.executable or "") else "python")
+    return '%s "%s" hook %s --agent %s' % (python, BIN, event, agent)
 
 
 def _skill_text() -> str:
