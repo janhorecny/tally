@@ -9,6 +9,7 @@ These are estimates at list price. Subscription plans (Pro/Max) are not billed
 per token; the figure is still useful to compare tasks.
 """
 
+import math
 import re
 from typing import Dict, Optional
 
@@ -79,6 +80,9 @@ TIERS = {
 # Fast mode (usage.speed == "fast") is billed at 2x on the Opus models.
 FAST_MULTIPLIER = 2.0
 
+# Web search (server tool): $10 per 1,000 searches, on top of the tokens.
+WEB_SEARCH_PER_1K = 10.0
+
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
 _VERSION_SUFFIX = re.compile(r"-v\d+(:\d+)?$")
 
@@ -98,13 +102,30 @@ def normalize_model(model: Optional[str]) -> str:
     return m
 
 
+def _price(v) -> Optional[float]:
+    """A price from config.json, or None if it is not a usable number ("4$", true, -1)."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return f if math.isfinite(f) and f >= 0 else None
+
+
 class Pricer:
     def __init__(self, overrides: Optional[dict] = None):
         self.prices = dict(DEFAULT_PRICES)
-        for name, spec in (overrides or {}).items():
+        # a hand-edited "pricing" section: entries that are not usable are skipped
+        for name, spec in (overrides.items() if isinstance(overrides, dict) else ()):
+            if not isinstance(name, str):
+                continue
             base = dict(self.prices.get(normalize_model(name), {}))
             if isinstance(spec, dict):
-                base.update({k: float(v) for k, v in spec.items() if v is not None})
+                for k, v in spec.items():
+                    f = _price(v)
+                    if f is not None:
+                        base[k] = f
             if "input" in base and "output" in base:
                 base.setdefault("cache_read", base["input"] * 0.1)
                 base.setdefault("cache_write_5m", base["input"] * 1.25)
@@ -133,13 +154,19 @@ class Pricer:
         """Cost of one usage row: what the agent reported (pi, Codex), else list price."""
         if r["cost"] is not None:
             return r["cost"]
+        try:
+            searches = r["web_search"]
+        except (KeyError, IndexError):
+            searches = 0
         return self.cost(r["model"], r["input"], r["output"], r["cache_read"], r["cache_write_5m"],
-                         r["cache_write_1h"], r["speed"])
+                         r["cache_write_1h"], r["speed"], web_search=searches)
 
     def cost(self, model, input_tokens=0, output_tokens=0, cache_read=0,
-             cache_write_5m=0, cache_write_1h=0, speed=None, tiers=True) -> Optional[float]:
+             cache_write_5m=0, cache_write_1h=0, speed=None, tiers=True, web_search=0) -> Optional[float]:
         """Cost of ONE API call. Pass tiers=False for summed usage of many
-        calls: prompt-size tiers apply per call and cannot be judged on a sum."""
+        calls: prompt-size tiers apply per call and cannot be judged on a sum.
+        web_search: number of web searches, priced per search (no tier or
+        fast-mode multiplier)."""
         key = self.resolve(model)
         if key is None:
             return None
@@ -159,4 +186,4 @@ class Pricer:
             + cache_write_5m * p["cache_write_5m"]
             + cache_write_1h * p["cache_write_1h"]
         )
-        return total * mult / 1_000_000
+        return total * mult / 1_000_000 + (web_search or 0) * WEB_SEARCH_PER_1K / 1000
